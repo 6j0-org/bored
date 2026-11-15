@@ -2,7 +2,7 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { newChallenge, verifyRegistration, verifyAssertion, WebAuthnError } from './webauthn.js';
-import { db, parseTags, setTaskTags, MAX_TAGS, COSTS, COST_LABELS, MAX_ATTENDEES_LIMIT } from './db.js';
+import { db, parseTags, setEventTags, MAX_TAGS, COSTS, COST_LABELS, MAX_ATTENDEES_LIMIT } from './db.js';
 
 const PORT = Number(process.env.PORT || 3000);
 // Passkeys are bound to an origin. Defaults to whatever host the browser used (fine for localhost);
@@ -55,9 +55,9 @@ function newSession(res, userId) {
 }
 
 function stats(userId) {
-  const helped = q(`SELECT COUNT(*) n FROM swipes WHERE helper_id = ? AND status = 'done'`).get(userId).n;
-  const received = q(`SELECT COUNT(*) n FROM swipes s JOIN tasks t ON t.id = s.task_id WHERE t.creator_id = ? AND s.status = 'done'`).get(userId).n;
-  return { helped, received };
+  const hosted = q(`SELECT COUNT(DISTINCT s.event_id) n FROM swipes s JOIN events t ON t.id = s.event_id WHERE t.host_id = ? AND s.status = 'attended'`).get(userId).n;
+  const attended = q(`SELECT COUNT(*) n FROM swipes WHERE attendee_id = ? AND status = 'attended'`).get(userId).n;
+  return { hosted, attended };
 }
 
 // What anyone may learn about an account: its GUID and activity counts. Never a name.
@@ -75,13 +75,13 @@ function chatPubkey(v) {
   return JSON.stringify({ kty: 'EC', crv: 'P-256', x: v.x, y: v.y });
 }
 
-// A "match" is an accepted/done yes-swipe. Only the helper and the task creator may see it.
+// A "match" is an accepted/attended yes-swipe. Only the attendee and the event host may see it.
 function loadMatch(swipeId, userId) {
   const m = q(`
-    SELECT s.*, t.creator_id, t.title, t.status AS task_status
-    FROM swipes s JOIN tasks t ON t.id = s.task_id
-    WHERE s.id = ? AND s.status IN ('accepted', 'done', 'withdrawn')`).get(swipeId);
-  if (!m || (m.helper_id !== userId && m.creator_id !== userId)) throw new HttpError(404, 'Match not found');
+    SELECT s.*, t.host_id, t.title, t.status AS event_status
+    FROM swipes s JOIN events t ON t.id = s.event_id
+    WHERE s.id = ? AND s.status IN ('accepted', 'attended', 'withdrawn')`).get(swipeId);
+  if (!m || (m.attendee_id !== userId && m.host_id !== userId)) throw new HttpError(404, 'Match not found');
   return m;
 }
 
@@ -91,8 +91,8 @@ function tagsField(v) {
   return tags;
 }
 
-// SQL column yielding a task's tags as a JSON array, in the poster's order. Use with alias t for tasks.
-const TAGS_COL = `(SELECT json_group_array(tag ORDER BY pos) FROM task_tags WHERE task_id = t.id) AS tags`;
+// SQL column yielding an event's tags as a JSON array, in the host's order. Use with alias t for events.
+const TAGS_COL = `(SELECT json_group_array(tag ORDER BY pos) FROM event_tags WHERE event_id = t.id) AS tags`;
 const withTags = (row) => ({ ...row, tags: JSON.parse(row.tags || '[]') });
 
 // Blank/missing → null (no limit); otherwise a whole number 1..MAX_ATTENDEES_LIMIT.
@@ -104,8 +104,8 @@ function maxAttendeesField(v) {
   return n;
 }
 
-function taskFields(body) {
-  // Public events are open to all (or ticketed elsewhere), so they never have a cap.
+function eventFields(body) {
+  // Open-to-everyone events (public, or ticketed elsewhere) never have a cap.
   const publicEvent = [true, 'on', 'true', '1', 1].includes(body.public_event) ? 1 : 0;
   return {
     public_event: publicEvent,
@@ -118,22 +118,22 @@ function taskFields(body) {
     max_attendees: publicEvent ? null : maxAttendeesField(body.max_attendees),
   };
 }
-const FIELD_LABELS = { title: 'Title', details: 'Details', tags: 'Tags', location: 'Where', when_text: 'When', cost: 'Cost', public_event: 'Public event', max_attendees: 'Max attendees' };
+const FIELD_LABELS = { title: 'Title', details: 'Details', tags: 'Tags', location: 'Where', when_text: 'When', cost: 'Cost', public_event: 'Open to everyone', max_attendees: 'Max attendees' };
 
-// Recompute open/full/done for a live task from its matched helpers. Call inside a transaction.
-function syncTaskStatus(taskId) {
-  const t = q('SELECT status, max_attendees FROM tasks WHERE id = ?').get(taskId);
+// Recompute open/full/past for a live event from its matched attendees. Call inside a transaction.
+function syncEventStatus(eventId) {
+  const t = q('SELECT status, max_attendees FROM events WHERE id = ?').get(eventId);
   if (!t || !['open', 'full'].includes(t.status)) return;
-  const { accepted, done } = q(`
-    SELECT COALESCE(SUM(status = 'accepted'), 0) accepted, COALESCE(SUM(status = 'done'), 0) done
-    FROM swipes WHERE task_id = ?`).get(taskId);
-  // No limit → stays open for more people until the poster removes it.
-  const status = t.max_attendees === null || accepted + done < t.max_attendees ? 'open' : accepted === 0 ? 'done' : 'full';
-  if (status !== t.status) q('UPDATE tasks SET status = ? WHERE id = ?').run(status, taskId);
+  const { accepted, attended } = q(`
+    SELECT COALESCE(SUM(status = 'accepted'), 0) accepted, COALESCE(SUM(status = 'attended'), 0) attended
+    FROM swipes WHERE event_id = ?`).get(eventId);
+  // No limit → stays open for more people until the host removes it.
+  const status = t.max_attendees === null || accepted + attended < t.max_attendees ? 'open' : accepted === 0 ? 'past' : 'full';
+  if (status !== t.status) q('UPDATE events SET status = ? WHERE id = ?').run(status, eventId);
 }
 
-function loadTask(id) {
-  const row = q(`SELECT t.*, ${TAGS_COL} FROM tasks t WHERE t.id = ?`).get(id);
+function loadEvent(id) {
+  const row = q(`SELECT t.*, ${TAGS_COL} FROM events t WHERE t.id = ?`).get(id);
   return row && withTags(row);
 }
 
@@ -263,86 +263,86 @@ route('POST', '/api/logout', async ({ req, res }) => {
 
 route('GET', '/api/me', async ({ user, res }) => {
   const counts = {
-    confirm: q(`SELECT COUNT(*) n FROM swipes s JOIN tasks t ON t.id = s.task_id
-               WHERE t.creator_id = ? AND s.yes = 1 AND s.status = 'pending' AND t.status = 'open'`).get(user.id).n,
-    matches: q(`SELECT COUNT(*) n FROM swipes s JOIN tasks t ON t.id = s.task_id
-                WHERE s.status = 'accepted' AND (s.helper_id = ? OR t.creator_id = ?)`).get(user.id, user.id).n,
+    confirm: q(`SELECT COUNT(*) n FROM swipes s JOIN events t ON t.id = s.event_id
+               WHERE t.host_id = ? AND s.yes = 1 AND s.status = 'pending' AND t.status = 'open'`).get(user.id).n,
+    plans: q(`SELECT COUNT(*) n FROM swipes s JOIN events t ON t.id = s.event_id
+                WHERE s.status = 'accepted' AND (s.attendee_id = ? OR t.host_id = ?)`).get(user.id, user.id).n,
   };
   send(res, 200, { ...publicUser(user), counts });
 });
 
-// Open tasks from other people that I haven't swiped on yet.
-const DISCOVERABLE = `t.status = 'open' AND t.creator_id != :me
-  AND NOT EXISTS (SELECT 1 FROM swipes s WHERE s.task_id = t.id AND s.helper_id = :me)`;
+// Open events from other people that I haven't swiped on yet.
+const DISCOVERABLE = `t.status = 'open' AND t.host_id != :me
+  AND NOT EXISTS (SELECT 1 FROM swipes s WHERE s.event_id = t.id AND s.attendee_id = :me)`;
 
-// The Discover deck (also shown to signed-out guests). ?tags=a,b keeps tasks with ANY of those tags;
-// ?cost=free,low keeps tasks at ANY of those costs. When both are given, a task must match both.
+// The Discover deck (also shown to signed-out guests). ?tags=a,b keeps events with ANY of those tags;
+// ?cost=free,low keeps events at ANY of those costs. When both are given, an event must match both.
 route('GET', '/api/discover', async ({ user, query, res }) => {
   const tags = parseTags(query.get('tags'));
   const costs = String(query.get('cost') || '').split(',').filter(c => COSTS.includes(c));
   const rows = q(`
-    SELECT t.*, u.guid AS creator_guid, ${TAGS_COL}
-    FROM tasks t JOIN users u ON u.id = t.creator_id
+    SELECT t.*, u.guid AS host_guid, ${TAGS_COL}
+    FROM events t JOIN users u ON u.id = t.host_id
     WHERE ${DISCOVERABLE}
-      AND (:tags = '[]' OR EXISTS (SELECT 1 FROM task_tags tt WHERE tt.task_id = t.id AND tt.tag IN (SELECT value FROM json_each(:tags))))
+      AND (:tags = '[]' OR EXISTS (SELECT 1 FROM event_tags tt WHERE tt.event_id = t.id AND tt.tag IN (SELECT value FROM json_each(:tags))))
       AND (:costs = '[]' OR t.cost IN (SELECT value FROM json_each(:costs)))
     ORDER BY t.created_at DESC, t.id DESC
     LIMIT 30`).all({ me: user?.id ?? -1, tags: JSON.stringify(tags), costs: JSON.stringify(costs) });
-  send(res, 200, rows.map(({ creator_id, creator_guid, ...t }) =>
-    withTags({ ...t, creator: { guid: creator_guid, ...stats(creator_id) } })));
+  send(res, 200, rows.map(({ host_id, host_guid, ...t }) =>
+    withTags({ ...t, host: { guid: host_guid, ...stats(host_id) } })));
 }, { auth: 'optional' });
 
-// Filter options for Discover: tags and costs, each with how many discoverable tasks match.
+// Filter options for Discover: tags and costs, each with how many discoverable events match.
 route('GET', '/api/discover/filters', async ({ user, res }) => {
   const me = user?.id ?? -1;
   const tags = q(`
-    SELECT tt.tag, COUNT(*) AS count FROM task_tags tt JOIN tasks t ON t.id = tt.task_id
+    SELECT tt.tag, COUNT(*) AS count FROM event_tags tt JOIN events t ON t.id = tt.event_id
     WHERE ${DISCOVERABLE}
     GROUP BY tt.tag ORDER BY count DESC, tt.tag LIMIT 40`).all({ me });
-  const byCost = Object.fromEntries(q(`SELECT t.cost, COUNT(*) AS count FROM tasks t WHERE ${DISCOVERABLE} GROUP BY t.cost`)
+  const byCost = Object.fromEntries(q(`SELECT t.cost, COUNT(*) AS count FROM events t WHERE ${DISCOVERABLE} GROUP BY t.cost`)
     .all({ me }).map(r => [r.cost, r.count]));
   send(res, 200, { tags, costs: COSTS.map(cost => ({ cost, count: byCost[cost] || 0 })) });
 }, { auth: 'optional' });
 
-route('POST', '/api/tasks/:id/swipe', async ({ user, params, body, res }) => {
-  const task = q('SELECT * FROM tasks WHERE id = ?').get(params.id);
-  if (!task || task.status !== 'open') throw new HttpError(404, 'That task is no longer open');
-  if (task.creator_id === user.id) throw new HttpError(400, "You can't swipe on your own task");
+route('POST', '/api/events/:id/swipe', async ({ user, params, body, res }) => {
+  const event = q('SELECT * FROM events WHERE id = ?').get(params.id);
+  if (!event || event.status !== 'open') throw new HttpError(404, 'That event is no longer open');
+  if (event.host_id === user.id) throw new HttpError(400, "You can't swipe on your own event");
   const yes = body.yes ? 1 : 0;
-  q(`INSERT INTO swipes (task_id, helper_id, yes, note, status) VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(task_id, helper_id) DO NOTHING`)
-    .run(task.id, user.id, yes, str(body.note, 280, { field: 'Note' }), yes ? 'pending' : 'declined');
+  q(`INSERT INTO swipes (event_id, attendee_id, yes, note, status) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(event_id, attendee_id) DO NOTHING`)
+    .run(event.id, user.id, yes, str(body.note, 280, { field: 'Note' }), yes ? 'pending' : 'declined');
   send(res, 200, { ok: true });
 });
 
-// Undo my swipe on a task, as long as the asker hasn't matched with me yet.
-route('DELETE', '/api/tasks/:id/swipe', async ({ user, params, res }) => {
-  const sw = q('SELECT * FROM swipes WHERE task_id = ? AND helper_id = ?').get(params.id, user.id);
+// Undo my swipe on an event, as long as the host hasn't matched with me yet.
+route('DELETE', '/api/events/:id/swipe', async ({ user, params, res }) => {
+  const sw = q('SELECT * FROM swipes WHERE event_id = ? AND attendee_id = ?').get(params.id, user.id);
   if (!sw) throw new HttpError(404, 'Nothing to undo');
   if (sw.yes && sw.status !== 'pending')
-    throw new HttpError(409, sw.status === 'accepted' || sw.status === 'done'
-      ? "They've already matched with you. Message them in Matches if you need to back out."
+    throw new HttpError(409, sw.status === 'accepted' || sw.status === 'attended'
+      ? "They've already matched with you. Message them in Plans if you need to back out."
       : 'They already responded');
   q('DELETE FROM swipes WHERE id = ?').run(sw.id);
   send(res, 200, { ok: true });
 });
 
-// Confirm tab: people who swiped "yes" on my open tasks, waiting for me to swipe back.
+// Confirm tab: people who swiped "yes" on my open events, waiting for me to swipe back.
 route('GET', '/api/confirm', async ({ user, res }) => {
   const rows = q(`
-    SELECT s.id, s.note, s.created_at, t.id AS task_id, t.title, ${TAGS_COL}, t.max_attendees,
-           u.id AS helper_id, u.guid
-    FROM swipes s JOIN tasks t ON t.id = s.task_id JOIN users u ON u.id = s.helper_id
-    WHERE t.creator_id = ? AND s.yes = 1 AND s.status = 'pending' AND t.status = 'open'
+    SELECT s.id, s.note, s.created_at, t.id AS event_id, t.title, ${TAGS_COL}, t.max_attendees,
+           u.id AS attendee_id, u.guid
+    FROM swipes s JOIN events t ON t.id = s.event_id JOIN users u ON u.id = s.attendee_id
+    WHERE t.host_id = ? AND s.yes = 1 AND s.status = 'pending' AND t.status = 'open'
     ORDER BY s.created_at, s.id`).all(user.id);
-  send(res, 200, rows.map(({ helper_id, guid, ...r }) => withTags({ ...r, helper: { guid, ...stats(helper_id) } })));
+  send(res, 200, rows.map(({ attendee_id, guid, ...r }) => withTags({ ...r, attendee: { guid, ...stats(attendee_id) } })));
 });
 
 route('POST', '/api/confirm/:id/respond', async ({ user, params, body, res }) => {
   const interest = q(`
-    SELECT s.*, t.creator_id, t.status AS task_status
-    FROM swipes s JOIN tasks t ON t.id = s.task_id WHERE s.id = ?`).get(params.id);
-  if (!interest || interest.creator_id !== user.id || interest.status !== 'pending' || interest.task_status !== 'open')
+    SELECT s.*, t.host_id, t.status AS event_status
+    FROM swipes s JOIN events t ON t.id = s.event_id WHERE s.id = ?`).get(params.id);
+  if (!interest || interest.host_id !== user.id || interest.status !== 'pending' || interest.event_status !== 'open')
     throw new HttpError(404, 'Request not found');
   if (!body.yes) {
     q(`UPDATE swipes SET status = 'declined' WHERE id = ?`).run(interest.id);
@@ -350,7 +350,7 @@ route('POST', '/api/confirm/:id/respond', async ({ user, params, body, res }) =>
   }
   tx(() => {
     q(`UPDATE swipes SET status = 'accepted' WHERE id = ?`).run(interest.id);
-    syncTaskStatus(interest.task_id);
+    syncEventStatus(interest.event_id);
   });
   send(res, 200, { match: true, matchId: interest.id });
 });
@@ -358,39 +358,39 @@ route('POST', '/api/confirm/:id/respond', async ({ user, params, body, res }) =>
 // Undo my response to someone interested: a "no thanks", or a fresh match nobody has messaged on yet.
 route('POST', '/api/confirm/:id/undo', async ({ user, params, res }) => {
   const interest = q(`
-    SELECT s.*, t.creator_id, t.status AS task_status
-    FROM swipes s JOIN tasks t ON t.id = s.task_id WHERE s.id = ?`).get(params.id);
-  if (!interest || interest.creator_id !== user.id || !interest.yes) throw new HttpError(404, 'Request not found');
-  if (!['declined', 'accepted'].includes(interest.status) || !['open', 'full'].includes(interest.task_status))
+    SELECT s.*, t.host_id, t.status AS event_status
+    FROM swipes s JOIN events t ON t.id = s.event_id WHERE s.id = ?`).get(params.id);
+  if (!interest || interest.host_id !== user.id || !interest.yes) throw new HttpError(404, 'Request not found');
+  if (!['declined', 'accepted'].includes(interest.status) || !['open', 'full'].includes(interest.event_status))
     throw new HttpError(409, 'That can no longer be undone');
   if (interest.status === 'accepted' && q('SELECT 1 FROM messages WHERE swipe_id = ? LIMIT 1').get(interest.id))
     throw new HttpError(409, "You've already started chatting, so this match can't be undone");
   tx(() => {
     q(`UPDATE swipes SET status = 'pending', reconfirm = 0 WHERE id = ?`).run(interest.id);
-    syncTaskStatus(interest.task_id);
+    syncEventStatus(interest.event_id);
   });
   send(res, 200, { ok: true });
 });
 
 route('GET', '/api/matches', async ({ user, res }) => {
   const rows = q(`
-    SELECT s.id, s.status, s.note, s.reconfirm, t.id AS task_id, t.title, ${TAGS_COL}, t.location, t.when_text, t.status AS task_status,
-           t.creator_id, s.helper_id, cu.guid AS creator_guid, hu.guid AS helper_guid,
-           cu.chat_pubkey AS creator_pubkey, hu.chat_pubkey AS helper_pubkey,
+    SELECT s.id, s.status, s.note, s.reconfirm, t.id AS event_id, t.title, ${TAGS_COL}, t.location, t.when_text, t.status AS event_status,
+           t.host_id, s.attendee_id, cu.guid AS host_guid, hu.guid AS attendee_guid,
+           cu.chat_pubkey AS host_pubkey, hu.chat_pubkey AS attendee_pubkey,
            (SELECT body FROM messages m WHERE m.swipe_id = s.id ORDER BY m.id DESC LIMIT 1) AS last_message,
            (SELECT kind FROM messages m WHERE m.swipe_id = s.id ORDER BY m.id DESC LIMIT 1) AS last_kind
-    FROM swipes s JOIN tasks t ON t.id = s.task_id
-    JOIN users cu ON cu.id = t.creator_id JOIN users hu ON hu.id = s.helper_id
-    WHERE s.status IN ('accepted', 'done', 'withdrawn') AND (s.helper_id = ? OR t.creator_id = ?)
+    FROM swipes s JOIN events t ON t.id = s.event_id
+    JOIN users cu ON cu.id = t.host_id JOIN users hu ON hu.id = s.attendee_id
+    WHERE s.status IN ('accepted', 'attended', 'withdrawn') AND (s.attendee_id = ? OR t.host_id = ?)
     ORDER BY s.status != 'accepted', s.id DESC`).all(user.id, user.id);
   // "other" is the GUID of the person on the other side; the browser turns it into the nickname *you* gave them.
-  send(res, 200, rows.map(({ creator_id, helper_id, creator_guid, helper_guid, creator_pubkey, helper_pubkey, ...r }) => {
-    const mine = creator_id === user.id;
+  send(res, 200, rows.map(({ host_id, attendee_id, host_guid, attendee_guid, host_pubkey, attendee_pubkey, ...r }) => {
+    const mine = host_id === user.id;
     return withTags({
       ...r,
-      role: mine ? 'creator' : 'helper',
-      other: mine ? helper_guid : creator_guid,
-      other_pubkey: JSON.parse((mine ? helper_pubkey : creator_pubkey) || 'null'),
+      role: mine ? 'host' : 'attendee',
+      other: mine ? attendee_guid : host_guid,
+      other_pubkey: JSON.parse((mine ? attendee_pubkey : host_pubkey) || 'null'),
     });
   }));
 });
@@ -410,23 +410,23 @@ route('POST', '/api/matches/:id/messages', async ({ user, params, body, res }) =
   send(res, 200, { ok: true });
 });
 
-// Creator confirms the help happened. Task closes once nobody is still accepted-but-not-done.
-route('POST', '/api/matches/:id/complete', async ({ user, params, res }) => {
+// Host marks that the event happened with this attendee. A full event becomes past once nobody is still accepted-but-not-attended.
+route('POST', '/api/matches/:id/happened', async ({ user, params, res }) => {
   const m = loadMatch(params.id, user.id);
-  if (m.creator_id !== user.id) throw new HttpError(403, 'Only the person who was helped can confirm it');
-  if (m.status === 'done') return send(res, 200, { ok: true });
+  if (m.host_id !== user.id) throw new HttpError(403, 'Only the host can mark this as happened');
+  if (m.status === 'attended') return send(res, 200, { ok: true });
   if (m.status !== 'accepted') throw new HttpError(409, 'This match has ended');
   tx(() => {
-    q(`UPDATE swipes SET status = 'done', reconfirm = 0 WHERE id = ?`).run(m.id);
-    syncTaskStatus(m.task_id);
+    q(`UPDATE swipes SET status = 'attended', reconfirm = 0 WHERE id = ?`).run(m.id);
+    syncEventStatus(m.event_id);
   });
   send(res, 200, { ok: true });
 });
 
-// Helper answers "still in?" after the asker edited the task.
+// Attendee answers "still in?" after the host edited the event.
 route('POST', '/api/matches/:id/reconfirm', async ({ user, params, body, res }) => {
   const m = loadMatch(params.id, user.id);
-  if (m.helper_id !== user.id) throw new HttpError(403, 'Only the helper can re-confirm');
+  if (m.attendee_id !== user.id) throw new HttpError(403, 'Only the attendee can re-confirm');
   if (m.status !== 'accepted' || !m.reconfirm) throw new HttpError(409, 'Nothing to re-confirm');
   tx(() => {
     if (body.yes) {
@@ -435,85 +435,83 @@ route('POST', '/api/matches/:id/reconfirm', async ({ user, params, body, res }) 
     } else {
       q(`UPDATE swipes SET status = 'withdrawn', reconfirm = 0 WHERE id = ?`).run(m.id);
       systemMessage(m.id, user.id, "🚪 Can't make it after the change, so dropped out.");
-      syncTaskStatus(m.task_id);
+      syncEventStatus(m.event_id);
     }
   });
   send(res, 200, { ok: true, withdrawn: !body.yes });
 });
 
-route('GET', '/api/tasks', async ({ user, res }) => {
+route('GET', '/api/events', async ({ user, res }) => {
   send(res, 200, q(`
     SELECT t.*, ${TAGS_COL},
-      (SELECT COUNT(*) FROM swipes s WHERE s.task_id = t.id AND s.yes = 1 AND s.status = 'pending') AS pending,
-      (SELECT COUNT(*) FROM swipes s WHERE s.task_id = t.id AND s.status IN ('accepted', 'done')) AS matched,
-      (SELECT COUNT(*) FROM swipes s WHERE s.task_id = t.id AND s.status = 'accepted' AND s.reconfirm = 1) AS awaiting
-    FROM tasks t WHERE t.creator_id = ? AND t.status != 'cancelled'
-    ORDER BY t.status = 'done', t.id DESC`).all(user.id).map(withTags));
+      (SELECT COUNT(*) FROM swipes s WHERE s.event_id = t.id AND s.yes = 1 AND s.status = 'pending') AS pending,
+      (SELECT COUNT(*) FROM swipes s WHERE s.event_id = t.id AND s.status IN ('accepted', 'attended')) AS matched,
+      (SELECT COUNT(*) FROM swipes s WHERE s.event_id = t.id AND s.status = 'accepted' AND s.reconfirm = 1) AS awaiting
+    FROM events t WHERE t.host_id = ? AND t.status != 'cancelled'
+    ORDER BY t.status = 'past', t.id DESC`).all(user.id).map(withTags));
 });
 
-route('POST', '/api/tasks', async ({ user, body, res }) => {
-  const f = taskFields(body);
+route('POST', '/api/events', async ({ user, body, res }) => {
+  const f = eventFields(body);
   const id = tx(() => {
     const { lastInsertRowid } = q(`
-      INSERT INTO tasks (creator_id, title, details, location, when_text, cost, public_event, max_attendees)
+      INSERT INTO events (host_id, title, details, location, when_text, cost, public_event, max_attendees)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(user.id, f.title, f.details, f.location, f.when_text, f.cost, f.public_event, f.max_attendees);
-    setTaskTags(lastInsertRowid, f.tags);
+    setEventTags(lastInsertRowid, f.tags);
     return lastInsertRowid;
   });
-  send(res, 200, loadTask(id));
+  send(res, 200, loadEvent(id));
 });
 
-// Edit my task. Every matched helper gets a chat message listing the changes and must re-confirm.
-route('PATCH', '/api/tasks/:id', async ({ user, params, body, res }) => {
-  const task = loadTask(params.id);
-  if (!task || task.creator_id !== user.id) throw new HttpError(404, 'Task not found');
-  if (!['open', 'full'].includes(task.status)) throw new HttpError(409, 'Finished posts can no longer be edited');
-  const f = taskFields(body);
-  const filled = q(`SELECT COUNT(*) n FROM swipes WHERE task_id = ? AND status IN ('accepted', 'done')`).get(task.id).n;
+// Edit my event. Every matched attendee gets a chat message listing the changes and must re-confirm.
+route('PATCH', '/api/events/:id', async ({ user, params, body, res }) => {
+  const event = loadEvent(params.id);
+  if (!event || event.host_id !== user.id) throw new HttpError(404, 'Event not found');
+  if (!['open', 'full'].includes(event.status)) throw new HttpError(409, 'Finished posts can no longer be edited');
+  const f = eventFields(body);
+  const filled = q(`SELECT COUNT(*) n FROM swipes WHERE event_id = ? AND status IN ('accepted', 'attended')`).get(event.id).n;
   if (f.max_attendees !== null && f.max_attendees < filled)
     throw new HttpError(400, `${filled} ${filled > 1 ? 'people are' : 'person is'} already matched, so max attendees must be at least ${filled} (or blank for no limit)`);
 
-  const changed = Object.keys(FIELD_LABELS).filter(k => JSON.stringify(f[k]) !== JSON.stringify(task[k]));
-  if (!changed.length) return send(res, 200, { task, notified: 0 });
+  const changed = Object.keys(FIELD_LABELS).filter(k => JSON.stringify(f[k]) !== JSON.stringify(event[k]));
+  if (!changed.length) return send(res, 200, { event, notified: 0 });
   const show = (v) => (Array.isArray(v) ? (v.length ? v.join(', ') : '(none)') : v === null ? 'No limit' : v === '' ? '(none)' : String(v));
   const notice = '✏️ The post was updated:\n' +
     changed.map(k => k === 'details' ? '• Details were changed'
-      : k === 'cost' ? `• Cost: ${COST_LABELS[task.cost]} → ${COST_LABELS[f.cost]}`
-      : k === 'public_event' ? (f.public_event ? '• Now a public event, open to all' : '• No longer a public event')
-      : `• ${FIELD_LABELS[k]}: ${show(task[k])} → ${show(f[k])}`).join('\n') +
+      : k === 'cost' ? `• Cost: ${COST_LABELS[event.cost]} → ${COST_LABELS[f.cost]}`
+      : k === 'public_event' ? (f.public_event ? '• Now open to everyone' : '• No longer open to everyone')
+      : `• ${FIELD_LABELS[k]}: ${show(event[k])} → ${show(f[k])}`).join('\n') +
     '\nPlease re-confirm you can still make it.';
 
   const notified = tx(() => {
-    q(`UPDATE tasks SET title = ?, details = ?, location = ?, when_text = ?, cost = ?, public_event = ?, max_attendees = ? WHERE id = ?`)
-      .run(f.title, f.details, f.location, f.when_text, f.cost, f.public_event, f.max_attendees, task.id);
-    setTaskTags(task.id, f.tags);
-    const attendees = q(`SELECT id FROM swipes WHERE task_id = ? AND status = 'accepted'`).all(task.id);
+    q(`UPDATE events SET title = ?, details = ?, location = ?, when_text = ?, cost = ?, public_event = ?, max_attendees = ? WHERE id = ?`)
+      .run(f.title, f.details, f.location, f.when_text, f.cost, f.public_event, f.max_attendees, event.id);
+    setEventTags(event.id, f.tags);
+    const attendees = q(`SELECT id FROM swipes WHERE event_id = ? AND status = 'accepted'`).all(event.id);
     for (const a of attendees) {
       q('UPDATE swipes SET reconfirm = 1 WHERE id = ?').run(a.id);
       systemMessage(a.id, user.id, notice);
     }
-    syncTaskStatus(task.id);
+    syncEventStatus(event.id);
     return attendees.length;
   });
-  send(res, 200, { task: loadTask(task.id), notified });
+  send(res, 200, { event: loadEvent(event.id), notified });
 });
 
-route('DELETE', '/api/tasks/:id', async ({ user, params, res }) => {
-  const r = q(`UPDATE tasks SET status = 'cancelled' WHERE id = ? AND creator_id = ? AND status != 'done'`).run(params.id, user.id);
-  if (!r.changes) throw new HttpError(404, 'Task not found');
+route('DELETE', '/api/events/:id', async ({ user, params, res }) => {
+  const r = q(`UPDATE events SET status = 'cancelled' WHERE id = ? AND host_id = ? AND status != 'past'`).run(params.id, user.id);
+  if (!r.changes) throw new HttpError(404, 'Event not found');
   send(res, 200, { ok: true });
 });
 
-// Who I've helped and who's helped me, by GUID. The browser shows them under the nicknames in my encrypted contacts.
+// How many events I've been to with each person (as host or attendee), by GUID. The browser shows them under the nicknames in my encrypted contacts.
 route('GET', '/api/ledger', async ({ user, res }) => {
   const rows = q(`
-    SELECT u.guid,
-      SUM(CASE WHEN s.helper_id = ? THEN 1 ELSE 0 END) AS i_helped,
-      SUM(CASE WHEN t.creator_id = ? THEN 1 ELSE 0 END) AS they_helped
-    FROM swipes s JOIN tasks t ON t.id = s.task_id
-    JOIN users u ON u.id = CASE WHEN s.helper_id = ? THEN t.creator_id ELSE s.helper_id END
-    WHERE s.status = 'done' AND (s.helper_id = ? OR t.creator_id = ?)
-    GROUP BY u.id ORDER BY (i_helped + they_helped) DESC`).all(user.id, user.id, user.id, user.id, user.id);
+    SELECT u.guid, COUNT(*) AS together
+    FROM swipes s JOIN events t ON t.id = s.event_id
+    JOIN users u ON u.id = CASE WHEN s.attendee_id = ? THEN t.host_id ELSE s.attendee_id END
+    WHERE s.status = 'attended' AND (s.attendee_id = ? OR t.host_id = ?)
+    GROUP BY u.id ORDER BY together DESC`).all(user.id, user.id, user.id);
   send(res, 200, rows);
 });
 

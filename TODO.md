@@ -11,22 +11,22 @@ about **connections and metadata**, and about the limits of doing end-to-end enc
 
 ## 1. Social graph and metadata the server still sees
 
-- [ ] **P0: The match graph is in plaintext.** `swipes` (who offered to help whom, accepted/declined/done) links
-  creator and helper GUIDs, with timestamps. That *is* the social graph. Match records are intentionally kept for
+- [ ] **P0: The match graph is in plaintext.** `swipes` (who asked to join whose event, accepted/declined/attended) links
+  host and attendee GUIDs, with timestamps. That *is* the social graph. Match records are intentionally kept for
   now; we need another way to protect them. Ideas: per-match pseudonymous IDs instead of account GUIDs, private set
   intersection / blind matching, sealed-sender-style message routing, or client-encrypted match records the server
   can't attribute.
 - [ ] **P0: Message metadata.** Even with E2E chat, the server sees which match a message belongs to (so both GUIDs),
   who sent it, when, and its length. Consider padding message sizes and decoupling sender identity from storage.
-- [ ] **P1: The "Your circle" stats come from the graph.** `/api/ledger` computes helped/got-help counts per pair on the
+- [ ] **P1: The "Your circle" stats come from the graph.** `/api/ledger` computes events-together counts per pair on the
   server, so the server must know the pairs. Move this to the client (count from your own encrypted vault) once
   matches are protected.
-- [ ] **P1: Posts are linkable to one account.** Every post carries the creator's GUID (`/api/discover` returns
-  `creator.guid`, even to guests), so anyone can link all of one person's posts. Combined with "Where"/"When",
+- [ ] **P1: Posts are linkable to one account.** Every post carries the host's GUID (`/api/discover` returns
+  `host.guid`, even to guests), so anyone can link all of one person's posts. Combined with "Where"/"When",
   that can de-anonymize people. Use a per-post pseudonym in public responses.
 - [ ] **P1: Avatars leak identity.** Avatar colors are derived from the GUID (`hue(guid)` in `public/app.js`), so the
   same color follows a person across posts. Derive from a per-post or per-viewer value instead.
-- [ ] **P1: Public activity counts.** Helped/got-help counts per GUID (`stats()` in `server.js`) are public on every
+- [ ] **P1: Public activity counts.** Hosted/attended counts per GUID (`stats()` in `server.js`) are public on every
   card and reveal how active someone is. Consider coarse buckets, or hide them.
 - [ ] **P1: Post contents are public and identifying.** Location and time fields are free text. Warn people when
   posting, and consider coarse neighborhoods instead of addresses.

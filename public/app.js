@@ -35,7 +35,7 @@ const GUEST_TABS = [
 const TABS = [
   { id: 'discover', ico: '🤝', label: 'Discover' },
   { id: 'confirm', ico: '🙋', label: 'Confirm' },
-  { id: 'matches', ico: '💬', label: 'Matches' },
+  { id: 'plans', ico: '💬', label: 'Plans' },
   { id: 'post', ico: '📝', label: 'Post' },
   { id: 'profile', ico: '⭐', label: 'Profile' },
 ];
@@ -216,7 +216,7 @@ function mountDeck(root, { items, renderCard, onSwipe, onUndo, yesLabel, noLabel
       }
       history.push({ item, yes });
     } catch (e) {
-      toast(e.message); // stale card (e.g. task closed): drop it anyway, nothing to undo
+      toast(e.message); // stale card (e.g. event closed): drop it anyway, nothing to undo
     }
     queue.shift();
     setTimeout(() => { busy = false; draw(); }, 250);
@@ -297,7 +297,7 @@ function shell(content) {
     <main id="view"></main>
     <nav class="tabs">
       ${tabs.map(t => {
-        const n = t.id === 'confirm' ? c.confirm : t.id === 'matches' ? c.matches : 0;
+        const n = t.id === 'confirm' ? c.confirm : t.id === 'plans' ? c.plans : 0;
         return `<button data-tab="${t.id}" class="${state.tab === t.id ? 'active' : ''}">
           <span class="ico">${t.ico}</span>${t.label}${n ? `<span class="badge">${n}</span>` : ''}</button>`;
       }).join('')}
@@ -318,7 +318,7 @@ async function render() {
   if (state.me && !hasKeys()) state.tab = 'account';
   if (!state.me && !GUEST_TABS.some(t => t.id === state.tab)) state.tab = 'discover';
   const views = {
-    discover: viewDiscover, confirm: viewConfirm, matches: viewMatches, post: viewPost, profile: viewProfile, account: viewAccount,
+    discover: viewDiscover, confirm: viewConfirm, plans: viewPlans, post: viewPost, profile: viewProfile, account: viewAccount,
   };
   shell((v) => views[state.tab](v).catch(err => toast(err.message)));
 }
@@ -345,8 +345,8 @@ async function viewAccount(v) {
   v.innerHTML = `
     <div class="account stack">
       <p class="lead">${unlocking ? 'Unlock your account with your passkey to see your contacts and chats.'
-        : `Go help a neighbor. Swipe through people's to-do lists, and when you both say yes, it's on.
-           Lend a hand, and get one when <em>you</em> need it.`}</p>
+        : `Swipe through what's happening nearby, and when you and the host both say yes, it's on.
+           Join something fun, or host your own.`}</p>
       ${unlocking ? `<button class="btn" id="signIn">🔓 Unlock with passkey</button>` : `
         <button class="btn" id="signIn">🔑 Sign in with passkey</button>
         <button class="btn ghost" id="create" ${support === false ? 'disabled' : ''}>✨ Create an account</button>`}
@@ -404,7 +404,7 @@ async function signOut() {
   render();
 }
 
-function taskCard(t) {
+function eventCard(t) {
   return `
     <div class="hero ${tagLook(t.tags).cls}">${tagLook(t.tags).ico}</div>
     <div class="body">
@@ -414,12 +414,12 @@ function taskCard(t) {
         ${t.location ? `<span class="chip">📍 ${esc(t.location)}</span>` : ''}
         ${t.when_text ? `<span class="chip">🗓 ${esc(t.when_text)}</span>` : ''}
         <span class="chip" title="${esc(COST_HINTS[t.cost])}">💵 ${esc(COSTS[t.cost] || 'Free')}</span>
-        <span class="chip">${t.public_event ? '🎟️ Public event' : `👥 ${attendeesLabel(t.max_attendees)}`}</span>
+        <span class="chip">${t.public_event ? '🎟️ Open to everyone' : `👥 ${attendeesLabel(t.max_attendees)}`}</span>
       </div>
       ${t.details ? `<div class="details">${esc(t.details)}</div>` : ''}
-      <div class="who">${avatar(t.creator.guid)}
-        <div><b>${esc(displayName(t.creator.guid))}</b>
-          <small>Helped ${t.creator.helped} · Got help ${t.creator.received}</small></div>
+      <div class="who">${avatar(t.host.guid)}
+        <div><b>${esc(displayName(t.host.guid))}</b>
+          <small>Hosted ${t.host.hosted} · Attended ${t.host.attended}</small></div>
       </div>
     </div>`;
 }
@@ -449,10 +449,10 @@ async function viewDiscover(v) {
     const params = new URLSearchParams();
     if (state.discoverTags.size) params.set('tags', [...state.discoverTags].join(','));
     if (state.discoverCosts.size) params.set('cost', [...state.discoverCosts].join(','));
-    const [tasks, opts] = await Promise.all([api('/api/discover' + (params.size ? `?${params}` : '')), api('/api/discover/filters')]);
+    const [events, opts] = await Promise.all([api('/api/discover' + (params.size ? `?${params}` : '')), api('/api/discover/filters')]);
     options = opts;
     drawFilters();
-    mountDeck(host, deckOptions(tasks, { tags: [...state.discoverTags], costs: [...state.discoverCosts] }));
+    mountDeck(host, deckOptions(events, { tags: [...state.discoverTags], costs: [...state.discoverCosts] }));
   }
   const clearAll = () => { state.discoverTags.clear(); state.discoverCosts.clear(); };
   const toggle = (set, value) => (set.has(value) ? set.delete(value) : set.add(value));
@@ -473,23 +473,23 @@ async function viewDiscover(v) {
   await load();
 }
 
-function deckOptions(tasks, filters) {
+function deckOptions(events, filters) {
   return {
-    items: tasks,
-    renderCard: taskCard,
-    yesLabel: "I'll help", noLabel: 'Pass',
+    items: events,
+    renderCard: eventCard,
+    yesLabel: "I'm in", noLabel: 'Pass',
     onSwipe: async (t, yes) => {
       if (!state.me) {
         // Guests can browse; passing is just local, but saying yes needs an account.
         if (yes) { toast('Sign in or create an account to say yes.'); go('account'); return KEEP_CARD; }
         return;
       }
-      await api(`/api/tasks/${t.id}/swipe`, { method: 'POST', body: { yes } });
-      if (yes) toast(`Offered to help ${displayName(t.creator.guid)}! You'll match if they swipe yes too.`);
+      await api(`/api/events/${t.id}/swipe`, { method: 'POST', body: { yes } });
+      if (yes) toast(`Asked to join “${t.title}”! You'll match if the host swipes yes too.`);
     },
     onUndo: async (t, yes) => {
-      if (state.me) await api(`/api/tasks/${t.id}/swipe`, { method: 'DELETE' });
-      toast(yes ? `Took back your offer to ${displayName(t.creator.guid)}` : 'Undone');
+      if (state.me) await api(`/api/events/${t.id}/swipe`, { method: 'DELETE' });
+      toast(yes ? `Took back your request to join “${t.title}”` : 'Undone');
     },
     empty: filters.tags.length || filters.costs.length
       ? `<div class="empty"><div class="big">🔎</div><h3>No matches for these filters</h3>
@@ -497,7 +497,7 @@ function deckOptions(tasks, filters) {
           <p>Nothing open matches right now. Try other filters, or see everything.</p>
           <button class="btn" id="clearFilters">Show all posts</button></div>`
       : `<div class="empty"><div class="big">🌤</div><h3>Still bored?</h3>
-          <p>Nothing new right now. Check back later, or post something you'd like a hand with or think people would enjoy.</p>
+          <p>Nothing new right now. Check back later, or post something you think people would enjoy.</p>
           <button class="btn" id="goPost">Post something</button></div>`,
   };
 }
@@ -508,15 +508,15 @@ async function viewConfirm(v) {
     items: interested,
     renderCard: (o) => `
       <div class="hero ${tagLook(o.tags).cls}">
-        ${avatar(o.helper.guid, 'big')}
+        ${avatar(o.attendee.guid, 'big')}
       </div>
       <div class="body">
-        <div class="meta"><span class="chip">${tagLook(o.tags).ico} wants to help with: <b>${esc(o.title)}</b></span></div>
-        <h2>${esc(displayName(o.helper.guid))}</h2>
+        <div class="meta"><span class="chip">${tagLook(o.tags).ico} wants to join: <b>${esc(o.title)}</b></span></div>
+        <h2>${esc(displayName(o.attendee.guid))}</h2>
         ${o.note ? `<div class="details">“${esc(o.note)}”</div>` : ''}
         <div class="who" style="justify-content:space-around;text-align:center">
-          <div><b>${o.helper.helped}</b><small>people helped</small></div>
-          <div><b>${o.helper.received}</b><small>times helped</small></div>
+          <div><b>${o.attendee.hosted}</b><small>events hosted</small></div>
+          <div><b>${o.attendee.attended}</b><small>events attended</small></div>
         </div>
       </div>`,
     yesLabel: "Let's do it", noLabel: 'No thanks',
@@ -524,13 +524,13 @@ async function viewConfirm(v) {
       const r = await api(`/api/confirm/${o.id}/respond`, { method: 'POST', body: { yes } });
       await refreshMe();
       shellRefreshBadges();
-      if (r.match) showMatch(o.helper.guid, o.title, r.matchId);
+      if (r.match) showMatch(o.attendee.guid, o.title, r.matchId);
     },
     onUndo: async (o, yes) => {
       await api(`/api/confirm/${o.id}/undo`, { method: 'POST' });
       await refreshMe();
       shellRefreshBadges();
-      toast(yes ? `Unmatched with ${displayName(o.helper.guid)}` : 'Undone');
+      toast(yes ? `Unmatched with ${displayName(o.attendee.guid)}` : 'Undone');
     },
     empty: `<div class="empty"><div class="big">🙋</div><h3>Nobody to confirm</h3>
       <p>When someone swipes yes on one of your posts, they'll show up here for you to swipe back.</p></div>`,
@@ -550,7 +550,7 @@ function showMatch(otherGuid, title, matchId) {
     <button class="btn ghost" id="mKeep">Keep swiping</button>`;
   document.body.appendChild(o);
   o.querySelector('#mKeep').onclick = () => { o.remove(); shellRefreshBadges(); };
-  o.querySelector('#mChat').onclick = () => { o.remove(); state.tab = 'matches'; state.chat = matchId; render(); };
+  o.querySelector('#mChat').onclick = () => { o.remove(); state.tab = 'plans'; state.chat = matchId; render(); };
 }
 
 function shellRefreshBadges() {
@@ -558,12 +558,12 @@ function shellRefreshBadges() {
   const c = state.me.counts || {};
   app.querySelectorAll('nav.tabs button').forEach(b => {
     b.querySelector('.badge')?.remove();
-    const n = b.dataset.tab === 'confirm' ? c.confirm : b.dataset.tab === 'matches' ? c.matches : 0;
+    const n = b.dataset.tab === 'confirm' ? c.confirm : b.dataset.tab === 'plans' ? c.plans : 0;
     if (n) b.insertAdjacentHTML('beforeend', `<span class="badge">${n}</span>`);
   });
 }
 
-async function viewMatches(v) {
+async function viewPlans(v) {
   if (state.chat) return viewChat(v, state.chat);
   const matches = await api('/api/matches');
   await ensureContacts(matches);
@@ -572,24 +572,24 @@ async function viewMatches(v) {
     if (m.last_message && m.last_kind === 'user') m.last_message = await decryptMessage(m.id, m.other_pubkey, m.last_message) ?? '🔒';
   }));
   if (!matches.length) {
-    v.innerHTML = `<div class="empty"><div class="big">💬</div><h3>No matches yet</h3>
-      <p>Swipe right on something you'd like to help with. When the asker swipes yes on you, you'll match.</p>
-      <button class="btn" id="goD">Start helping</button></div>`;
+    v.innerHTML = `<div class="empty"><div class="big">💬</div><h3>No plans yet</h3>
+      <p>Swipe right on something you'd like to join. When the host swipes yes on you, you'll match.</p>
+      <button class="btn" id="goD">Find something to do</button></div>`;
     v.querySelector('#goD').onclick = () => go('discover');
     return;
   }
   const active = matches.filter(m => m.status === 'accepted'), past = matches.filter(m => m.status !== 'accepted');
   const pill = (m) =>
-    m.status === 'done' ? `<span class="pill">Done ✓</span>`
+    m.status === 'attended' ? `<span class="pill">Happened ✓</span>`
     : m.status === 'withdrawn' ? `<span class="pill">Dropped out</span>`
-    : m.reconfirm ? `<span class="pill warn">${m.role === 'helper' ? 'Re-confirm?' : 'Awaiting OK'}</span>`
+    : m.reconfirm ? `<span class="pill warn">${m.role === 'attendee' ? 'Re-confirm?' : 'Awaiting OK'}</span>`
     : `<span class="pill go">It's on</span>`;
   const row = (m) => `
     <button class="row" data-id="${m.id}">
       <div class="dot ${tagLook(m.tags).cls}">${tagLook(m.tags).ico}</div>
       <div class="grow">
         <div class="title">${esc(m.title)}</div>
-        <div class="sub">${m.role === 'helper' ? 'Helping' : 'Helped by'} ${esc(displayName(m.other))}${m.last_message ? ' · ' + esc(m.last_message) : ''}</div>
+        <div class="sub">${m.role === 'attendee' ? `Hosted by ${esc(displayName(m.other))}` : `${esc(displayName(m.other))} is going`}${m.last_message ? ' · ' + esc(m.last_message) : ''}</div>
       </div>
       ${pill(m)}
     </button>`;
@@ -602,7 +602,7 @@ async function viewMatches(v) {
 async function viewChat(v, id) {
   const matches = await api('/api/matches');
   const m = matches.find(x => x.id === id);
-  if (!m) { state.chat = null; return viewMatches(v); }
+  if (!m) { state.chat = null; return viewPlans(v); }
   await ensureContacts([m]);
   const name = displayName(m.other);
   v.innerHTML = `
@@ -614,10 +614,10 @@ async function viewChat(v, id) {
           <button type="button" class="link" id="rename" title="Change the nickname only you see">${esc(name)} ✎</button>
           <div class="sub" style="color:var(--muted);font-size:.85rem">${tagLook(m.tags).ico} ${esc(m.title)}${m.when_text ? ' · ' + esc(m.when_text) : ''}${m.location ? ' · ' + esc(m.location) : ''}</div>
         </div>
-        ${m.role === 'creator' && m.status === 'accepted' ? `<button class="btn small" id="done">Mark done</button>` : ''}
+        ${m.role === 'host' && m.status === 'accepted' ? `<button class="btn small" id="happened">It happened</button>` : ''}
       </div>
       <div class="msgs" id="msgs"></div>
-      ${m.status === 'accepted' && m.reconfirm && m.role === 'helper' ? `
+      ${m.status === 'accepted' && m.reconfirm && m.role === 'attendee' ? `
         <div class="reconfirm">
           <div><b>${esc(name)} changed this post.</b> Can you still make it?</div>
           <div class="btns">
@@ -637,11 +637,11 @@ async function viewChat(v, id) {
   const msgsEl = v.querySelector('#msgs');
   async function loadMsgs() {
     const msgs = await api(`/api/matches/${id}/messages`);
-    const sys = m.role === 'helper'
-      ? `You offered to help ${esc(name)} and they said yes!`
-      : `${esc(name)} offered to help and you said yes!`;
-    const tail = m.status === 'done' ? '<div class="msg sys">✅ Marked as done. Thank you!</div>'
-      : m.status === 'accepted' && m.reconfirm && m.role === 'creator' ? `<div class="msg sys">⏳ Waiting for ${esc(name)} to re-confirm</div>`
+    const sys = m.role === 'attendee'
+      ? `You asked to join and ${esc(name)} said yes!`
+      : `${esc(name)} asked to join and you said yes!`;
+    const tail = m.status === 'attended' ? '<div class="msg sys">✅ Marked as happened. Hope it was fun!</div>'
+      : m.status === 'accepted' && m.reconfirm && m.role === 'host' ? `<div class="msg sys">⏳ Waiting for ${esc(name)} to re-confirm</div>`
       : '';
     msgsEl.innerHTML = `<div class="msg sys">🤝 ${sys}</div>` +
       (await Promise.all(msgs.map(async x => {
@@ -675,16 +675,16 @@ async function viewChat(v, id) {
   };
   v.querySelector('#stillIn')?.addEventListener('click', () => reconfirm(true));
   v.querySelector('#cantGo')?.addEventListener('click', () => reconfirm(false));
-  v.querySelector('#done')?.addEventListener('click', async () => {
-    if (!confirm(`Confirm that ${name} helped you? This marks it as done.`)) return;
-    await api(`/api/matches/${id}/complete`, { method: 'POST' });
+  v.querySelector('#happened')?.addEventListener('click', async () => {
+    if (!confirm(`Mark “${m.title}” as happened with ${name}?`)) return;
+    await api(`/api/matches/${id}/happened`, { method: 'POST' });
     await refreshMe();
-    toast(`🎉 Done! Thanks, ${name}.`);
+    toast(`🎉 Glad it happened! Thanks, ${name}.`);
     render();
   });
 }
 
-function taskFormFields(t = {}) {
+function eventFormFields(t = {}) {
   const val = (k) => esc(t[k] ?? '');
   return `
       <input name="title" placeholder="e.g. Pick up compost & spread it on my garden" required maxlength="100" value="${val('title')}">
@@ -702,16 +702,16 @@ function taskFormFields(t = {}) {
         ${Object.entries(COSTS).map(([k, label]) => `<label title="${esc(COST_HINTS[k])}"><input type="radio" name="cost" value="${k}" ${(t.cost || 'free') === k ? 'checked' : ''}><span>${label}</span></label>`).join('')}
       </div></fieldset>
       <label class="switch-row"><input type="checkbox" name="public_event" ${t.public_event ? 'checked' : ''}>
-        🎟️ Public event <small>Open to all or ticketed elsewhere, so no attendee cap</small></label>
+        🎟️ Open to everyone <small>Public, or ticketed elsewhere, so no attendee cap</small></label>
       <label class="inline max-attendees" ${t.public_event ? 'hidden' : ''}>👥 Max attendees
         <input name="max_attendees" type="number" inputmode="numeric" step="1" min="${Math.max(1, t.matched || 0)}" max="${MAX_ATTENDEES_LIMIT}"
           placeholder="No limit" value="${t.max_attendees ?? ''}">
         <small>Leave blank for no limit</small></label>`;
 }
 
-// Chip-style tag input inside taskFormFields. Keeps the hidden "tags" input in sync (comma-separated).
+// Chip-style tag input inside eventFormFields. Keeps the hidden "tags" input in sync (comma-separated).
 // Enter or comma adds a tag, Backspace on an empty box removes the last, suggestions add with one tap.
-// Public event switch: hides the attendee cap (the server ignores it too) and adds #events as a convenience.
+// Open-to-everyone switch: hides the attendee cap (the server ignores it too) and adds #events as a convenience.
 function mountPublicEventSwitch(form) {
   const box = form.querySelector('input[name=public_event]'), cap = form.querySelector('.max-attendees');
   if (!box || !cap) return;
@@ -768,7 +768,7 @@ function openPostSheet(t = {}) {
   sheet.innerHTML = `
     <form class="stack panel" id="sheetForm">
       <h2>${editing ? 'Edit post' : 'New post'}</h2>
-      ${taskFormFields(t)}
+      ${eventFormFields(t)}
       ${editing && t.matched ? `<p class="note">Anyone you've matched with will get a message about what changed and be asked to re-confirm.</p>` : ''}
       ${editing ? '' : `<p class="note">Tweak anything you like, then post it.</p>`}
       <div class="two">
@@ -786,10 +786,10 @@ function openPostSheet(t = {}) {
     e.preventDefault();
     try {
       if (editing) {
-        const r = await api(`/api/tasks/${t.id}`, { method: 'PATCH', body: formData(e.target) });
-        toast(r.notified ? `Saved. Asked ${r.notified} helper${r.notified > 1 ? 's' : ''} to re-confirm.` : 'Saved');
+        const r = await api(`/api/events/${t.id}`, { method: 'PATCH', body: formData(e.target) });
+        toast(r.notified ? `Saved. Asked ${r.notified} attendee${r.notified > 1 ? 's' : ''} to re-confirm.` : 'Saved');
       } else {
-        await api('/api/tasks', { method: 'POST', body: formData(e.target) });
+        await api('/api/events', { method: 'POST', body: formData(e.target) });
         toast('Posted! Neighbors can now swipe on it.');
       }
       close();
@@ -814,17 +814,17 @@ function rotatePostIdeas(el) {
   el.querySelector('.idea-next').onclick = next;
   const timer = setInterval(() => {
     if (!document.body.contains(el)) return clearInterval(timer);
-    if (el.matches(':hover') || document.activeElement?.closest('#newTask') || document.querySelector('.sheet')) return;
+    if (el.matches(':hover') || document.activeElement?.closest('#newEvent') || document.querySelector('.sheet')) return;
     next();
   }, POST_IDEA_MS);
 }
 
 async function viewPost(v) {
-  const tasks = await api('/api/tasks');
+  const events = await api('/api/events');
   const statusPill = (t) => ({
     open: `<span class="pill">${t.pending ? `${t.pending} interested` : 'Looking'}</span>`,
     full: `<span class="pill go">It's on</span>`,
-    done: `<span class="pill">Done ✓</span>`,
+    past: `<span class="pill">Happened ✓</span>`,
   }[t.status]);
   v.innerHTML = `
     <div class="section-title">Post something</div>
@@ -834,37 +834,37 @@ async function viewPost(v) {
       </button>
       <button type="button" class="idea-next" aria-label="Next idea" title="Next idea">›</button>
     </div>
-    <form class="stack" id="newTask">
-      ${taskFormFields()}
+    <form class="stack" id="newEvent">
+      ${eventFormFields()}
       <button class="btn">Post it</button>
     </form>
     <div class="section-title">Your posts</div>
     <div class="list">
-      ${tasks.length ? tasks.map(t => `
+      ${events.length ? events.map(t => `
         <div class="row">
           <div class="dot ${tagLook(t.tags).cls}">${tagLook(t.tags).ico}</div>
           <div class="grow">
             <div class="title">${esc(t.title)}</div>
             ${t.tags.length ? `<div class="sub">${t.tags.map(x => '#' + esc(x)).join(' ')}</div>` : ''}
-            <div class="sub">${t.public_event ? `${t.matched} going · public event` : t.max_attendees == null ? `${t.matched} matched · no limit` : `${t.matched}/${t.max_attendees} matched`}${t.awaiting ? ` · ${t.awaiting} to re-confirm` : ''}${t.when_text ? ' · ' + esc(t.when_text) : ''}</div>
+            <div class="sub">${t.public_event ? `${t.matched} going · open to everyone` : t.max_attendees == null ? `${t.matched} matched · no limit` : `${t.matched}/${t.max_attendees} matched`}${t.awaiting ? ` · ${t.awaiting} to re-confirm` : ''}${t.when_text ? ' · ' + esc(t.when_text) : ''}</div>
           </div>
           ${statusPill(t)}
-          ${t.status !== 'done' ? `<button class="btn ghost small" data-edit="${t.id}" aria-label="Edit">✎</button>
+          ${t.status !== 'past' ? `<button class="btn ghost small" data-edit="${t.id}" aria-label="Edit">✎</button>
             <button class="btn danger small" data-del="${t.id}" aria-label="Remove">✕</button>` : ''}
-        </div>`).join('') : `<p style="color:var(--muted)">Nothing yet. What could you use a hand with?</p>`}
+        </div>`).join('') : `<p style="color:var(--muted)">Nothing yet. What would you like to host?</p>`}
     </div>`;
   rotatePostIdeas(v.querySelector('#postIdea'));
   v.querySelectorAll('.tag-editor').forEach(mountTagEditor);
-  mountPublicEventSwitch(v.querySelector('#newTask'));
-  v.querySelector('#newTask').onsubmit = async (e) => {
+  mountPublicEventSwitch(v.querySelector('#newEvent'));
+  v.querySelector('#newEvent').onsubmit = async (e) => {
     e.preventDefault();
-    try { await api('/api/tasks', { method: 'POST', body: formData(e.target) }); toast('Posted! Neighbors can now swipe on it.'); render(); }
+    try { await api('/api/events', { method: 'POST', body: formData(e.target) }); toast('Posted! Neighbors can now swipe on it.'); render(); }
     catch (err) { toast(err.message); }
   };
-  v.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openPostSheet(tasks.find(t => t.id === Number(b.dataset.edit))));
+  v.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openPostSheet(events.find(t => t.id === Number(b.dataset.edit))));
   v.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
     if (!confirm('Remove this post?')) return;
-    await api(`/api/tasks/${b.dataset.del}`, { method: 'DELETE' });
+    await api(`/api/events/${b.dataset.del}`, { method: 'DELETE' });
     render();
   });
 }
@@ -933,8 +933,8 @@ async function viewProfile(v) {
         <button type="button" class="link" id="editSelf">${vault.data.self.nickname ? 'Change' : 'Give yourself'} a nickname only you see ✎</button></div>
     </div>
     <div class="stats">
-      <div class="stat"><b>${me.helped}</b><span>people helped</span></div>
-      <div class="stat"><b>${me.received}</b><span>times helped</span></div>
+      <div class="stat"><b>${me.hosted}</b><span>events hosted</span></div>
+      <div class="stat"><b>${me.attended}</b><span>events attended</span></div>
     </div>
 
     <div class="section-title">Contacts</div>
@@ -946,7 +946,7 @@ async function viewProfile(v) {
       ${shown.length ? shown.map(c => `
         <button class="row" data-contact="${esc(c.guid)}">${avatar(c.guid)}
           <div class="grow"><div class="title">${esc(c.nickname || 'Unnamed contact')}</div>
-            <div class="sub">${(c.tags || []).map(t => '#' + esc(t)).join(' ')}${c.tags?.length ? ' · ' : ''}You helped ${c.i_helped || 0}× · they helped ${c.they_helped || 0}×</div></div>
+            <div class="sub">${(c.tags || []).map(t => '#' + esc(t)).join(' ')}${c.tags?.length ? ' · ' : ''}${c.together || 0} event${c.together === 1 ? '' : 's'} together</div></div>
           <span class="pill">✎</span></button>`).join('')
         : `<p style="color:var(--muted)">${contacts.length ? 'No contacts with those tags.' : "Once you match with someone, they'll show up here for you to name and tag."}</p>`}
     </div>

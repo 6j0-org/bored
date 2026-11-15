@@ -1,0 +1,9 @@
+.git
+.github
+.gitlab-ci.yml
+data.sqlite*
+node_modules
+*.md
+seed.js
+Dockerfile
+.dockerignore

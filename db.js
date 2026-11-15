@@ -37,34 +37,34 @@ CREATE TABLE IF NOT EXISTS sessions (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- status: open (looking for helpers) | full (enough helpers matched) | done | cancelled
-CREATE TABLE IF NOT EXISTS tasks (
+-- status: open (looking for attendees) | full (enough attendees matched) | past (full, and it happened) | cancelled
+CREATE TABLE IF NOT EXISTS events (
   id             INTEGER PRIMARY KEY,
-  creator_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  host_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   title          TEXT NOT NULL,
   details        TEXT NOT NULL DEFAULT '',
   location       TEXT NOT NULL DEFAULT '',
   when_text      TEXT NOT NULL DEFAULT '',
-  public_event   INTEGER NOT NULL DEFAULT 0,   -- 1 = a public event: open to all (or ticketed elsewhere), never capped
-  max_attendees  INTEGER,                      -- NULL = no limit; otherwise the post fills up at this many matches. Always NULL for public events
+  public_event   INTEGER NOT NULL DEFAULT 0,   -- 1 = open to everyone (public, or ticketed elsewhere), never capped
+  max_attendees  INTEGER,                      -- NULL = no limit; otherwise the post fills up at this many matches. Always NULL for open-to-everyone events
   cost           TEXT NOT NULL DEFAULT 'free', -- free | low ($) | medium ($$) | high ($$$)
   status         TEXT NOT NULL DEFAULT 'open',
   created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- One row per (task, would-be helper) swipe.
+-- One row per (event, would-be attendee) swipe.
 -- yes=0 means "pass" (never shown again).
--- status for yes-swipes: pending (waiting on creator) | accepted (it's a match!) | declined | done | withdrawn
+-- status for yes-swipes: pending (waiting on host) | accepted (it's a match!) | declined | attended (host marked it happened) | withdrawn
 CREATE TABLE IF NOT EXISTS swipes (
-  id         INTEGER PRIMARY KEY,
-  task_id    INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
-  helper_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  yes        INTEGER NOT NULL,
-  note       TEXT NOT NULL DEFAULT '',
-  status     TEXT NOT NULL DEFAULT 'pending',
-  reconfirm  INTEGER NOT NULL DEFAULT 0, -- 1 when the post was edited after this helper matched; they must re-confirm
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  UNIQUE (task_id, helper_id)
+  id          INTEGER PRIMARY KEY,
+  event_id    INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  attendee_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  yes         INTEGER NOT NULL,
+  note        TEXT NOT NULL DEFAULT '',
+  status      TEXT NOT NULL DEFAULT 'pending',
+  reconfirm   INTEGER NOT NULL DEFAULT 0, -- 1 when the post was edited after this attendee matched; they must re-confirm
+  created_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE (event_id, attendee_id)
 );
 
 CREATE TABLE IF NOT EXISTS messages (
@@ -76,17 +76,17 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Free-form tags on a task (up to 5). pos keeps the poster's order; the first known tag picks the card's icon/color.
-CREATE TABLE IF NOT EXISTS task_tags (
-  task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+-- Free-form tags on an event (up to 5). pos keeps the host's order; the first known tag picks the card's icon/color.
+CREATE TABLE IF NOT EXISTS event_tags (
+  event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
   tag     TEXT NOT NULL,
   pos     INTEGER NOT NULL DEFAULT 0,
-  PRIMARY KEY (task_id, tag)
+  PRIMARY KEY (event_id, tag)
 );
 
-CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
-CREATE INDEX IF NOT EXISTS idx_task_tags_tag ON task_tags(tag);
-CREATE INDEX IF NOT EXISTS idx_swipes_helper ON swipes(helper_id);
+CREATE INDEX IF NOT EXISTS idx_tasks_status ON events(status);
+CREATE INDEX IF NOT EXISTS idx_event_tags_tag ON event_tags(tag);
+CREATE INDEX IF NOT EXISTS idx_swipes_attendee ON swipes(attendee_id);
 CREATE INDEX IF NOT EXISTS idx_messages_swipe ON messages(swipe_id);
 `);
 
@@ -114,8 +114,8 @@ export function parseTags(input) {
   return [...new Set(list.map(normalizeTag).filter(Boolean))];
 }
 
-export function setTaskTags(taskId, tags) {
-  db.prepare('DELETE FROM task_tags WHERE task_id = ?').run(taskId);
-  const ins = db.prepare('INSERT INTO task_tags (task_id, tag, pos) VALUES (?, ?, ?)');
-  tags.forEach((tag, i) => ins.run(taskId, tag, i));
+export function setEventTags(eventId, tags) {
+  db.prepare('DELETE FROM event_tags WHERE event_id = ?').run(eventId);
+  const ins = db.prepare('INSERT INTO event_tags (event_id, tag, pos) VALUES (?, ?, ?)');
+  tags.forEach((tag, i) => ins.run(eventId, tag, i));
 }

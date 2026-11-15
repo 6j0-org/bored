@@ -1,11 +1,9 @@
 # Bored?
 
-Bored? Go help a neighbor.
-
-A public, social to-do list that works like a dating app.
-Post something you need a hand with. Neighbors swipe through posts in **Discover**, and **right = "I'll help"**.
-In **Confirm**, swipe through the people who are interested, and **right = "Let's do it"**. When both sides say yes, it's on: chat, get it done,
-then the person who got help marks it done.
+A local event board that works like a dating app.
+Host an event. Neighbors swipe through posts in **Discover**, and **right = "I'm in"**.
+In **Confirm**, the host swipes through the people who want to join, and **right = "Let's do it"**. When both sides say yes, it's on:
+it shows up in **Plans**, where you chat and sort out details. Afterwards the host marks it as happened.
 
 Accounts are anonymous: a random GUID and a passkey. No usernames, passwords or email. Anyone can browse **Discover** without an account.
 
@@ -32,13 +30,13 @@ This is a prototype, so there are no database migrations. After a schema change,
 
 | Step | Who | Where |
 |---|---|---|
-| Post something you'd like a hand with, or a public event (title, details, up to 5 tags, where/when, cost, max attendees or no limit) | Poster | **Post** |
-| Swipe right on posts you're in for (filter by tags and/or cost) | Helper | **Discover** |
-| Swipe right on people who are interested | Poster | **Confirm** |
-| Match → chat to sort out details | Both | **Matches** |
-| "Mark done" to close it out | Poster | Match chat |
+| Post an event (title, details, up to 5 tags, where/when, cost, max attendees or no limit, or open to everyone) | Host | **Post** |
+| Swipe right on events you're in for (filter by tags and/or cost) | Attendee | **Discover** |
+| Swipe right on people who want to join | Host | **Confirm** |
+| Match → chat to sort out details | Both | **Plans** |
+| "It happened" to close it out | Host | Plan chat |
 
-A post stays in the deck until it reaches its max attendees. Posts with no limit stay open until the poster removes them. **Public events** (open to all, or ticketed elsewhere) never have a cap.
+A post stays in the deck until it reaches its max attendees. Posts with no limit stay open until the host removes them. Events that are **open to everyone** (public, or ticketed elsewhere) never have a cap.
 
 ## Privacy model
 

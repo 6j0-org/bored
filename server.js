@@ -1,7 +1,8 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { newChallenge, verifyRegistration, verifyAssertion, WebAuthnError } from './webauthn.js';
+import { newChallenge, takeChallenge, verifyRegistration, verifyAssertion, WebAuthnError } from './webauthn.js';
+import { verifyIdToken, IdTokenError } from './idtoken.js';
 import { db, parseTags, setEventTags, MAX_TAGS, COSTS, COST_LABELS, MAX_ATTENDEES_LIMIT } from './db.js';
 
 const PORT = Number(process.env.PORT || 3000);
@@ -10,6 +11,21 @@ const PORT = Number(process.env.PORT || 3000);
 const originOf = (req) => process.env.ORIGIN || `${req.headers['x-forwarded-proto'] || 'http'}://${req.headers.host}`;
 const rpIdOf = (req) => process.env.RP_ID || new URL(originOf(req)).hostname;
 const MAX_SEALED = 200 * 1024; // max size of one encrypted blob (vault, key) in characters
+
+// Who signs people in:
+// - AUTH_MODE=local (default): Bored? runs its own passkeys (RP ID = RP_ID or the ORIGIN hostname). Standalone.
+// - AUTH_MODE=6j0: a 6j0.org identity server at ID_ORIGIN does. The browser comes back with a signed token and
+//   this app's key from that server; the local passkey routes are switched off. ID_APP is this app's name in the
+//   identity server's APPS list (default "bored"). ID_JWKS_URL overrides where its public keys are fetched from
+//   (default ID_ORIGIN + /.well-known/jwks.json), e.g. an in-cluster Service URL.
+// The two modes have separate accounts: switching a running instance from one to the other strands existing users.
+const AUTH_MODE = process.env.AUTH_MODE || 'local';
+if (!['local', '6j0'].includes(AUTH_MODE)) throw new Error(`AUTH_MODE must be "local" or "6j0", not "${AUTH_MODE}"`);
+const ID = AUTH_MODE === '6j0' ? (() => {
+  const origin = process.env.ID_ORIGIN;
+  if (!origin || new URL(origin).origin !== origin) throw new Error('AUTH_MODE=6j0 needs ID_ORIGIN, e.g. https://id.6j0.org');
+  return { origin, app: process.env.ID_APP || 'bored', jwksUrl: process.env.ID_JWKS_URL || `${origin}/.well-known/jwks.json` };
+})() : null;
 
 // ---------- helpers ----------
 
@@ -150,7 +166,9 @@ function tx(fn) {
 
 const routes = [];
 // auth: true (must be signed in) | false (no user) | 'optional' (user if signed in, else null)
-const route = (method, pattern, handler, { auth = true } = {}) => {
+// mode: only register the route in this AUTH_MODE ('local' | '6j0'); default: always.
+const route = (method, pattern, handler, { auth = true, mode } = {}) => {
+  if (mode && mode !== AUTH_MODE) return;
   const keys = [];
   const re = new RegExp('^' + pattern.replace(/:(\w+)/g, (_, k) => { keys.push(k); return '(\\d+)'; }) + '$');
   routes.push({ method, re, keys, handler, auth });
@@ -161,9 +179,9 @@ const route = (method, pattern, handler, { auth = true } = {}) => {
 // encrypts its chat private key and empty vault with it, and sends only ciphertext plus the passkey's public key.
 
 const webauthnCtx = (req, kind) => ({ origin: originOf(req), rpId: rpIdOf(req), kind });
-const keyBundle = (user, passkey) => ({
+const keyBundle = (user, wrappedKey) => ({
   user: publicUser(user),
-  wrappedKey: passkey.wrapped_key,
+  wrappedKey,
   chatPrivkey: user.chat_privkey,
   vault: { data: user.vault, version: user.vault_version },
 });
@@ -175,7 +193,7 @@ route('POST', '/api/passkey/register/options', async ({ req, res }) => {
     rp: { id: rpIdOf(req), name: 'Bored?' },
     user: { id: Buffer.from(guid).toString('base64url'), name: `Bored? ${guid.slice(0, 8)}`, displayName: 'Bored? account' },
   });
-}, { auth: false });
+}, { auth: false, mode: 'local' });
 
 route('POST', '/api/passkey/register/verify', async ({ req, body, res }) => {
   const reg = verifyRegistration(body, webauthnCtx(req, 'register'));
@@ -194,11 +212,11 @@ route('POST', '/api/passkey/register/verify', async ({ req, body, res }) => {
   });
   const user = q('SELECT * FROM users WHERE id = ?').get(userId);
   send(res, 200, { user: publicUser(user) }, newSession(res, userId));
-}, { auth: false });
+}, { auth: false, mode: 'local' });
 
 route('POST', '/api/passkey/login/options', async ({ req, res }) => {
   send(res, 200, { challenge: newChallenge('login'), rpId: rpIdOf(req) });
-}, { auth: false });
+}, { auth: false, mode: 'local' });
 
 route('POST', '/api/passkey/login/verify', async ({ req, body, res }) => {
   const pk = q('SELECT * FROM passkeys WHERE credential_id = ?').get(String(body.credentialId || ''));
@@ -207,8 +225,8 @@ route('POST', '/api/passkey/login/verify', async ({ req, body, res }) => {
   const user = q('SELECT * FROM users WHERE id = ?').get(pk.user_id);
   if (body.userHandle && Buffer.from(body.userHandle, 'base64url').toString() !== user.guid) throw new HttpError(401, 'Passkey user mismatch');
   q(`UPDATE passkeys SET sign_count = ?, last_used_at = datetime('now') WHERE id = ?`).run(signCount, pk.id);
-  send(res, 200, keyBundle(user, pk), newSession(res, user.id));
-}, { auth: false });
+  send(res, 200, keyBundle(user, pk.wrapped_key), newSession(res, user.id));
+}, { auth: false, mode: 'local' });
 
 // Add another passkey to my account (e.g. a phone, a security key, or a password manager like Bitwarden).
 // The browser unlocks the vault key with an existing passkey, then wraps it for the new one.
@@ -220,7 +238,7 @@ route('POST', '/api/passkey/add/options', async ({ req, user, res }) => {
     user: { id: Buffer.from(user.guid).toString('base64url'), name: `Bored? ${user.guid.slice(0, 8)}`, displayName: 'Bored? account' },
     existing: mine.map(p => ({ credentialId: p.credential_id, wrappedKey: p.wrapped_key })),
   });
-});
+}, { mode: 'local' });
 
 route('POST', '/api/passkey/add/verify', async ({ req, user, body, res }) => {
   const reg = verifyRegistration(body, webauthnCtx(req, 'add'));
@@ -228,11 +246,11 @@ route('POST', '/api/passkey/add/verify', async ({ req, user, body, res }) => {
   q(`INSERT INTO passkeys (user_id, credential_id, public_key, alg, sign_count, wrapped_key) VALUES (?, ?, ?, ?, ?, ?)`)
     .run(user.id, reg.credentialId, reg.publicKey, reg.alg, reg.signCount, sealed(body.wrappedKey, 'wrapped key'));
   send(res, 200, { ok: true });
-});
+}, { mode: 'local' });
 
 route('GET', '/api/passkeys', async ({ user, res }) => {
   send(res, 200, q('SELECT id, created_at, last_used_at FROM passkeys WHERE user_id = ? ORDER BY id').all(user.id));
-});
+}, { mode: 'local' });
 
 route('DELETE', '/api/passkeys/:id', async ({ user, params, res }) => {
   const n = q('SELECT COUNT(*) n FROM passkeys WHERE user_id = ?').get(user.id).n;
@@ -240,7 +258,52 @@ route('DELETE', '/api/passkeys/:id', async ({ user, params, res }) => {
   const r = q('DELETE FROM passkeys WHERE id = ? AND user_id = ?').run(params.id, user.id);
   if (!r.changes) throw new HttpError(404, 'Passkey not found');
   send(res, 200, { ok: true });
-});
+}, { mode: 'local' });
+
+// ---------- 6j0.org identity (AUTH_MODE=6j0) ----------
+// The browser went to ID_ORIGIN/authorize and came back with a signed token plus this app's key, which only the
+// page can decrypt. Known identity: return the key bundle and start a session. New identity: hand out a short-lived
+// setup ticket, and the browser creates the vault and chat keys (wrapped under the app key) and calls /api/id/register.
+
+route('GET', '/api/config', async ({ res }) => {
+  send(res, 200, ID ? { authMode: AUTH_MODE, idOrigin: ID.origin, idApp: ID.app } : { authMode: AUTH_MODE });
+}, { auth: false });
+
+route('POST', '/api/id/login', async ({ body, res }) => {
+  let claims;
+  try {
+    claims = await verifyIdToken(body.token, { issuer: ID.origin, audience: ID.app, nonce: body.nonce, jwksUrl: ID.jwksUrl });
+  } catch (e) {
+    if (e instanceof IdTokenError) throw new HttpError(401, e.message);
+    console.error(e);
+    throw new HttpError(502, "Couldn't reach the 6j0.org identity server. Please try again.");
+  }
+  const acct = q('SELECT * FROM id_accounts WHERE sub = ?').get(claims.sub);
+  if (!acct) return send(res, 200, { setup: newChallenge('id-setup', { sub: claims.sub }) });
+  const user = q('SELECT * FROM users WHERE id = ?').get(acct.user_id);
+  send(res, 200, keyBundle(user, acct.wrapped_key), newSession(res, user.id));
+}, { auth: false, mode: '6j0' });
+
+route('POST', '/api/id/register', async ({ body, res }) => {
+  let data;
+  try { data = takeChallenge(String(body.setup || ''), 'id-setup'); } catch (e) { throw new HttpError(400, e.message); }
+  const fields = {
+    wrapped: sealed(body.wrappedKey, 'wrapped key'),
+    pub: chatPubkey(body.chatPubkey),
+    priv: sealed(body.chatPrivkey, 'chat key'),
+    vault: sealed(body.vault, 'vault'),
+  };
+  const userId = tx(() => {
+    if (q('SELECT 1 FROM id_accounts WHERE sub = ?').get(data.sub)) throw new HttpError(409, 'This identity already has an account. Please sign in again.');
+    // A fresh public GUID, unrelated to the identity's sub, so other apps' users can't link accounts across apps.
+    const { lastInsertRowid } = q('INSERT INTO users (guid, chat_pubkey, chat_privkey, vault) VALUES (?, ?, ?, ?)')
+      .run(randomUUID(), fields.pub, fields.priv, fields.vault);
+    q('INSERT INTO id_accounts (user_id, sub, wrapped_key) VALUES (?, ?, ?)').run(lastInsertRowid, data.sub, fields.wrapped);
+    return lastInsertRowid;
+  });
+  const user = q('SELECT * FROM users WHERE id = ?').get(userId);
+  send(res, 200, { user: publicUser(user) }, newSession(res, userId));
+}, { auth: false, mode: '6j0' });
 
 // ---------- encrypted vault (contacts, nicknames) ----------
 route('GET', '/api/vault', async ({ user, res }) => {

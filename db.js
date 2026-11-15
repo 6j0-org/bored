@@ -31,6 +31,16 @@ CREATE TABLE IF NOT EXISTS passkeys (
   last_used_at  TEXT
 );
 
+-- AUTH_MODE=6j0 only: links an account to a 6j0.org identity instead of to local passkeys. sub is the identity's
+-- ID from the identity server; it stays on this server and is never shown to other users (they see users.guid).
+-- wrapped_key is the vault key encrypted with a key derived from the app key the identity server hands the browser.
+CREATE TABLE IF NOT EXISTS id_accounts (
+  user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  sub         TEXT NOT NULL UNIQUE,
+  wrapped_key TEXT NOT NULL,
+  created_at  TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS sessions (
   token      TEXT PRIMARY KEY,
   user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

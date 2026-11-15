@@ -104,6 +104,17 @@ about **connections and metadata**, and about the limits of doing end-to-end enc
 - [ ] **P2: PRF support varies** across browsers and passkey managers. Signup is blocked without it; keep the
   supported list in the UI current. If a passkey provider is compromised, so is that passkey's vault access.
 
+### With a 6j0.org identity (`AUTH_MODE=6j0`)
+
+- [ ] **P1: The identity server holds every app's keys.** It can't read Bored? data on its own (it never sees the root
+  secret), but a compromised id.6j0.org page could derive every app's key for whoever signs in there. Keep it small,
+  strictly CSP'd and separately deployed. See the id repo's TODO.
+- [ ] **P1: Signing out of Bored? doesn't sign out of id.6j0.org,** so "Continue" signs straight back in without a
+  passkey prompt while the identity session lasts. Say so in the UI, and consider a "sign out of all 6j0.org apps" link.
+- [ ] **P2: Setup tickets and seen-token IDs live in process memory** (like passkey challenges): a restart between the
+  redirect and account creation means signing in again.
+- [ ] **P2: No migration between modes.** A local-passkey account can't be linked to a 6j0.org identity (or back).
+
 ## 6. Abuse, rate limiting and safety
 
 - [ ] **P0: No rate limiting anywhere.** Account creation, sign-in, posting, swiping, messaging and the public Discover

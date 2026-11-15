@@ -24,6 +24,28 @@ Env vars: `PORT` (default 3000), `DB_PATH` (default `./data.sqlite`), `ORIGIN` (
 behind HTTPS/proxies, passkeys are bound to it; also turns on `Secure` cookies), `RP_ID` (passkey domain; defaults to
 the `ORIGIN` hostname).
 
+### Sign-in: standalone or with a 6j0.org identity
+
+`AUTH_MODE` picks who signs people in:
+
+- `local` (default): Bored? runs its own passkeys, as described below. Works on its own.
+- `6j0`: people sign in with an anonymous identity from a [6j0.org identity server](https://gitlab.com/6j0-org/id),
+  so one passkey covers every 6j0.org app. Set `ID_ORIGIN` (e.g. `https://id.6j0.org`). Optional: `ID_APP` (this
+  app's name in the identity server's `APPS`; default `bored`) and `ID_JWKS_URL` (where to fetch its public keys;
+  default `ID_ORIGIN/.well-known/jwks.json`). The local passkey endpoints are switched off.
+
+The two modes keep separate accounts, so pick one before people sign up. Switching later strands existing users.
+
+To try `6j0` mode locally, run the identity server on `localhost` and Bored? on `127.0.0.1` (cookies ignore the
+port, so two apps on one hostname would overwrite each other's session cookie):
+
+```sh
+# in the id repo
+APPS=bored=http://127.0.0.1:3000 ORIGIN=http://localhost:4000 npm start
+# here
+AUTH_MODE=6j0 ID_ORIGIN=http://localhost:4000 ORIGIN=http://127.0.0.1:3000 npm start   # open http://127.0.0.1:3000
+```
+
 This is a prototype, so there are no database migrations. After a schema change, stop the server, delete `data.sqlite*`, and run `npm run seed` again.
 
 ## How it works
@@ -47,6 +69,11 @@ A post stays in the deck until it reaches its max attendees. Posts with no limit
   everyone else is "A neighbor". Your nickname for yourself is also visible only to you.
 - **The vault** (your nickname, plus nickname + tags for each contact) is encrypted in the browser with a random
   vault key. That key is wrapped by a key derived from each passkey's PRF output, so the server only stores ciphertext.
+- **With a 6j0.org identity** (`AUTH_MODE=6j0`) the passkeys live on the identity server instead. After sign-in it
+  sends the browser back with a signed token and Bored?'s own *app key*, encrypted to a one-time key the page made
+  and carried in the URL fragment (which never reaches a server). The vault key is wrapped by a key derived from the
+  app key. Other 6j0.org apps get different app keys, so they can't read Bored? data, and Bored? gives the account
+  its own public GUID, so people can't link your Bored? account to your accounts in other apps.
 - **Chat is end-to-end encrypted** (ECDH P-256 → HKDF per match → AES-GCM). Your chat private key is stored
   encrypted under the vault key, so any of your passkeys can read your chats on a new device. Prototype caveat:
   static keys, so no forward secrecy.
@@ -59,9 +86,10 @@ A post stays in the deck until it reaches its max attendees. Posts with no limit
 
 - `server.js`: HTTP server + JSON API (routing, passkey auth, matching logic)
 - `webauthn.js`: passkey registration/sign-in verification (no dependencies)
+- `idtoken.js`: verifies sign-in tokens from a 6j0.org identity server (`AUTH_MODE=6j0`)
 - `db.js`: SQLite schema, tag helpers
 - `public/app.js`: single-page front-end (vanilla JS, swipe deck with pointer/touch/keyboard)
-- `public/secure.js`: passkeys + PRF, encrypted vault, key storage, E2E chat crypto
+- `public/secure.js`: passkeys + PRF, 6j0.org identity handoff, encrypted vault, key storage, E2E chat crypto
 - `public/fonts/`: bundled Bungee title font (SIL OFL 1.1, license alongside). The app loads nothing from outside its own server.
 - `seed.js`: demo data
 - `TODO.md`: open security and privacy issues, by priority

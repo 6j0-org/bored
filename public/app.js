@@ -1,7 +1,7 @@
 // Bored? — vanilla JS front-end.
 import {
   prfSupport, createAccount, signIn, addPasskey, loadKeys, clearKeys, hasKeys, vault,
-  encryptMessage, decryptMessage, PrfUnsupportedError,
+  encryptMessage, decryptMessage, PrfUnsupportedError, startIdSignIn, finishIdSignIn, hasIdCallback,
 } from './secure.js';
 
 // Well-known tags: offered as one-tap suggestions, and the first one on a post picks its icon and color (.tag-<name>).
@@ -101,7 +101,8 @@ const POST_IDEAS = [
 ];
 const POST_IDEA_MS = 5000;
 
-const state = { me: null, tab: 'discover', chat: null, discoverTags: loadSet('discoverTags'), discoverCosts: loadSet('discoverCosts') };
+// config.authMode: 'local' (Bored? passkeys) | '6j0' (sign in with a 6j0.org identity at config.idOrigin).
+const state = { config: { authMode: 'local' }, me: null, tab: 'discover', chat: null, discoverTags: loadSet('discoverTags'), discoverCosts: loadSet('discoverCosts') };
 const app = document.getElementById('app');
 
 // ---------- utils ----------
@@ -126,7 +127,7 @@ async function api(path, { method = 'GET', body } = {}) {
     body: body !== undefined ? JSON.stringify(body) : method !== 'GET' ? '{}' : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && state.me && !path.startsWith('/api/passkey/')) { state.me = null; await clearKeys(); render(); }
+  if (res.status === 401 && state.me && !path.startsWith('/api/passkey/') && !path.startsWith('/api/id/')) { state.me = null; await clearKeys(); render(); }
   if (!res.ok) throw new Error(data.error || 'Request failed');
   return data;
 }
@@ -338,8 +339,33 @@ const UPGRADE_ADVICE = `Bored? encrypts your contacts and chats with a key that 
   browser or passkey manager can't do that yet. Please update to the latest <b>Chrome</b>, <b>Edge</b>, <b>Safari</b>
   (macOS/iOS 18 or newer) or <b>Firefox</b>, or store your passkey in <b>Bitwarden</b>, then try again.`;
 
+const idHost = () => new URL(state.config.idOrigin).host;
+
+// AUTH_MODE=6j0: one button for sign-in, sign-up and unlock; the identity server handles the passkey.
+function viewAccountId(v) {
+  const unlocking = Boolean(state.me);
+  v.innerHTML = `
+    <div class="account stack">
+      <p class="lead">${unlocking ? 'Unlock your account with your 6j0.org identity to see your contacts and chats.'
+        : `Swipe through what's happening nearby, and when you and the host both say yes, it's on.
+           Join something fun, or host your own.`}</p>
+      <button class="btn" id="idSignIn">🔑 ${unlocking ? 'Unlock' : 'Continue'} with ${esc(idHost())}</button>
+      <div class="error" id="authErr"></div>
+      <div class="notice"><b>No usernames, passwords or email.</b> Bored? uses your anonymous 6j0.org identity: one
+        passkey for every 6j0.org app. New here? You can create one on the next screen.
+        Nobody sees a name for you unless they've connected with you, and then only the nickname <em>they</em> chose.
+        Your contacts and chats are encrypted with a key only your passkey can unlock.</div>
+      ${unlocking ? `<button class="btn danger" id="logout">Sign out</button>` : ''}
+    </div>`;
+  v.querySelector('#idSignIn').onclick = async () => {
+    try { await startIdSignIn(state.config); } catch (e) { v.querySelector('#authErr').textContent = e.message; }
+  };
+  v.querySelector('#logout')?.addEventListener('click', signOut);
+}
+
 // Sign up, sign in, or unlock (signed in but keys missing in this browser). Shown as a tab for guests.
 async function viewAccount(v) {
+  if (state.config.authMode === '6j0') return viewAccountId(v);
   const unlocking = Boolean(state.me);
   const support = await prfSupport();
   v.innerHTML = `
@@ -915,7 +941,8 @@ function openContactSheet(guid, onSaved) {
 }
 
 async function viewProfile(v) {
-  const [ledger, passkeys] = await Promise.all([api('/api/ledger'), api('/api/passkeys')]);
+  const idMode = state.config.authMode === '6j0';
+  const [ledger, passkeys] = await Promise.all([api('/api/ledger'), idMode ? [] : api('/api/passkeys')]);
   const me = state.me;
   const history = Object.fromEntries(ledger.map(l => [l.guid, l]));
   const contacts = Object.entries(vault.data.contacts).map(([guid, c]) => ({ guid, ...c, ...(history[guid] || {}) }))
@@ -951,6 +978,9 @@ async function viewProfile(v) {
         : `<p style="color:var(--muted)">${contacts.length ? 'No contacts with those tags.' : "Once you match with someone, they'll show up here for you to name and tag."}</p>`}
     </div>
 
+    ${idMode ? `<div class="section-title">Sign-in</div>
+    <div class="notice">You sign in with your 6j0.org identity. Add or remove passkeys at
+      <a href="${esc(state.config.idOrigin)}/">${esc(idHost())}</a>. Keep at least two, so losing one device doesn't lose your account.</div>` : `
     <div class="section-title">Passkeys</div>
     <div class="notice ${passkeys.length < 2 ? 'warn' : ''}">${passkeys.length < 2
       ? `<b>You only have one passkey.</b> If you lose it, your account is gone for good. Add another one: on your phone (scan the QR code your browser offers), on a security key, or in a password manager like <b>Bitwarden</b>.`
@@ -960,7 +990,7 @@ async function viewProfile(v) {
         <div class="grow"><div class="title">Passkey ${i + 1}</div><div class="sub">Added ${fmt(p.created_at)} · last used ${fmt(p.last_used_at)}</div></div>
         ${passkeys.length > 1 ? `<button class="btn danger small" data-rmkey="${p.id}" aria-label="Remove passkey">✕</button>` : ''}</div>`).join('')}
     </div>
-    <button class="btn ghost" id="addKey">➕ Add another passkey</button>
+    <button class="btn ghost" id="addKey">➕ Add another passkey</button>`}
 
     <button class="btn danger" id="logout" style="margin-top:24px">Sign out</button>`;
 
@@ -970,7 +1000,7 @@ async function viewProfile(v) {
     sel.has(b.dataset.ctag) ? sel.delete(b.dataset.ctag) : sel.add(b.dataset.ctag); render();
   });
   v.querySelector('[data-cclear]')?.addEventListener('click', () => { sel.clear(); render(); });
-  v.querySelector('#addKey').onclick = async () => {
+  v.querySelector('#addKey')?.addEventListener('click', async () => {
     try {
       toast('First confirm with a passkey you already have, then create the new one.');
       await addPasskey(api, nextStep);
@@ -979,7 +1009,7 @@ async function viewProfile(v) {
       toast(e instanceof PrfUnsupportedError ? "That passkey manager can't create the encryption key. Try Bitwarden, your phone, or an updated browser."
         : e?.name === 'NotAllowedError' ? 'Passkey request was cancelled.' : e?.name === 'InvalidStateError' ? 'That device already has a passkey for this account.' : e.message);
     }
-  };
+  });
   v.querySelectorAll('[data-rmkey]').forEach(b => b.onclick = async () => {
     if (!confirm("Remove this passkey? You won't be able to sign in with it anymore.")) return;
     try { await api(`/api/passkeys/${b.dataset.rmkey}`, { method: 'DELETE' }); render(); } catch (e) { toast(e.message); }
@@ -991,8 +1021,22 @@ async function viewProfile(v) {
 setInterval(async () => { if (state.me && hasKeys()) { await refreshMe(); if (state.me) shellRefreshBadges(); } }, 20000);
 
 // Boot: restore the session and, if this browser still holds the keys, the vault.
-await refreshMe();
-if (state.me && await loadKeys(state.me.guid)) {
-  try { await vault.load(api); } catch { await clearKeys(); }
+try { state.config = await api('/api/config'); } catch {}
+if (state.config.authMode === '6j0' && hasIdCallback()) {
+  // Back from the 6j0.org identity server with a token and this app's key.
+  try {
+    const res = await finishIdSignIn(api);
+    await enterApp(res.created ? 'profile' : 'discover');
+    toast(res.created ? 'Account created! Give yourself a nickname only you can see.' : 'Welcome back!');
+  } catch (e) {
+    await refreshMe();
+    if (state.me && !hasKeys()) state.tab = 'account';
+    render(); toast(e.message);
+  }
+} else {
+  await refreshMe();
+  if (state.me && await loadKeys(state.me.guid)) {
+    try { await vault.load(api); } catch { await clearKeys(); }
+  }
+  render();
 }
-render();

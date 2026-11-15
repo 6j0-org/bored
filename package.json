@@ -1,0 +1,13 @@
+{
+  "name": "bored",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Bored? Go help a neighbor. Swipe on your neighbors' to-do lists. When you both say yes, it's on.",
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "seed": "node seed.js"
+  }
+}

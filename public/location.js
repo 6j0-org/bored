@@ -38,15 +38,14 @@ export function mapLink(lat, lon) {
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // HTML for a location: its name (or, without one, the coordinates), linked to the map when there are coordinates.
-// cls is the link/span's class. icon: false leaves out the pin, e.g. where a "Where" label already says what it is.
-export function locationHtml(loc, cls = '', { icon = true, name = '' } = {}) {
+// cls is the link/span's class.
+export function locationHtml(loc, cls = '', { name = '' } = {}) {
   if (!loc && !name) return '';
-  const pin = icon ? '📍 ' : '';
   const ll = parseLatLon(loc);
-  if (!ll) return `<span class="${cls}">${pin}${esc(name || loc)}</span>`;
+  if (!ll) return `<span class="${cls}">${esc(name || loc)}</span>`;
   const { href, external } = mapLink(...ll);
   return `<a class="${cls} map-link" href="${esc(href)}" ${external ? 'target="_blank" rel="noopener noreferrer"' : ''}
-    title="Open in your maps app">${pin}${esc(name || fmt(...ll))}</a>`;
+    title="Open in your maps app">${esc(name || fmt(...ll))}</a>`;
 }
 
 // A suggested name for a spot, or '' if none could be found.

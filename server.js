@@ -231,7 +231,7 @@ function syncEventStatus(eventId) {
   if (room !== 0) {
     for (const { id, attendee_id } of q(`SELECT id, attendee_id FROM swipes WHERE event_id = ? AND status = 'waitlisted' ORDER BY id LIMIT ?`).all(eventId, room)) {
       q(`UPDATE swipes SET status = 'accepted', reconfirm = 0 WHERE id = ?`).run(id);
-      systemMessage(id, t.host_id, "🎉 A spot opened up, so you're off the waitlist and in!");
+      systemMessage(id, t.host_id, "A spot opened up, so you're off the waitlist and in!");
       notify(attendee_id, { body: `A spot opened up for ${quoted(t.title)}. You're in!`, tag: `chat-${id}`, open: `chat:${id}` });
     }
   }
@@ -722,10 +722,10 @@ route('POST', '/api/matches/:id/reconfirm', async ({ user, params, body, res }) 
   tx(() => {
     if (body.yes) {
       q('UPDATE swipes SET reconfirm = 0 WHERE id = ?').run(m.id);
-      systemMessage(m.id, user.id, '✅ Re-confirmed: still in!');
+      systemMessage(m.id, user.id, 'Re-confirmed: still in!');
     } else {
       q(`UPDATE swipes SET status = 'withdrawn', reconfirm = 0 WHERE id = ?`).run(m.id);
-      systemMessage(m.id, user.id, "🚪 Can't make it after the change, so dropped out.");
+      systemMessage(m.id, user.id, "Can't make it after the change, so dropped out.");
       notify(m.host_id, { body: `Someone can't make ${quoted(m.title)} after your change`, tag: `chat-${m.id}`, open: `chat:${m.id}` });
       syncEventStatus(m.event_id);
     }
@@ -740,7 +740,7 @@ route('POST', '/api/matches/:id/leave', async ({ user, params, res }) => {
   if (m.status !== 'accepted') throw new HttpError(409, 'This match has ended');
   tx(() => {
     q(`UPDATE swipes SET status = 'withdrawn', reconfirm = 0 WHERE id = ?`).run(m.id);
-    systemMessage(m.id, user.id, "🚪 Can't make it anymore, so dropped out.");
+    systemMessage(m.id, user.id, "Can't make it anymore, so dropped out.");
     notify(m.host_id, { body: `Someone dropped out of ${quoted(m.title)}`, tag: `chat-${m.id}`, open: `chat:${m.id}` });
     syncEventStatus(m.event_id);
   });
@@ -791,7 +791,7 @@ route('PATCH', '/api/events/:id', async ({ user, params, body, res }) => {
   const viewers = viewerIds(body.viewers, user.id);
   if (!changed.length) { tx(() => setViewers(event.id, viewers)); return send(res, 200, { event, notified: 0 }); }
   const show = (v) => (Array.isArray(v) ? (v.length ? v.join(', ') : '(none)') : v === null ? 'No limit' : v === '' ? '(none)' : String(v));
-  const notice = '✏️ The post was updated:\n' +
+  const notice = 'The post was updated:\n' +
     changed.map(k => k === 'details' ? '• Details were changed'
       : k === 'cost' ? `• Cost: ${cost(event)} → ${cost(f)}`
       : k === 'visibility' ? (f.visibility === 'public' ? '• Now public' : '• Now private')

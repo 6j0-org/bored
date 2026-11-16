@@ -88,7 +88,7 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
--- Free-form tags on an event (up to 5). pos keeps the host's order; the first known tag picks the card's icon/color.
+-- Free-form tags on an event (up to 5). pos keeps the host's order.
 CREATE TABLE IF NOT EXISTS event_tags (
   event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
   tag     TEXT NOT NULL,

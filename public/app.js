@@ -10,19 +10,12 @@ import { CURRENCIES, DEFAULT_CURRENCY, costLabel } from './cost.js';
 import { toSvg as identicon } from './vendor/jdenticon.js';
 import { addToCalendar } from './ics.js';
 
-// Well-known tags: offered as one-tap suggestions, and the first one on a post picks its icon and color (.tag-<name>).
-// Posts can also use any other tag; those show with no icon.
-const TAG_ICONS = {
-  outdoors: '🥾', events: '🎟️', food: '🍽️', garden: '🌱', hauling: '🚚', moving: '📦',
-  repair: '🔧', pets: '🐕', tech: '💻', cooking: '🍲', errands: '🛒', fitness: '🏋️', games: '🎮', movies: '🎬',
-};
+// Well-known tags, offered as one-tap suggestions. Posts can also use any other tag.
+const TAGS = ['outdoors', 'events', 'food', 'garden', 'hauling', 'moving',
+  'repair', 'pets', 'tech', 'cooking', 'errands', 'fitness', 'games', 'movies'];
 const MAX_TAGS = 5;
 const MAX_ATTENDEES_LIMIT = 500; // must match db.js
 const attendeesLabel = (max) => (max == null ? 'No limit' : max === 1 ? '1 person' : `Up to ${max} people`);
-const tagLook = (tags = []) => {
-  const known = tags.find(t => TAG_ICONS[t]);
-  return known ? { ico: TAG_ICONS[known], cls: `tag-${known}` } : { ico: '', cls: 'tag-none' };
-};
 const whenLabel = (s) => fmtWhen(s, { today: localToday() });
 // Discover's cost filter: prices in different currencies can't be compared, so it's just free vs. paid.
 const COST_FILTERS = { free: 'Free', paid: 'Paid' };
@@ -66,7 +59,7 @@ function nextAt(hour, dow) {
 const normalizeTag = (raw) => String(raw ?? '').toLowerCase().trim().replace(/^#+/, '')
   .replace(/[\s_]+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 24);
 // Suggested tags for organizing your contacts (private, stored only in your encrypted vault).
-const CONTACT_TAGS = { family: '👪', friends: '🫶', neighbors: '🏡', work: '💼' };
+const CONTACT_TAGS = ['family', 'friends', 'neighbors', 'work'];
 
 // Signed-out guests can browse Discover; everything else needs an account.
 // AGPL-3.0 section 13: people using the app over the network must be offered its source.
@@ -75,15 +68,15 @@ const ABOUT_LINKS = `<p class="note" style="margin-top:20px;text-align:center"><
   <a href="${SOURCE_URL}">Source code</a> (free software, AGPL-3.0)</p>`;
 
 const GUEST_TABS = [
-  { id: 'discover', ico: '🤝', label: 'Discover' },
-  { id: 'account', ico: '🔑', label: 'Sign in' },
+  { id: 'discover', label: 'Discover' },
+  { id: 'account', label: 'Sign in' },
 ];
 const TABS = [
-  { id: 'discover', ico: '🤝', label: 'Discover' },
-  { id: 'confirm', ico: '🙋', label: 'Confirm' },
-  { id: 'plans', ico: '💬', label: 'Plans' },
-  { id: 'post', ico: '📝', label: 'Post' },
-  { id: 'profile', ico: '⭐', label: 'Profile' },
+  { id: 'discover', label: 'Discover' },
+  { id: 'confirm', label: 'Confirm' },
+  { id: 'plans', label: 'Plans' },
+  { id: 'post', label: 'Post' },
+  { id: 'profile', label: 'Profile' },
 ];
 
 // Rotating ideas shown above the form in the Post tab. Tapping one opens a new post pre-filled with its template.
@@ -510,7 +503,7 @@ function shell(content) {
       ${tabs.map(t => {
         const n = t.id === 'confirm' ? c.confirm : t.id === 'plans' ? c.plans : 0;
         return `<button data-tab="${t.id}" class="${state.tab === t.id ? 'active' : ''}">
-          <span class="ico">${t.ico}</span>${t.label}${n ? `<span class="badge">${n}</span>` : ''}</button>`;
+          ${t.label}${n ? `<span class="badge">${n}</span>` : ''}</button>`;
       }).join('')}
     </nav>`;
   app.querySelectorAll('nav.tabs button').forEach(b => b.onclick = () => go(b.dataset.tab));
@@ -634,7 +627,7 @@ function viewAccountId(v) {
       <p class="lead">${unlocking ? 'Unlock your account with your 6j0.org identity to see your contacts and chats.'
         : `Swipe through what's happening nearby, and when you and the host both say yes, it's on.
            Join something fun, or host your own.`}</p>
-      <button class="btn" id="idSignIn">🔑 ${unlocking ? 'Unlock' : 'Continue'} with ${esc(idHost())}</button>
+      <button class="btn" id="idSignIn">${unlocking ? 'Unlock' : 'Continue'} with ${esc(idHost())}</button>
       <div class="error" id="authErr"></div>
       <div class="notice"><b>No names or email.</b> Bored? uses your anonymous 6j0.org identity: one sign-in, with a
         passkey or a username and password, for every 6j0.org app. New here? You can create one on the next screen.
@@ -659,9 +652,9 @@ async function viewAccount(v) {
       <p class="lead">${unlocking ? 'Unlock your account with your passkey to see your contacts and chats.'
         : `Swipe through what's happening nearby, and when you and the host both say yes, it's on.
            Join something fun, or host your own.`}</p>
-      ${unlocking ? `<button class="btn" id="signIn">🔓 Unlock with passkey</button>` : `
-        <button class="btn" id="signIn">🔑 Sign in with passkey</button>
-        <button class="btn ghost" id="create" ${support === false ? 'disabled' : ''}>✨ Create an account</button>`}
+      ${unlocking ? `<button class="btn" id="signIn">Unlock with passkey</button>` : `
+        <button class="btn" id="signIn">Sign in with passkey</button>
+        <button class="btn ghost" id="create" ${support === false ? 'disabled' : ''}>Create an account</button>`}
       <div class="error" id="authErr"></div>
       <div class="notice ${support === false ? 'warn' : ''}" id="authNote">${support === false ? UPGRADE_ADVICE : `
         <b>No usernames, passwords, or email.</b> You get an anonymous account protected by a passkey.
@@ -700,7 +693,7 @@ function nextStep(message, button = 'Continue') {
     const sheet = document.createElement('div');
     sheet.className = 'sheet';
     sheet.innerHTML = `<div class="stack panel" role="dialog" aria-live="polite">
-      <h2>🔑 One more step</h2><p class="note">${esc(message)}</p>
+      <h2>One more step</h2><p class="note">${esc(message)}</p>
       <div class="two"><button type="button" class="btn ghost" id="stepCancel">Cancel</button>
         <button type="button" class="btn" id="stepGo">${esc(button)}</button></div></div>`;
     document.body.appendChild(sheet);
@@ -720,8 +713,8 @@ async function signOut() {
 
 // Where a post happens, as HTML: its place (linked to the map), "Online", or both ("City Hall and online").
 // e.online: 0 in person, 1 online only, 2 both. '' when nothing is known.
-function whereHtml(e, { icon = true } = {}) {
-  const place = e.online !== 1 && (e.location || e.location_name) ? locationHtml(e.location, '', { icon, name: e.location_name }) : '';
+function whereHtml(e) {
+  const place = e.online !== 1 && (e.location || e.location_name) ? locationHtml(e.location, '', { name: e.location_name }) : '';
   return e.online === 1 ? 'Online' : e.online === 2 ? `${place || 'In person'} and online` : place;
 }
 
@@ -734,7 +727,7 @@ function eventCard(t) {
       ${t.status === 'full' ? `<div class="meta"><span class="chip warn" title="Say yes to join the waitlist">Full: join the waitlist</span></div>` : ''}
       <dl class="facts">
         ${t.when_text ? fact('When', `<button type="button" class="link" data-ics="${t.id}" title="Add to your calendar">${esc(whenLabel(t.when_text))}</button>`) : ''}
-        ${whereHtml(t) ? fact('Where', whereHtml(t, { icon: false })) : ''}
+        ${whereHtml(t) ? fact('Where', whereHtml(t)) : ''}
         ${fact('Cost', esc(costLabel(t.cost_amount, t.cost_currency)))}
         ${fact('Max attendees', attendeesLabel(t.max_attendees))}
         ${fact('Who can see it', t.visibility === 'private' ? 'Private: the host shared it with you' : 'Public')}
@@ -779,7 +772,7 @@ async function viewDiscover(v) {
             ${chip('online', '1', radius ? 'Or online' : 'Online', options.online ?? 0, online,
               radius ? 'Also show online posts' : 'Only show online posts')}</div>
           ${tags.length ? `<div class="filter-row" role="group" aria-label="Filter by tag"><span class="label">Tags</span>
-            ${tags.map(({ tag, count }) => chip('tag', tag, `${TAG_ICONS[tag] || '#'} ${esc(tag)}`, count, selTags.has(tag))).join('')}</div>` : ''}
+            ${tags.map(({ tag, count }) => chip('tag', tag, `#${esc(tag)}`, count, selTags.has(tag))).join('')}</div>` : ''}
           <div class="filter-row" role="group" aria-label="Filter by cost"><span class="label">Cost</span>
             ${options.costs.map(({ cost, count }) => chip('cost', cost, esc(COST_FILTERS[cost]), count, selCosts.has(cost))).join('')}
             ${on ? `<button type="button" class="chip filter clear" data-clear>Clear all</button>` : ''}
@@ -877,11 +870,11 @@ function deckOptions(events, filters) {
       toast(yes ? `Took back your request to join “${t.title}”` : 'Undone');
     },
     empty: filters.tags.length || filters.costs.length || filters.date || filters.near
-      ? `<div class="empty"><div class="big">🔎</div><h3>No matches for these filters</h3>
+      ? `<div class="empty"><h3>No matches for these filters</h3>
           <p>${[filters.near && esc(filters.near), filters.date && esc(DATE_FILTERS[filters.date]), filters.tags.length && filters.tags.map(t => '#' + esc(t)).join(' or '), filters.costs.length && filters.costs.map(c => esc(COST_FILTERS[c])).join(' or ')].filter(Boolean).join(' · ')}</p>
           <p>Nothing open matches right now. Try other filters, or see everything.</p>
           <button class="btn" id="clearFilters">Show all posts</button></div>`
-      : `<div class="empty"><div class="big">🌤</div><h3>Still bored?</h3>
+      : `<div class="empty"><h3>Still bored?</h3>
           ${state.me
             ? `<p>Nothing new right now. Check back later, or post something you think people would enjoy.</p>
           <button class="btn" id="goPost">Post something</button>`
@@ -892,7 +885,7 @@ function deckOptions(events, filters) {
 // Confirm: people asking to join my posts, and people asking to connect through my invitation links.
 function connectCard(c) {
   return `
-      <div class="hero tag-none">${avatar(c.requester.icon, 'big')}</div>
+      <div class="hero">${avatar(c.requester.icon, 'big')}</div>
       <div class="body">
         <div class="meta"><span class="chip">Wants to connect${c.via ? ` through your invitation as “${esc(c.via)}”` : ''}</span></div>
         <h2>${c.suggested ? esc(c.suggested) : 'Someone'}</h2>
@@ -917,11 +910,11 @@ async function viewConfirm(v) {
   mountDeck(v, {
     items: [...requests.map(c => ({ ...c, kind: 'connect' })), ...interested],
     renderCard: (o) => o.kind === 'connect' ? connectCard(o) : `
-      <div class="hero ${tagLook(o.tags).cls}">
+      <div class="hero">
         ${avatar(o.attendee.guid || o.attendee.icon, 'big')}
       </div>
       <div class="body">
-        <div class="meta"><span class="chip">${tagLook(o.tags).ico ? tagLook(o.tags).ico + ' ' : ''}${contactName(o.attendee.guid) ? 'wants' : 'Wants'} to join: <b>${esc(o.title)}</b></span></div>
+        <div class="meta"><span class="chip">${contactName(o.attendee.guid) ? 'wants' : 'Wants'} to join: <b>${esc(o.title)}</b></span></div>
         ${contactName(o.attendee.guid) ? `<h2>${esc(contactName(o.attendee.guid))}</h2>` : ''}
         ${o.note ? `<div class="details">“${esc(o.note)}”</div>` : ''}
         ${o.full ? `<p class="note">This post is full, so saying yes puts them on the waitlist. They'll be matched automatically when a spot opens.</p>` : ''}
@@ -963,7 +956,7 @@ async function viewConfirm(v) {
       shellRefreshBadges();
       toast(yes ? (contactName(o.attendee.guid) ? `Unmatched with ${contactName(o.attendee.guid)}` : 'Unmatched') : 'Undone');
     },
-    empty: `<div class="empty"><div class="big">🙋</div><h3>Nobody to confirm</h3>
+    empty: `<div class="empty"><h3>Nobody to confirm</h3>
       <p>When someone swipes yes on one of your posts, or asks to connect through one of your invitation links,
         they'll show up here for you to answer.</p></div>`,
   });
@@ -1001,10 +994,10 @@ async function viewPlans(v) {
   await ensureContacts(matches);
   // Decrypt the last-message previews (only you and the other person can read them).
   await Promise.all(matches.map(async m => {
-    if (m.last_message && m.last_kind === 'user') m.last_message = await decryptMessage(m.id, m.other_pubkey, m.last_message) ?? '🔒';
+    if (m.last_message && m.last_kind === 'user') m.last_message = await decryptMessage(m.id, m.other_pubkey, m.last_message) ?? 'Encrypted message';
   }));
   if (!matches.length) {
-    v.innerHTML = `<div class="empty"><div class="big">💬</div><h3>No plans yet</h3>
+    v.innerHTML = `<div class="empty"><h3>No plans yet</h3>
       <p>Swipe right on something you'd like to join. When the host swipes yes on you, you'll match.</p>
       <button class="btn" id="goD">Find something to do</button></div>`;
     v.querySelector('#goD').onclick = () => go('discover');
@@ -1019,7 +1012,6 @@ async function viewPlans(v) {
     : `<span class="pill go">It's on</span>`;
   const row = (m) => `
     <button class="row" data-id="${m.id}">
-      ${tagLook(m.tags).ico ? `<div class="dot ${tagLook(m.tags).cls}">${tagLook(m.tags).ico}</div>` : ''}
       <div class="grow">
         <div class="title">${esc(m.title)}</div>
         <div class="sub">${m.role === 'attendee' ? `Hosted by ${esc(displayName(m.other))}` : `${esc(displayName(m.other))} is going`}${m.last_message ? ' · ' + esc(m.last_message) : ''}</div>
@@ -1029,7 +1021,6 @@ async function viewPlans(v) {
   // Waitlist rows have no chat yet: that opens when a spot does and they're matched.
   const waitRow = (m) => `
     <div class="row">
-      ${tagLook(m.tags).ico ? `<div class="dot ${tagLook(m.tags).cls}">${tagLook(m.tags).ico}</div>` : ''}
       <div class="grow">
         <div class="title">${esc(m.title)}</div>
         <div class="sub">${contactName(m.other) ? `Hosted by ${esc(contactName(m.other))} · ` : ''}#${m.waitlist_pos} on the waitlist</div>
@@ -1063,7 +1054,7 @@ async function viewChat(v, id) {
         ${avatar(m.other)}
         <div class="grow" style="flex:1;min-width:0">
           <button type="button" class="link" id="rename" title="Change the nickname only you see">${esc(name)} ✎</button>
-          <div class="sub" style="color:var(--muted);font-size:.85rem">${tagLook(m.tags).ico ? tagLook(m.tags).ico + ' ' : ''}${esc(m.title)}${m.when_text ? ` · <button type="button" class="link cal-link" id="addCal" title="Add to your calendar">${esc(whenLabel(m.when_text))}</button>` : ''}${whereHtml(m) ? ' · ' + whereHtml(m) : ''}</div>
+          <div class="sub" style="color:var(--muted);font-size:.85rem">${esc(m.title)}${m.when_text ? ` · <button type="button" class="link cal-link" id="addCal" title="Add to your calendar">${esc(whenLabel(m.when_text))}</button>` : ''}${whereHtml(m) ? ' · ' + whereHtml(m) : ''}</div>
         </div>
         ${m.role === 'host' && m.status === 'accepted' ? `<button class="btn small" id="happened">It happened</button>` : ''}
         ${m.role === 'attendee' && m.status === 'accepted' && !m.reconfirm ? `<button class="btn ghost small" id="leave">Can't make it</button>` : ''}
@@ -1094,14 +1085,14 @@ async function viewChat(v, id) {
     const sys = m.role === 'attendee'
       ? `You asked to join and ${esc(name)} said yes!`
       : `${esc(name)} asked to join and you said yes!`;
-    const tail = m.status === 'attended' ? '<div class="msg sys">✅ Marked as happened. Hope it was fun!</div>'
-      : m.status === 'accepted' && m.reconfirm && m.role === 'host' ? `<div class="msg sys">⏳ Waiting for ${esc(name)} to re-confirm</div>`
+    const tail = m.status === 'attended' ? '<div class="msg sys">Marked as happened. Hope it was fun!</div>'
+      : m.status === 'accepted' && m.reconfirm && m.role === 'host' ? `<div class="msg sys">Waiting for ${esc(name)} to re-confirm</div>`
       : '';
-    msgsEl.innerHTML = `<div class="msg sys">🤝 ${sys}</div>` +
+    msgsEl.innerHTML = `<div class="msg sys">${sys}</div>` +
       (await Promise.all(msgs.map(async x => {
         if (x.kind === 'system') return `<div class="msg sys notice">${esc(x.body)}</div>`;
         const text = await decryptMessage(id, m.other_pubkey, x.body);
-        return `<div class="msg ${x.mine ? 'mine' : ''}">${text === null ? '🔒 <i>Couldn\'t decrypt this message</i>' : esc(text)}</div>`;
+        return `<div class="msg ${x.mine ? 'mine' : ''}">${text === null ? '<i>Couldn\'t decrypt this message</i>' : esc(text)}</div>`;
       }))).join('') + tail;
     msgsEl.scrollTop = msgsEl.scrollHeight;
     window.scrollTo(0, document.body.scrollHeight);
@@ -1138,7 +1129,7 @@ async function viewChat(v, id) {
     if (!confirm(`Mark “${m.title}” as happened with ${name}?`)) return;
     await api(`/api/matches/${id}/happened`, { method: 'POST' });
     await refreshMe();
-    toast(`🎉 Glad it happened! Thanks, ${name}.`);
+    toast(`Glad it happened! Thanks, ${name}.`);
     render();
   });
 }
@@ -1276,7 +1267,7 @@ function mountAudience(form) {
       ? `<p class="note">You don't have any contacts yet; people are added when you match with them. Until then only you
           can see a private post. Make it public to find people.</p>`
       : `${groups.length ? `<div class="filter-row stacked" role="group" aria-label="Groups"><span class="label">Groups</span>
-          ${groups.map(([g, count]) => chip('group', g, `${CONTACT_TAGS[g] || '#'} ${esc(g)} <span class="n">${count}</span>`, pick.groups.includes(g))).join('')}</div>` : ''}
+          ${groups.map(([g, count]) => chip('group', g, `#${esc(g)} <span class="n">${count}</span>`, pick.groups.includes(g))).join('')}</div>` : ''}
         <div class="filter-row stacked" role="group" aria-label="Contacts"><span class="label">People</span>
           ${contacts.map(g => chip('contact', g, esc(displayName(g)), pick.contacts.includes(g))).join('')}</div>
         <p class="note">${n ? `Only you and ${n === 1 ? '1 person' : `${n} people`} can see this.` : 'Only you can see this until you pick someone.'}
@@ -1329,8 +1320,8 @@ async function syncAudiences() {
   if (gone.length) await vault.update(api, (d) => { for (const id of gone) delete d.audiences?.[id]; });
 }
 
-// suggestions: { tag: icon } offered as one-tap chips (post tags by default; contacts use CONTACT_TAGS).
-function mountTagEditor(root, suggestions = TAG_ICONS) {
+// suggestions: tags offered as one-tap chips (post tags by default; contacts use CONTACT_TAGS).
+function mountTagEditor(root, suggestions = TAGS) {
   const hidden = root.querySelector('input[name=tags]'), box = root.querySelector('.tag-box');
   const input = root.querySelector('.tag-input'), suggest = root.querySelector('.tag-suggest');
   let tags = JSON.parse(root.dataset.tags || '[]');
@@ -1343,8 +1334,8 @@ function mountTagEditor(root, suggestions = TAG_ICONS) {
     const full = tags.length >= MAX_TAGS;
     input.hidden = full;
     suggest.innerHTML = full ? `<small>That's the max of ${MAX_TAGS} tags.</small>`
-      : Object.keys(suggestions).filter(t => !tags.includes(t))
-        .map(t => `<button type="button" class="chip suggest" data-add="${t}">${suggestions[t]} ${t}</button>`).join('');
+      : suggestions.filter(t => !tags.includes(t))
+        .map(t => `<button type="button" class="chip suggest" data-add="${t}">#${t}</button>`).join('');
   }
   function add(raw) {
     const t = normalizeTag(raw);
@@ -1447,7 +1438,7 @@ async function viewPost(v) {
     <div class="idea" id="postIdea">
       <button type="button" class="idea-prev" aria-label="Previous idea" title="Previous idea">‹</button>
       <button type="button" class="idea-open" title="Start a post from this idea">
-        <span class="ico">💡</span><span class="text" aria-live="polite"></span>
+        <span class="text" aria-live="polite"></span>
       </button>
       <button type="button" class="idea-next" aria-label="Next idea" title="Next idea">›</button>
     </div>
@@ -1459,11 +1450,10 @@ async function viewPost(v) {
     <div class="list">
       ${events.length ? events.map(t => `
         <div class="row">
-          ${tagLook(t.tags).ico ? `<div class="dot ${tagLook(t.tags).cls}">${tagLook(t.tags).ico}</div>` : ''}
           <div class="grow">
             <div class="title">${esc(t.title)}</div>
             ${t.tags.length ? `<div class="sub">${t.tags.map(x => '#' + esc(x)).join(' ')}</div>` : ''}
-            <div class="sub">${t.visibility === 'public' ? '🌐 Public' : `🔒 ${t.viewers ? `${t.viewers} can see` : 'Only you'}`} · ${t.max_attendees == null ? `${t.matched} matched · no limit` : `${t.matched}/${t.max_attendees} matched`}${t.waitlisted ? ` · ${t.waitlisted} waitlisted` : ''}${t.awaiting ? ` · ${t.awaiting} to re-confirm` : ''}${t.when_text ? ' · ' + esc(whenLabel(t.when_text)) : ''}</div>
+            <div class="sub">${t.visibility === 'public' ? 'Public' : `${t.viewers ? `${t.viewers} can see` : 'Only you'}`} · ${t.max_attendees == null ? `${t.matched} matched · no limit` : `${t.matched}/${t.max_attendees} matched`}${t.waitlisted ? ` · ${t.waitlisted} waitlisted` : ''}${t.awaiting ? ` · ${t.awaiting} to re-confirm` : ''}${t.when_text ? ' · ' + esc(whenLabel(t.when_text)) : ''}</div>
           </div>
           ${statusPill(t)}
           ${t.status !== 'past' ? `<button class="btn ghost small" data-edit="${t.id}" aria-label="Edit">✎</button>
@@ -1586,7 +1576,7 @@ async function viewProfile(v) {
     <div class="section-title">Contacts</div>
     <p class="note">People you've matched or connected with. Names and tags here are yours alone: they're encrypted with your passkey, and nobody else, including the server, can read them.</p>
     ${allTags.length ? `<div class="filter-row" role="group" aria-label="Filter contacts by tag"><span class="label">Tags</span>
-      ${allTags.map(t => `<button type="button" class="chip filter ${sel.has(t) ? 'on' : ''}" data-ctag="${esc(t)}" aria-pressed="${sel.has(t)}">${CONTACT_TAGS[t] || '#'} ${esc(t)}</button>`).join('')}
+      ${allTags.map(t => `<button type="button" class="chip filter ${sel.has(t) ? 'on' : ''}" data-ctag="${esc(t)}" aria-pressed="${sel.has(t)}">#${esc(t)}</button>`).join('')}
       ${sel.size ? `<button type="button" class="chip filter clear" data-cclear>Clear</button>` : ''}</div>` : ''}
     <div class="list">
       ${shown.length ? shown.map(c => `
@@ -1605,11 +1595,11 @@ async function viewProfile(v) {
       ? `<b>You only have one passkey.</b> If you lose it, your account is gone for good. Add another one: on your phone (scan the QR code your browser offers) or on a security key.`
       : `You have ${passkeys.length} passkeys, so losing one device won't lock you out.`}</div>
     <div class="list">
-      ${passkeys.map((p, i) => `<div class="row"><div class="dot tag-none">🔑</div>
+      ${passkeys.map((p, i) => `<div class="row">
         <div class="grow"><div class="title">Passkey ${i + 1}</div><div class="sub">Added ${fmt(p.created_at)} · last used ${fmt(p.last_used_at)}</div></div>
         ${passkeys.length > 1 ? `<button class="btn danger small" data-rmkey="${p.id}" aria-label="Remove passkey">✕</button>` : ''}</div>`).join('')}
     </div>
-    <button class="btn ghost" id="addKey">➕ Add another passkey</button>`}
+    <button class="btn ghost" id="addKey">Add another passkey</button>`}
 
     <button class="btn danger" id="logout" style="margin-top:24px">Sign out</button>
     ${ABOUT_LINKS}`;

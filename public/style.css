@@ -63,10 +63,9 @@ nav.tabs {
   padding-bottom: env(safe-area-inset-bottom);
 }
 nav.tabs button {
-  background: none; border: 0; padding: 10px 0 12px; font-size: .72rem; color: var(--muted);
-  display: flex; flex-direction: column; align-items: center; gap: 2px; position: relative;
+  background: none; border: 0; padding: 16px 0 18px; font-size: .82rem; color: var(--muted);
+  display: flex; align-items: center; justify-content: center; gap: 4px; position: relative;
 }
-nav.tabs button .ico { font-size: 1.35rem; line-height: 1; }
 nav.tabs button.active { color: var(--accent); font-weight: 700; }
 .badge {
   position: absolute; top: 4px; left: calc(50% + 6px);
@@ -90,7 +89,7 @@ nav.tabs button.active { color: var(--accent); font-weight: 700; }
 .card:not(.top):not(.second) { opacity: 0; }
 .card .hero {
   height: 42%; min-height: 150px; display: grid; place-items: center;
-  font-size: 5rem; position: relative;
+  font-size: 5rem; position: relative; background: linear-gradient(135deg, #d6d3d1, #57534e);
 }
 .card .body { padding: 18px 20px; flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
 .card h2 { font-size: 1.5rem; letter-spacing: -.01em; }
@@ -140,24 +139,6 @@ nav.tabs button.active { color: var(--accent); font-weight: 700; }
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center; color: var(--muted); gap: 10px; padding: 40px 20px;
 }
-.empty .big { font-size: 3.5rem; }
-
-/* ---------- tag colors (first well-known tag on a post) ---------- */
-.tag-garden   { background: linear-gradient(135deg, #86efac, #15803d); }
-.tag-hauling  { background: linear-gradient(135deg, #fcd34d, #b45309); }
-.tag-moving   { background: linear-gradient(135deg, #fdba74, #c2410c); }
-.tag-repair   { background: linear-gradient(135deg, #93c5fd, #1d4ed8); }
-.tag-pets     { background: linear-gradient(135deg, #f9a8d4, #be185d); }
-.tag-tech     { background: linear-gradient(135deg, #c4b5fd, #6d28d9); }
-.tag-cooking  { background: linear-gradient(135deg, #fca5a5, #b91c1c); }
-.tag-errands  { background: linear-gradient(135deg, #67e8f9, #0e7490); }
-.tag-none     { background: linear-gradient(135deg, #d6d3d1, #57534e); }
-.tag-fitness  { background: linear-gradient(135deg, #fdba74, #dc2626); }
-.tag-games    { background: linear-gradient(135deg, #a5b4fc, #4338ca); }
-.tag-movies   { background: linear-gradient(135deg, #d8b4fe, #7e22ce); }
-.tag-outdoors { background: linear-gradient(135deg, #bef264, #3f6212); }
-.tag-events   { background: linear-gradient(135deg, #a5b4fc, #be123c); }
-.tag-food     { background: linear-gradient(135deg, #fed7aa, #9a3412); }
 
 /* ---------- lists, forms ---------- */
 .section-title { font-size: 1.1rem; font-weight: 700; margin: 18px 0 8px; }
@@ -170,7 +151,6 @@ nav.tabs button.active { color: var(--accent); font-weight: 700; }
 .row .grow { flex: 1; min-width: 0; }
 .row .title { font-weight: 600; }
 .row .sub { color: var(--muted); font-size: .85rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dot { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; font-size: 1.3rem; flex: none; }
 
 form.stack, .stack { display: flex; flex-direction: column; gap: 10px; }
 label { font-size: .85rem; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
@@ -311,7 +291,6 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
 .idea-open { flex: 1; display: flex; align-items: center; gap: 10px; padding: 12px 0; text-align: left; }
 .idea-next, .idea-prev { flex: none; width: 40px; font-size: 1.6rem; color: var(--muted); }
 .idea button:hover { background: rgba(0, 0, 0, .04); }
-.idea .ico { font-size: 1.3rem; flex: none; }
 .idea .text.in { animation: ideaIn .4s ease; }
 @keyframes ideaIn { from { opacity: 0; transform: translateY(4px); } }
 @media (prefers-reduced-motion: reduce) { .idea .text.in { animation: none; } }
@@ -340,6 +319,7 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
 .filter-box summary::before { content: '\25B8'; transition: transform .15s; } /* ▸, turned down when open */
 .filter-box[open] summary::before { transform: rotate(90deg); }
 .filter-box summary .badge { position: static; }
+nav.tabs .badge { position: static; }
 .filter-body { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
 button.chip { font: inherit; font-size: .82rem; cursor: pointer; }
 .facts button.link:hover, .cal-link:hover { text-decoration: underline; }

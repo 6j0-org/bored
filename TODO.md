@@ -37,6 +37,9 @@ about **connections and metadata**, and about the limits of doing end-to-end enc
 - [ ] **P2: The location picker contacts OpenStreetMap.** While it's open, the browser fetches tiles from
   tile.openstreetmap.org, which sees the viewer's IP, the area they look at, and (via Referer) this site's origin.
   Consider self-hosting tiles or proxying them.
+- [ ] **P2: Push notifications reveal activity to push services.** Google, Mozilla, Apple or Microsoft see when each
+  device gets a notification, which hints at when someone is matched or messaged. The server also stores each
+  device's push subscription next to its account (`push_subscriptions`). Consider batching or delaying pushes.
 - [ ] **P2: Place names come from Nominatim.** When a host drops a pin, the server sends its coordinates to
   nominatim.openstreetmap.org for a suggested name (`reverseGeocode()` in `server.js`). The server makes the request,
   so OSM sees the server's IP, not the host's, but it does see the spot. Nominatim also allows only one request a

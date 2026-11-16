@@ -5,6 +5,7 @@ import { newChallenge, takeChallenge, verifyRegistration, verifyAssertion, WebAu
 import { verifyIdToken, IdTokenError } from './idtoken.js';
 import { composeWhen, whenLabel, occursBetween } from './public/when.js';
 import { parseCost, costLabel } from './public/cost.js';
+import { vapidPublicKey, validEndpoint, sendPush } from './push.js';
 import { db, parseTags, setEventTags, MAX_TAGS, MAX_ATTENDEES_LIMIT, MAX_VIEWERS } from './db.js';
 
 const PORT = Number(process.env.PORT || 3000);
@@ -224,13 +225,14 @@ const isFull = (t) => t.max_attendees !== null && filledSpots(t.id) >= t.max_att
 // Recompute open/full/past for a live event from its matched attendees, first moving people up from the waitlist
 // (first come, first served) into any open spots. Call inside a transaction.
 function syncEventStatus(eventId) {
-  const t = q('SELECT id, host_id, status, max_attendees FROM events WHERE id = ?').get(eventId);
+  const t = q('SELECT id, host_id, title, status, max_attendees FROM events WHERE id = ?').get(eventId);
   if (!t || !['open', 'full'].includes(t.status)) return;
   const room = t.max_attendees === null ? -1 : t.max_attendees - filledSpots(eventId); // -1 = no limit (SQLite LIMIT)
   if (room !== 0) {
-    for (const { id } of q(`SELECT id FROM swipes WHERE event_id = ? AND status = 'waitlisted' ORDER BY id LIMIT ?`).all(eventId, room)) {
+    for (const { id, attendee_id } of q(`SELECT id, attendee_id FROM swipes WHERE event_id = ? AND status = 'waitlisted' ORDER BY id LIMIT ?`).all(eventId, room)) {
       q(`UPDATE swipes SET status = 'accepted', reconfirm = 0 WHERE id = ?`).run(id);
       systemMessage(id, t.host_id, "🎉 A spot opened up, so you're off the waitlist and in!");
+      notify(attendee_id, { body: `A spot opened up for ${quoted(t.title)}. You're in!`, tag: `chat-${id}`, open: `chat:${id}` });
     }
   }
   const { accepted, attended } = q(`
@@ -265,11 +267,43 @@ function loadEvent(id) {
 const systemMessage = (swipeId, senderId, body) =>
   q(`INSERT INTO messages (swipe_id, sender_id, body, kind) VALUES (?, ?, ?, 'system')`).run(swipeId, senderId, body);
 
+// Runs fn in a transaction. Notifications sent inside it wait for the commit, so a rolled-back change never notifies.
+let afterCommit = null;
 function tx(fn) {
+  afterCommit = [];
   db.exec('BEGIN');
-  try { const r = fn(); db.exec('COMMIT'); return r; }
-  catch (e) { db.exec('ROLLBACK'); throw e; }
+  try {
+    const r = fn();
+    db.exec('COMMIT');
+    const later = afterCommit; afterCommit = null;
+    for (const f of later) f();
+    return r;
+  } catch (e) { db.exec('ROLLBACK'); afterCommit = null; throw e; }
 }
+
+// ---------- push notifications ----------
+// notify(userId, { body, tag, open }) sends to all of that user's devices, best effort. Text stays generic: the
+// server doesn't know anyone's name, and messages are end-to-end encrypted. tag groups notifications on the device
+// (a newer one replaces an older one with the same tag); open says what the app shows when it's tapped
+// ('confirm', 'plans', 'profile' or 'chat:<matchId>'). Chat notifications are sent at most once a minute per chat.
+const PUSH_SUBJECT = process.env.VAPID_SUBJECT || (process.env.ORIGIN?.startsWith('https:') ? process.env.ORIGIN : 'mailto:push@bored.invalid');
+const lastPush = new Map(); // "userId:tag" → time, for throttling chat notifications
+function notify(userId, { body, tag, open = '', throttle = false }) {
+  if (afterCommit) return void afterCommit.push(() => notify(userId, { body, tag, open, throttle }));
+  if (throttle) {
+    const k = `${userId}:${tag}`, now = Date.now();
+    if (now - (lastPush.get(k) || 0) < 60000) return;
+    lastPush.set(k, now);
+    if (lastPush.size > 10000) lastPush.clear();
+  }
+  for (const s of q('SELECT * FROM push_subscriptions WHERE user_id = ?').all(userId)) {
+    sendPush(s, { title: 'Bored?', body, tag, open }, { subject: PUSH_SUBJECT, topic: tag }).then((status) => {
+      if (status === 404 || status === 410) q('DELETE FROM push_subscriptions WHERE id = ?').run(s.id);
+      else if (status >= 400) console.warn(`Push to subscription ${s.id} failed with HTTP ${status}`);
+    }, (err) => console.warn(`Push to subscription ${s.id} failed: ${err.message}`));
+  }
+}
+const quoted = (title) => `“${String(title).slice(0, 60)}”`;
 
 // ---------- routes ----------
 
@@ -545,9 +579,10 @@ route('POST', '/api/events/:id/swipe', async ({ user, params, body, res }) => {
   if (!event || !['open', 'full'].includes(event.status)) throw new HttpError(404, 'That event is no longer open');
   if (event.host_id === user.id) throw new HttpError(400, "You can't swipe on your own event");
   const yes = body.yes ? 1 : 0;
-  q(`INSERT INTO swipes (event_id, attendee_id, yes, note, status) VALUES (?, ?, ?, ?, ?)
+  const r = q(`INSERT INTO swipes (event_id, attendee_id, yes, note, status) VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(event_id, attendee_id) DO NOTHING`)
     .run(event.id, user.id, yes, str(body.note, 280, { field: 'Note' }), yes ? 'pending' : 'declined');
+  if (yes && r.changes) notify(event.host_id, { body: `Someone wants to join ${quoted(event.title)}`, tag: 'confirm', open: 'confirm' });
   send(res, 200, { ok: true });
 });
 
@@ -587,8 +622,12 @@ route('POST', '/api/confirm/:id/respond', async ({ user, params, body, res }) =>
   }
   // A yes on a full event puts them on the waitlist; they're matched automatically when a spot opens.
   const waitlisted = tx(() => {
-    const full = isFull(q('SELECT id, max_attendees FROM events WHERE id = ?').get(interest.event_id));
+    const ev = q('SELECT id, title, max_attendees FROM events WHERE id = ?').get(interest.event_id);
+    const full = isFull(ev);
     q(`UPDATE swipes SET status = ? WHERE id = ?`).run(full ? 'waitlisted' : 'accepted', interest.id);
+    notify(interest.attendee_id, full
+      ? { body: `${quoted(ev.title)} is full, so you're on the waitlist. You'll get the next spot.`, tag: `wait-${interest.id}`, open: 'plans' }
+      : { body: `It's on! The host said yes to you for ${quoted(ev.title)}`, tag: `chat-${interest.id}`, open: `chat:${interest.id}` });
     syncEventStatus(interest.event_id);
     return full;
   });
@@ -653,9 +692,12 @@ route('GET', '/api/matches/:id/messages', async ({ user, params, res }) => {
 });
 
 route('POST', '/api/matches/:id/messages', async ({ user, params, body, res }) => {
-  if (loadMatch(params.id, user.id).status === 'withdrawn') throw new HttpError(409, 'This match has ended');
+  const m = loadMatch(params.id, user.id);
+  if (m.status === 'withdrawn') throw new HttpError(409, 'This match has ended');
   q('INSERT INTO messages (swipe_id, sender_id, body) VALUES (?, ?, ?)')
     .run(params.id, user.id, sealed(body.body, 'message', 8000)); // E2E ciphertext; the server can't read it
+  notify(m.host_id === user.id ? m.attendee_id : m.host_id,
+    { body: `New message about ${quoted(m.title)}`, tag: `chat-${m.id}`, open: `chat:${m.id}`, throttle: true });
   send(res, 200, { ok: true });
 });
 
@@ -684,6 +726,7 @@ route('POST', '/api/matches/:id/reconfirm', async ({ user, params, body, res }) 
     } else {
       q(`UPDATE swipes SET status = 'withdrawn', reconfirm = 0 WHERE id = ?`).run(m.id);
       systemMessage(m.id, user.id, "🚪 Can't make it after the change, so dropped out.");
+      notify(m.host_id, { body: `Someone can't make ${quoted(m.title)} after your change`, tag: `chat-${m.id}`, open: `chat:${m.id}` });
       syncEventStatus(m.event_id);
     }
   });
@@ -698,6 +741,7 @@ route('POST', '/api/matches/:id/leave', async ({ user, params, res }) => {
   tx(() => {
     q(`UPDATE swipes SET status = 'withdrawn', reconfirm = 0 WHERE id = ?`).run(m.id);
     systemMessage(m.id, user.id, "🚪 Can't make it anymore, so dropped out.");
+    notify(m.host_id, { body: `Someone dropped out of ${quoted(m.title)}`, tag: `chat-${m.id}`, open: `chat:${m.id}` });
     syncEventStatus(m.event_id);
   });
   send(res, 200, { ok: true });
@@ -761,10 +805,11 @@ route('PATCH', '/api/events/:id', async ({ user, params, body, res }) => {
       .run(f.title, f.details, f.location, f.location_name, f.online, f.when_text, f.cost_amount, f.cost_currency, f.visibility, f.max_attendees, event.id);
     setEventTags(event.id, f.tags);
     setViewers(event.id, viewers);
-    const attendees = q(`SELECT id FROM swipes WHERE event_id = ? AND status = 'accepted'`).all(event.id);
+    const attendees = q(`SELECT id, attendee_id FROM swipes WHERE event_id = ? AND status = 'accepted'`).all(event.id);
     for (const a of attendees) {
       q('UPDATE swipes SET reconfirm = 1 WHERE id = ?').run(a.id);
       systemMessage(a.id, user.id, notice);
+      notify(a.attendee_id, { body: `${quoted(f.title)} changed. Can you still make it?`, tag: `chat-${a.id}`, open: `chat:${a.id}` });
     }
     syncEventStatus(event.id);
     return attendees.length;
@@ -842,9 +887,11 @@ route('POST', '/api/invites/accept', async ({ user, body, res }) => {
   if (inv.owner_id === user.id) throw new HttpError(400, "That's your own invitation. Share it with someone else.");
   if (connected(user.id, inv.owner_id)) return send(res, 200, { status: 'connected' });
   const note = sealed(body.note, 'nickname', 1000);
+  const fresh = !requestOf(inv.owner_id, user.id);
   q(`INSERT INTO connection_requests (owner_id, requester_id, invite_id, note) VALUES (?, ?, ?, ?)
      ON CONFLICT (owner_id, requester_id) DO UPDATE SET note = excluded.note, invite_id = excluded.invite_id
      WHERE connection_requests.status = 'pending'`).run(inv.owner_id, user.id, inv.id, note);
+  if (fresh) notify(inv.owner_id, { body: 'Someone used your invitation and asked to connect', tag: 'confirm', open: 'confirm' });
   send(res, 200, { status: 'requested' });
 });
 
@@ -875,6 +922,7 @@ route('POST', '/api/connection-requests/:id/respond', async ({ user, params, bod
     q(`UPDATE connection_requests SET status = 'accepted' WHERE id = ?`).run(r.id);
     q('INSERT OR IGNORE INTO connections (a, b) VALUES (?, ?)').run(Math.min(r.owner_id, r.requester_id), Math.max(r.owner_id, r.requester_id));
     if (r.invite_id) q('UPDATE invites SET uses = uses + 1 WHERE id = ?').run(r.invite_id);
+    notify(r.requester_id, { body: "You're connected! They confirmed your request.", tag: 'connected', open: 'profile' });
   });
   send(res, 200, { connected: true, guid: q('SELECT guid FROM users WHERE id = ?').get(r.requester_id).guid });
 });
@@ -899,6 +947,38 @@ route('GET', '/api/connections', async ({ user, res }) => {
     WHERE c.a = ? OR c.b = ?`).all(user.id, user.id, user.id));
 });
 
+// ---------- push subscriptions ----------
+route('GET', '/api/push/key', async ({ res }) => send(res, 200, { publicKey: vapidPublicKey() }), { auth: false });
+
+// Save this device's subscription for me. The same device signing in as someone else moves it to them.
+const MAX_DEVICES = 10;
+route('POST', '/api/push/subscribe', async ({ user, body, res }) => {
+  const { endpoint, keys = {} } = body;
+  if (typeof endpoint !== 'string' || endpoint.length > 1000 || !validEndpoint(endpoint))
+    throw new HttpError(400, "This browser's push service isn't supported");
+  const p256dh = String(keys.p256dh || ''), auth = String(keys.auth || '');
+  if (!/^[A-Za-z0-9_-]{86,88}$/.test(p256dh) || !/^[A-Za-z0-9_-]{21,24}$/.test(auth)) throw new HttpError(400, 'Bad push keys');
+  tx(() => {
+    q(`INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth) VALUES (?, ?, ?, ?)
+       ON CONFLICT (endpoint) DO UPDATE SET user_id = excluded.user_id, p256dh = excluded.p256dh, auth = excluded.auth`)
+      .run(user.id, endpoint, p256dh, auth);
+    // Keep the newest few devices.
+    q(`DELETE FROM push_subscriptions WHERE user_id = ? AND id NOT IN
+       (SELECT id FROM push_subscriptions WHERE user_id = ? ORDER BY id DESC LIMIT ${MAX_DEVICES})`).run(user.id, user.id);
+  });
+  send(res, 200, { ok: true });
+});
+
+route('POST', '/api/push/unsubscribe', async ({ user, body, res }) => {
+  q('DELETE FROM push_subscriptions WHERE endpoint = ? AND user_id = ?').run(String(body.endpoint || ''), user.id);
+  send(res, 200, { ok: true });
+});
+
+route('POST', '/api/push/test', async ({ user, res }) => {
+  notify(user.id, { body: "Notifications are on. You'll hear about requests, matches and messages here.", tag: 'test', open: 'profile' });
+  send(res, 200, { ok: true });
+});
+
 route('GET', '/api/ledger', async ({ user, res }) => {
   const rows = q(`
     SELECT u.guid, COUNT(*) AS together
@@ -914,6 +994,7 @@ route('GET', '/api/ledger', async ({ user, res }) => {
 
 const STATIC = {
   '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/secure.js': 'secure.js', '/style.css': 'style.css', '/location.js': 'location.js', '/when.js': 'when.js', '/cost.js': 'cost.js', '/ics.js': 'ics.js',
+  '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon.svg': 'icon.svg',
   '/fonts/bungee-latin.woff2': 'fonts/bungee-latin.woff2', // Bungee, SIL OFL 1.1 (see public/fonts/Bungee-OFL.txt)
 };
 // Browser files from npm packages (package.json), served from our own origin like everything else: npm is only
@@ -921,7 +1002,8 @@ const STATIC = {
 const VENDOR = {
   '/vendor/jdenticon.js': 'node_modules/jdenticon/dist/jdenticon-module.mjs', // Jdenticon avatars, MIT
 };
-const MIME = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', mjs: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8', woff2: 'font/woff2' };
+const MIME = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', mjs: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8',
+  woff2: 'font/woff2', webmanifest: 'application/manifest+json', svg: 'image/svg+xml' };
 
 // Everything is served from this origin; a strict CSP keeps injected scripts away from the keys in the page.
 // (style-src allows inline style attributes used in the markup; img-src allows OSM tiles for the location picker.)

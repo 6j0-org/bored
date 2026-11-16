@@ -26,7 +26,15 @@ otherwise.
 
 Env vars: `PORT` (default 3000), `DB_PATH` (default `./data.sqlite`), `ORIGIN` (e.g. `https://bored.example`; required
 behind HTTPS/proxies, passkeys are bound to it; also turns on `Secure` cookies), `RP_ID` (passkey domain; defaults to
-the `ORIGIN` hostname).
+the `ORIGIN` hostname), `VAPID_SUBJECT` (a `mailto:` or `https:` contact for push services; defaults to `ORIGIN`),
+`PUSH_HOSTS` (extra push service hostnames to allow, comma-separated).
+
+### Notifications
+
+Web Push, opt-in per device from Profile: desktop Chrome, Edge, Firefox and Safari, and Chrome on Android. On iPhone
+and iPad (iOS 16.4+) only after adding the app to the Home Screen. `push.js` encrypts each notification for the device
+(RFC 8291) and signs requests with this server's VAPID key (RFC 8292, generated on first use and kept in the
+database), using `node:crypto` only. Push needs HTTPS (or `localhost`).
 
 ### Sign-in: standalone or with a 6j0.org identity
 
@@ -88,6 +96,9 @@ A post stays in the deck until it reaches its max attendees. Posts with no limit
 - **Invitations to connect** are links (`/#invite=<token>`). The token stays in the URL fragment, so it isn't sent
   in requests or logged; the server stores only its SHA-256, and the owner's encrypted vault keeps the link to share
   again. Connecting makes two people contacts, the same as matching (the server records the pair in `connections`).
+- **Notifications** go through the browser vendor's push service (Google, Mozilla, Apple or Microsoft). They're
+  encrypted for the device, so the service can't read them, but it does see when they're sent and to which device.
+  The text stays generic ("New message about “Picnic”"): no names, and never message contents.
 - **Your location for the distance filter** stays in your browser (`localStorage`). Discover sends the server only a
   rough spot, rounded to 2 decimals (about a kilometre), and only while a distance is picked.
 - **Chat is end-to-end encrypted** (ECDH P-256 → HKDF per match → AES-GCM). Your chat private key is stored

@@ -155,6 +155,18 @@ const MIGRATIONS = [
      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
      UNIQUE (owner_id, requester_id)
    );`,
+  // 5: web push. A device's push subscription (from the browser's PushManager), and a small key-value table for
+  //    server settings such as this server's VAPID key pair (see push.js).
+  `CREATE TABLE push_subscriptions (
+     id         INTEGER PRIMARY KEY,
+     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     endpoint   TEXT NOT NULL UNIQUE,  -- the push service URL for this device
+     p256dh     TEXT NOT NULL,         -- the device's public key, base64url
+     auth       TEXT NOT NULL,         -- the device's auth secret, base64url
+     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+   );
+   CREATE INDEX idx_push_user ON push_subscriptions(user_id);
+   CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
 ];
 
 export function migrate() {

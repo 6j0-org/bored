@@ -6,7 +6,7 @@ FROM node:24-alpine
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts
-COPY server.js db.js webauthn.js idtoken.js ./
+COPY server.js db.js push.js webauthn.js idtoken.js ./
 COPY public ./public
 
 # The SQLite database (accounts, posts, encrypted vaults and chats) lives here; mount a volume to keep it.

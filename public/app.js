@@ -2,7 +2,7 @@
 import {
   prfSupport, createAccount, signIn, addPasskey, loadKeys, clearKeys, hasKeys, vault,
   encryptMessage, decryptMessage, PrfUnsupportedError, startIdSignIn, finishIdSignIn, hasIdCallback,
-  newInviteKey, sealForInvite, openForInvite, sha1Hex,
+  newInviteKey, sealForInvite, openForInvite, sha1Hex, b64u,
 } from './secure.js';
 import { locationHtml, mountLocationField, pickLocation, PIN_SVG } from './location.js';
 import { parseWhen, repeatOptions, whenLabel as fmtWhen, localToday } from './when.js';
@@ -537,6 +537,78 @@ async function enterApp(tab = 'discover') {
   state.tab = tab; state.chat = null;
   render();
   offerPendingInvite();
+  syncPush();
+}
+
+// ---------- push notifications ----------
+// Opt-in per device, from Profile. The service worker (sw.js) shows them; the server sends them (push.js).
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const isIos = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+async function swRegistration() {
+  return (await navigator.serviceWorker.getRegistration()) || navigator.serviceWorker.register('/sw.js');
+}
+async function pushSubscription() {
+  if (!pushSupported()) return null;
+  const reg = await navigator.serviceWorker.getRegistration();
+  return reg ? reg.pushManager.getSubscription() : null;
+}
+async function turnOnPush() {
+  if (await Notification.requestPermission() !== 'granted') throw new Error('Notifications are blocked for this site.');
+  const reg = await swRegistration();
+  const { publicKey } = await api('/api/push/key');
+  const sub = await reg.pushManager.getSubscription() || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u.dec(publicKey) });
+  await api('/api/push/subscribe', { method: 'POST', body: sub.toJSON() });
+}
+async function turnOffPush() {
+  const sub = await pushSubscription();
+  if (!sub) return;
+  await api('/api/push/unsubscribe', { method: 'POST', body: { endpoint: sub.endpoint } }).catch(() => {});
+  await sub.unsubscribe();
+}
+// Keep the server's record of this device in step, e.g. after signing in as someone else on it.
+async function syncPush() {
+  if (!state.me || !pushSupported() || Notification.permission !== 'granted') return;
+  const sub = await pushSubscription().catch(() => null);
+  if (sub) api('/api/push/subscribe', { method: 'POST', body: sub.toJSON() }).catch(() => {});
+}
+// Go where a tapped notification says: 'confirm', 'plans', 'profile', 'discover' or 'chat:<matchId>'.
+function openScreen(open) {
+  if (!open || !state.me) return;
+  const [tab, id] = String(open).split(':');
+  if (tab === 'chat' && Number(id)) { state.tab = 'plans'; state.chat = Number(id); }
+  else if (['confirm', 'plans', 'profile', 'discover'].includes(tab)) { state.tab = tab; state.chat = null; }
+  else return;
+  render();
+}
+// Profile's Notifications section, which depends on the browser and this device's state.
+async function drawPushSettings(el) {
+  const ios = isIos(), standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  let note = '', on = false, canToggle = false;
+  if (!pushSupported()) {
+    note = ios && !standalone
+      ? 'On iPhone and iPad, first add Bored? to your Home Screen (Share, then Add to Home Screen), open it from there, and turn notifications on here.'
+      : "This browser doesn't support notifications.";
+  } else if (Notification.permission === 'denied') {
+    note = "Notifications are blocked for this site. Allow them in your browser's site settings, then come back here.";
+  } else {
+    on = Boolean(await pushSubscription().catch(() => null)) && Notification.permission === 'granted';
+    canToggle = true;
+    note = on ? "On for this device. You'll hear about join requests, matches, messages and changes to your plans."
+      : 'Get notified on this device about join requests, matches, messages and changes to your plans.';
+  }
+  el.innerHTML = `
+    <p class="note">${note}</p>
+    ${canToggle ? `<div class="two">
+      <button type="button" class="btn ${on ? 'ghost' : ''}" data-push-toggle>${on ? 'Turn off' : 'Turn on notifications'}</button>
+      ${on ? '<button type="button" class="btn ghost" data-push-test>Send a test</button>' : ''}</div>` : ''}`;
+  el.querySelector('[data-push-toggle]')?.addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    try { if (on) { await turnOffPush(); toast('Notifications off for this device'); } else { await turnOnPush(); toast('Notifications on'); } }
+    catch (err) { toast(err.message); }
+    drawPushSettings(el);
+  });
+  el.querySelector('[data-push-test]')?.addEventListener('click', () =>
+    api('/api/push/test', { method: 'POST' }).then(() => toast('Sent. It should arrive in a moment.'), err => toast(err.message)));
 }
 
 const PASSKEY_ADVICE = `Your passkey <b>is</b> your account: there's no email or password to recover it with.
@@ -632,6 +704,7 @@ function nextStep(message, button = 'Continue') {
 }
 
 async function signOut() {
+  await turnOffPush().catch(() => {}); // a signed-out device shouldn't get this account's notifications
   try { await api('/api/logout', { method: 'POST' }); } catch {}
   await clearKeys();
   state.me = null; state.tab = 'discover'; state.chat = null;
@@ -1478,6 +1551,9 @@ async function viewProfile(v) {
       <div class="stat"><b>${me.attended}</b><span>events attended</span></div>
     </div>
 
+    <div class="section-title">Notifications</div>
+    <div class="stack" id="pushSettings"></div>
+
     <div class="section-title">Settings</div>
     <form class="stack" id="prefsForm">
       <label>Distance units
@@ -1545,6 +1621,7 @@ async function viewProfile(v) {
       toast('Invitation deleted'); render();
     } catch (err) { toast(err.message); }
   });
+  drawPushSettings(v.querySelector('#pushSettings'));
   v.querySelector('#prefsForm').addEventListener('change', async (e) => {
     const { distanceUnit } = formData(e.currentTarget);
     try { await vault.update(api, (d) => { d.prefs = { ...d.prefs, distanceUnit }; }); toast('Saved'); }
@@ -1603,4 +1680,15 @@ if (state.config.authMode === '6j0' && hasIdCallback()) {
   }
   render();
   offerPendingInvite();
+  syncPush();
+}
+
+// The service worker shows notifications; tapping one opens the app at ?open=… or messages an open window.
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(() => {});
+  navigator.serviceWorker.addEventListener('message', (e) => { if (e.data?.type === 'open') openScreen(e.data.open); });
+}
+{
+  const open = new URLSearchParams(location.search).get('open');
+  if (open) { history.replaceState(null, '', location.pathname + location.hash); openScreen(open); }
 }

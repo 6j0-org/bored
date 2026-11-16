@@ -109,7 +109,7 @@ const POST_IDEAS = [
     prompt: 'Need some help tending the garden?',
     template: {
       title: 'Help tending the garden',
-      details: "Weeding, watering and some general tidying. I'll provide gloves, tools and something cold to drink.",
+      details: "Weeding, watering, and some general tidying. I'll provide gloves, tools, and something cold to drink.",
       tags: ['garden', 'outdoors'], max_attendees: 1, when: [10, 6],
     },
   },
@@ -576,7 +576,7 @@ async function syncPush() {
   const sub = await pushSubscription().catch(() => null);
   if (sub) api('/api/push/subscribe', { method: 'POST', body: sub.toJSON() }).catch(() => {});
 }
-// Go where a tapped notification says: 'confirm', 'plans', 'profile', 'discover' or 'chat:<matchId>'.
+// Go where a tapped notification says: 'confirm', 'plans', 'profile', 'discover', or 'chat:<matchId>'.
 function openScreen(open) {
   if (!open || !state.me) return;
   const [tab, id] = String(open).split(':');
@@ -598,8 +598,8 @@ async function drawPushSettings(el) {
   } else {
     on = Boolean(await pushSubscription().catch(() => null)) && Notification.permission === 'granted';
     canToggle = true;
-    note = on ? "On for this device. You'll hear about join requests, matches, messages and changes to your plans."
-      : 'Get notified on this device about join requests, matches, messages and changes to your plans.';
+    note = on ? "On for this device. You'll hear about join requests, matches, messages, and changes to your plans."
+      : 'Get notified on this device about join requests, matches, messages, and changes to your plans.';
   }
   el.innerHTML = `
     <p class="note">${note}</p>
@@ -621,12 +621,12 @@ const PASSKEY_ADVICE = `Your passkey <b>is</b> your account: there's no email or
 const UPGRADE_ADVICE = `Bored? encrypts your contacts and chats with a key that only your passkey can make, using a
   passkey feature called <b>PRF</b>. This browser or passkey manager doesn't support it. <b>Some password managers,
   including Bitwarden, don't support it yet.</b><br><br>
-  Passkeys that do: a <b>security key</b> (YubiKey 5, Nitrokey 3, SoloKey 2 and similar), <b>Google Password
+  Passkeys that do: a <b>security key</b> (YubiKey 5, Nitrokey 3, SoloKey 2, and similar), <b>Google Password
   Manager</b> (Chrome, Android) and <b>iCloud Keychain</b> (Safari on macOS/iOS 18 or newer).`;
 
 const idHost = () => new URL(state.config.idOrigin).host;
 
-// AUTH_MODE=6j0: one button for sign-in, sign-up and unlock; the identity server handles the passkey.
+// AUTH_MODE=6j0: one button for sign-in, sign-up, and unlock; the identity server handles the passkey.
 function viewAccountId(v) {
   const unlocking = Boolean(state.me);
   v.innerHTML = `
@@ -664,7 +664,7 @@ async function viewAccount(v) {
         <button class="btn ghost" id="create" ${support === false ? 'disabled' : ''}>✨ Create an account</button>`}
       <div class="error" id="authErr"></div>
       <div class="notice ${support === false ? 'warn' : ''}" id="authNote">${support === false ? UPGRADE_ADVICE : `
-        <b>No usernames, passwords or email.</b> You get an anonymous account protected by a passkey.
+        <b>No usernames, passwords, or email.</b> You get an anonymous account protected by a passkey.
         Nobody sees a name for you unless they've connected with you, and then only the nickname <em>they</em> chose.
         <br><br>${PASSKEY_ADVICE}`}</div>
       ${unlocking ? `<button class="btn danger" id="logout">Sign out</button>` : ''}
@@ -1154,7 +1154,7 @@ function eventFormFields(t = {}) {
       <label>Title
         <input name="title" placeholder="e.g. Pick up compost & spread it on my garden" required maxlength="100" value="${val('title')}"></label>
       <label>Details
-        <textarea name="details" class="details-input" placeholder="e.g. Bring gloves if you have them. I'll provide tools, snacks and beer." maxlength="1000">${val('details')}</textarea></label>
+        <textarea name="details" class="details-input" placeholder="e.g. Bring gloves if you have them. I'll provide tools, snacks, and beer." maxlength="1000">${val('details')}</textarea></label>
       <div class="tag-editor" data-tags="${esc(JSON.stringify(t.tags || []))}">
         <label for="${tagsId}">Tags</label>
         <input type="hidden" name="tags">

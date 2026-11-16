@@ -9,7 +9,7 @@ RUN npm ci --omit=dev --ignore-scripts
 COPY server.js db.js push.js webauthn.js idtoken.js ./
 COPY public ./public
 
-# The SQLite database (accounts, posts, encrypted vaults and chats) lives here; mount a volume to keep it.
+# The SQLite database (accounts, posts, encrypted vaults, and chats) lives here; mount a volume to keep it.
 RUN mkdir -p /data && chown node:node /data
 VOLUME /data
 

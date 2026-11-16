@@ -5,7 +5,7 @@ Host an event. Neighbors swipe through posts in **Discover**, and **right = "I'm
 In **Confirm**, the host swipes through the people who want to join, and **right = "Let's do it"**. When both sides say yes, it's on:
 it shows up in **Plans**, where you chat and sort out details. Afterwards the host marks it as happened.
 
-Accounts are anonymous: a random GUID and a passkey. No usernames, passwords or email. Anyone can browse **Discover** without an account.
+Accounts are anonymous: a random GUID and a passkey. No usernames, passwords, or email. Anyone can browse **Discover** without an account.
 
 ## Run
 
@@ -37,7 +37,7 @@ the `ORIGIN` hostname), `VAPID_SUBJECT` (a `mailto:` or `https:` contact for pus
 
 ### Notifications
 
-Web Push, opt-in per device from Profile: desktop Chrome, Edge, Firefox and Safari, and Chrome on Android. On iPhone
+Web Push, opt-in per device from Profile: Chrome on Android, and desktop Chrome, Edge, Firefox, and Safari. On iPhone
 and iPad (iOS 16.4+) only after adding the app to the Home Screen. `push.js` encrypts each notification for the device
 (RFC 8291) and signs requests with this server's VAPID key (RFC 8292, generated on first use and kept in the
 database), using `node:crypto` only. Push needs HTTPS (or `localhost`).
@@ -83,7 +83,7 @@ A post stays in the deck until it reaches its max attendees. Posts with no limit
 ## Privacy model
 
 - **Accounts** are a server-assigned GUID plus one or more passkeys. The server stores each passkey's public key,
-  never a name, email or password. Lose every passkey and the account is gone: the app nudges people to keep their
+  never a name, email, or password. Lose every passkey and the account is gone: the app nudges people to keep their
   add a second passkey (another device or a security key) (Profile → Passkeys).
 - **Names are private.** You see only the nicknames *you* gave people, and only once you've matched with them;
   everyone else has no name.
@@ -102,7 +102,7 @@ A post stays in the deck until it reaches its max attendees. Posts with no limit
 - **Invitations to connect** are links (`/#invite=<token>`). The token stays in the URL fragment, so it isn't sent
   in requests or logged; the server stores only its SHA-256, and the owner's encrypted vault keeps the link to share
   again. Connecting makes two people contacts, the same as matching (the server records the pair in `connections`).
-- **Notifications** go through the browser vendor's push service (Google, Mozilla, Apple or Microsoft). They're
+- **Notifications** go through the browser vendor's push service (Google, Mozilla, Apple, or Microsoft). They're
   encrypted for the device, so the service can't read them, but it does see when they're sent and to which device.
   The text stays generic ("New message about “Picnic”"): no names, and never message contents.
 - **Your location for the distance filter** stays in your browser (`localStorage`). Discover sends the server only a
@@ -110,7 +110,7 @@ A post stays in the deck until it reaches its max attendees. Posts with no limit
 - **Chat is end-to-end encrypted** (ECDH P-256 → HKDF per match → AES-GCM). Your chat private key is stored
   encrypted under the vault key, so any of your passkeys can read your chats on a new device. Prototype caveat:
   static keys, so no forward secrecy.
-- **What the server still knows:** which GUIDs swiped on, matched and messaged which other GUIDs, and when;
+- **What the server still knows:** which GUIDs swiped on, matched, and messaged which other GUIDs, and when;
   post contents; who each private post is shared with (the browser expands your picked contacts and groups into
   GUIDs, and re-sends them when your groups change); IP addresses. See `TODO.md` for the full list of open security and privacy issues. Match records are kept for now.
 - `public/secure.js` holds all client-side crypto; `webauthn.js` verifies passkeys on the server with `node:crypto` only.

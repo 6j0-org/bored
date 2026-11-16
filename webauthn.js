@@ -2,7 +2,7 @@
 //
 // Registration trusts the browser-provided SPKI public key (AuthenticatorAttestationResponse.getPublicKey())
 // and uses attestation "none", so no CBOR parsing is needed. We still check the challenge, origin,
-// RP ID hash, user-presence/verification flags and that the credential ID matches the authenticator data.
+// RP ID hash, user-presence/verification flags, and that the credential ID matches the authenticator data.
 // Sign-in verifies the assertion signature over authenticatorData || SHA-256(clientDataJSON).
 
 import { createHash, createPublicKey, randomBytes, verify } from 'node:crypto';

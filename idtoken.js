@@ -2,7 +2,7 @@
 //
 // Tokens are compact JWTs signed with Ed25519 ("EdDSA"). The public keys come from the identity server's JWKS
 // (ID_JWKS_URL, default ID_ORIGIN + /.well-known/jwks.json), cached and re-fetched when an unknown kid shows up.
-// A token is accepted once: iss, aud, exp and nonce must match, and its jti is remembered until it expires.
+// A token is accepted once: iss, aud, exp, and nonce must match, and its jti is remembered until it expires.
 
 import { createPublicKey, verify } from 'node:crypto';
 

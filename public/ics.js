@@ -2,7 +2,7 @@
 // imports (Apple, Google, Outlook, Thunderbird…); opening the downloaded file hands it to the default one.
 import { parseWhen } from './when.js';
 
-// Text values escape backslash, semicolon, comma and newlines.
+// Text values escape backslash, semicolon, comma, and newlines.
 const text = (s) => String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
 
 // Lines are at most 75 octets; longer ones continue on the next line after a space.

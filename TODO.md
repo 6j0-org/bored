@@ -22,7 +22,7 @@ about **connections and metadata**, and about the limits of doing end-to-end enc
   server, so the server must know the pairs. Move this to the client (count from your own encrypted vault) once
   matches are protected.
 - [x] **P1: Posts are linkable to one account.** Fixed: the API only sends a GUID for people you've matched with
-  (`MATCHED` in `server.js`), so Discover, Confirm and waitlist entries are anonymous, and private posts can only
+  (`MATCHED` in `server.js`), so Discover, Confirm, and waitlist entries are anonymous, and private posts can only
   be shared with people you've matched with. The hosted/attended counts on cards can still hint at who it is.
 - [ ] **P1: Avatars link posts to one person.** By design, everyone has one Jdenticon, the same for every viewer
   (the API sends strangers its hash, `iconHash` in `server.js`, not the GUID). So anyone can still tell which posts
@@ -37,7 +37,7 @@ about **connections and metadata**, and about the limits of doing end-to-end enc
 - [ ] **P2: The location picker contacts OpenStreetMap.** While it's open, the browser fetches tiles from
   tile.openstreetmap.org, which sees the viewer's IP, the area they look at, and (via Referer) this site's origin.
   Consider self-hosting tiles or proxying them.
-- [ ] **P2: Push notifications reveal activity to push services.** Google, Mozilla, Apple or Microsoft see when each
+- [ ] **P2: Push notifications reveal activity to push services.** Google, Mozilla, Apple, or Microsoft see when each
   device gets a notification, which hints at when someone is matched or messaged. The server also stores each
   device's push subscription next to its account (`push_subscriptions`). Consider batching or delaying pushes.
 - [ ] **P2: Place names come from Nominatim.** When a host drops a pin, the server sends its coordinates to
@@ -54,7 +54,7 @@ about **connections and metadata**, and about the limits of doing end-to-end enc
 - [ ] **P0: HTTPS only in production.** Passkeys require a secure context outside `localhost`. Set `ORIGIN`
   (and `RP_ID`) and add HSTS. With `ORIGIN` unset, the server derives the expected origin from the `Host` /
   `X-Forwarded-Proto` headers (`originOf()` in `server.js`), which is only acceptable for local development.
-- [ ] **P1: The database is unencrypted at rest**, along with its backups. It holds the graph, public keys and
+- [ ] **P1: The database is unencrypted at rest**, along with its backups. It holds the graph, public keys, and
   ciphertext. Encrypt the disk and backups, and restrict access.
 - [ ] **P2: Hosting jurisdiction and legal requests.** Document what data exists and what we can be compelled to
   hand over (see section 1).
@@ -62,7 +62,7 @@ about **connections and metadata**, and about the limits of doing end-to-end enc
 ## 3. Web-app end-to-end encryption limits
 
 - [ ] **P0: The server delivers the code that holds the keys.** A malicious or compromised server can serve
-  JavaScript that exfiltrates the vault key, chat key or plaintext. This is the core weakness of web E2E. Options:
+  JavaScript that exfiltrates the vault key, chat key, or plaintext. This is the core weakness of web E2E. Options:
   a reproducible, signed build plus a verification browser extension, Subresource Integrity with pinned hashes
   published elsewhere, or native/PWA apps with signed updates.
 - [ ] **P0: Peer public keys aren't verified.** Chat keys come from the server (`other_pubkey` in `/api/matches`),
@@ -71,7 +71,7 @@ about **connections and metadata**, and about the limits of doing end-to-end enc
 - [ ] **P1: No forward secrecy.** Each user has one static ECDH key (`public/secure.js`), so leaking it exposes all
   past and future chats. Move to a ratcheting protocol (Signal-style double ratchet) or at least periodic key rotation.
 - [ ] **P1: No sender authentication inside a match.** Both parties share one symmetric key per match, so either side
-  could forge a message as the other, and the server can drop, reorder or replay ciphertexts. Add per-message
+  could forge a message as the other, and the server can drop, reorder, or replay ciphertexts. Add per-message
   signatures and sequence numbers.
 - [ ] **P1: The server injects system messages.** Edit notices and re-confirm replies are plaintext rows the server
   writes (`systemMessage()` in `server.js`). A malicious server can fake them. Mark them clearly as server-generated,
@@ -96,7 +96,7 @@ about **connections and metadata**, and about the limits of doing end-to-end enc
   tightened, and keep all user content going through `esc()`.
 - [ ] **P2: The browser extension attack surface** (extensions can read page content) is outside our control. Document it.
 
-## 5. Accounts, sessions and passkeys
+## 5. Accounts, sessions, and passkeys
 
 - [ ] **P1: Session lifetime and revocation.** Sessions last 30 days, with no "sign out everywhere" and no list of
   active sessions. Add both, plus shorter idle timeouts.
@@ -136,17 +136,17 @@ about **connections and metadata**, and about the limits of doing end-to-end enc
 
 - [ ] **P1: The identity server holds every app's keys.** It can't read Bored? data on its own (it never sees the root
   secret), but a compromised id.6j0.org page could derive every app's key for whoever signs in there. Keep it small,
-  strictly CSP'd and separately deployed. See the id repo's TODO.
+  strictly CSP'd, and separately deployed. See the id repo's TODO.
 - [ ] **P1: Signing out of Bored? doesn't sign out of id.6j0.org,** so "Continue" signs straight back in without a
   passkey prompt while the identity session lasts. Say so in the UI, and consider a "sign out of all 6j0.org apps" link.
 - [ ] **P2: Setup tickets and seen-token IDs live in process memory** (like passkey challenges): a restart between the
   redirect and account creation means signing in again.
 - [ ] **P2: No migration between modes.** A local-passkey account can't be linked to a 6j0.org identity (or back).
 
-## 6. Abuse, rate limiting and safety
+## 6. Abuse, rate limiting, and safety
 
-- [ ] **P0: No rate limiting anywhere.** Account creation, sign-in, posting, swiping, messaging and the public Discover
-  endpoints are all unthrottled. That allows spam, Sybil accounts, scraping and denial of service. Add per-IP and
+- [ ] **P0: No rate limiting anywhere.** Account creation, sign-in, posting, swiping, messaging, and the public Discover
+  endpoints are all unthrottled. That allows spam, Sybil accounts, scraping, and denial of service. Add per-IP and
   per-account limits (privacy-preserving where possible, e.g. Privacy Pass-style tokens).
 - [ ] **P0: In-person safety.** Users meet anonymous strangers in real life. Add blocking, reporting, safety tips, and
   a way to unmatch and hide your posts from someone. Design reporting so it doesn't break the privacy model
@@ -158,8 +158,8 @@ about **connections and metadata**, and about the limits of doing end-to-end enc
 ## 7. Data retention and deletion
 
 - [ ] **P1: No account deletion.** Add "delete my account", which removes the user, passkeys, sessions, vault, posts,
-  swipes and messages. Decide what happens to the other person's view of shared matches.
-- [ ] **P1: No retention policy.** Cancelled posts, declined swipes, finished matches and messages are kept forever.
+  swipes, and messages. Decide what happens to the other person's view of shared matches.
+- [ ] **P1: No retention policy.** Cancelled posts, declined swipes, finished matches, and messages are kept forever.
   Define retention and purge on a schedule.
 - [ ] **P2: Seed data.** `seed.js` creates demo accounts with fixed, recognizable GUIDs (`00000000-0000-4000-8000-…`).
   Never run it against production.

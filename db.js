@@ -6,7 +6,7 @@ db.exec(`
 PRAGMA journal_mode = WAL;
 PRAGMA foreign_keys = ON;
 
--- Accounts have no name, email or password: just a random GUID, authenticated by passkeys.
+-- Accounts have no name, email, or password: just a random GUID, authenticated by passkeys.
 -- Everything private is encrypted in the browser; the server only ever stores ciphertext ("iv.ciphertext", base64url).
 CREATE TABLE IF NOT EXISTS users (
   id              INTEGER PRIMARY KEY,

@@ -90,7 +90,7 @@ export function pickLocation(initial = '', initialName = '', { title = 'Where?',
     sheet.innerHTML = `
       <div class="panel stack">
         <h2>${esc(title)}</h2>
-        <div class="map" tabindex="0" aria-label="Map. Drag to move, tap to place the pin, plus and minus keys to zoom.">
+        <div class="map" tabindex="0" aria-label="Map. Drag to move, tap to place the pin, and plus and minus keys to zoom.">
           <div class="tiles"></div>
           <div class="pin" hidden>${MAP_PIN_SVG}</div>
           <div class="map-zoom">

@@ -285,7 +285,7 @@ function tx(fn) {
 // notify(userId, { body, tag, open }) sends to all of that user's devices, best effort. Text stays generic: the
 // server doesn't know anyone's name, and messages are end-to-end encrypted. tag groups notifications on the device
 // (a newer one replaces an older one with the same tag); open says what the app shows when it's tapped
-// ('confirm', 'plans', 'profile' or 'chat:<matchId>'). Chat notifications are sent at most once a minute per chat.
+// ('confirm', 'plans', 'profile', or 'chat:<matchId>'). Chat notifications are sent at most once a minute per chat.
 const PUSH_SUBJECT = process.env.VAPID_SUBJECT || (process.env.ORIGIN?.startsWith('https:') ? process.env.ORIGIN : 'mailto:push@bored.invalid');
 const lastPush = new Map(); // "userId:tag" → time, for throttling chat notifications
 function notify(userId, { body, tag, open = '', throttle = false }) {
@@ -975,7 +975,7 @@ route('POST', '/api/push/unsubscribe', async ({ user, body, res }) => {
 });
 
 route('POST', '/api/push/test', async ({ user, res }) => {
-  notify(user.id, { body: "Notifications are on. You'll hear about requests, matches and messages here.", tag: 'test', open: 'profile' });
+  notify(user.id, { body: "Notifications are on. You'll hear about requests, matches, and messages here.", tag: 'test', open: 'profile' });
   send(res, 200, { ok: true });
 });
 

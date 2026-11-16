@@ -53,11 +53,12 @@ CREATE TABLE IF NOT EXISTS events (
   host_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   title          TEXT NOT NULL,
   details        TEXT NOT NULL DEFAULT '',
-  location       TEXT NOT NULL DEFAULT '',
-  when_text      TEXT NOT NULL DEFAULT '',
-  public_event   INTEGER NOT NULL DEFAULT 0,   -- 1 = open to everyone (public, or ticketed elsewhere), never capped
-  max_attendees  INTEGER,                      -- NULL = no limit; otherwise the post fills up at this many matches. Always NULL for open-to-everyone events
-  cost           TEXT NOT NULL DEFAULT 'free', -- free | low ($) | medium ($$) | high ($$$)
+  location       TEXT NOT NULL DEFAULT '',     -- "lat,lon", e.g. "32.719649,-117.220272"; '' = not given
+  when_text      TEXT NOT NULL DEFAULT '',     -- "YYYY-MM-DDTHH:MM[;RRULE]" in the host's local time (public/when.js); '' = not given
+  visibility     TEXT NOT NULL DEFAULT 'private', -- private (only the host's chosen contacts, in event_viewers) | public (anyone, even guests)
+  max_attendees  INTEGER,                      -- NULL = no limit; otherwise the post fills up at this many matches
+  cost_amount    REAL NOT NULL DEFAULT 0,      -- 0 = free; rounded to the currency's decimals (public/cost.js)
+  cost_currency  TEXT NOT NULL DEFAULT 'USD',  -- ISO 4217 code
   status         TEXT NOT NULL DEFAULT 'open',
   created_at     TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -94,6 +95,15 @@ CREATE TABLE IF NOT EXISTS event_tags (
   PRIMARY KEY (event_id, tag)
 );
 
+-- Who may see a private event. The host's browser expands the contacts and groups they picked (which live only in
+-- their encrypted vault) into accounts, and re-sends the list whenever those groups change.
+CREATE TABLE IF NOT EXISTS event_viewers (
+  event_id INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  user_id  INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  PRIMARY KEY (event_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_viewers_user ON event_viewers(user_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status ON events(status);
 CREATE INDEX IF NOT EXISTS idx_event_tags_tag ON event_tags(tag);
 CREATE INDEX IF NOT EXISTS idx_swipes_attendee ON swipes(attendee_id);
@@ -103,10 +113,8 @@ CREATE INDEX IF NOT EXISTS idx_messages_swipe ON messages(swipe_id);
 // Prototype: no migrations. After a schema change, delete data.sqlite* and run `npm run seed`.
 
 // ---------- tags ----------
-export const COSTS = ['free', 'low', 'medium', 'high'];
-export const COST_LABELS = { free: 'Free', low: '$', medium: '$$', high: '$$$' };
-
 export const MAX_ATTENDEES_LIMIT = 500;
+export const MAX_VIEWERS = 1000; // people one private event can be shared with
 
 export const MAX_TAGS = 5;
 export const MAX_TAG_LENGTH = 24;

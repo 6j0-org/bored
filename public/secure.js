@@ -4,7 +4,7 @@
 // - Each passkey yields a secret via the WebAuthn PRF extension (same passkey + same salt → same 32 bytes).
 //   HKDF turns it into a key-encryption key that wraps the account's random 256-bit *vault key*.
 //   The server stores one wrapped copy per passkey and never sees the PRF output or the vault key.
-// - The vault key encrypts the *vault* (your nickname for yourself, plus nickname + tags for each contact)
+// - The vault key encrypts the *vault* (nickname + tags for each contact, and who your private posts are shared with)
 //   and your ECDH P-256 *chat private key*. Your chat public key is stored in the clear so matches can reach you.
 // - Chat: ECDH(my private, their public) → HKDF(salt = match id) → AES-256-GCM key per match.
 //   (Prototype: static keys, so no forward secrecy.)
@@ -266,8 +266,9 @@ export async function addPasskey(api, nextStep) {
 }
 
 // ---------- vault: your private names for yourself and your contacts ----------
-// { v: 1, self: { nickname }, contacts: { [guid]: { nickname, tags: [], added } } }
-const emptyVault = () => ({ v: 1, self: { nickname: '' }, contacts: {} });
+// { v: 1, contacts: { [guid]: { nickname, tags: [], added } },
+//   audiences: { [eventId]: { groups: [tag], contacts: [guid] } } }  (who each of my private posts is shared with)
+const emptyVault = () => ({ v: 1, contacts: {}, audiences: {} });
 
 export const vault = {
   data: emptyVault(),
@@ -278,7 +279,7 @@ export const vault = {
   async load(api) {
     if (!this._sealed) { const r = await api('/api/vault'); this._sealed = r.data; this.version = r.version; }
     this.data = this._sealed ? JSON.parse(await openText(keys.vaultKey, this._sealed)) : emptyVault();
-    this.data.contacts ||= {}; this.data.self ||= { nickname: '' };
+    this.data.contacts ||= {}; this.data.audiences ||= {};
     this._sealed = null; this.loaded = true;
     return this.data;
   },

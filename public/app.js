@@ -3,6 +3,9 @@ import {
   prfSupport, createAccount, signIn, addPasskey, loadKeys, clearKeys, hasKeys, vault,
   encryptMessage, decryptMessage, PrfUnsupportedError, startIdSignIn, finishIdSignIn, hasIdCallback,
 } from './secure.js';
+import { locationHtml, mountLocationField } from './location.js';
+import { parseWhen, repeatOptions, whenLabel as fmtWhen, localToday } from './when.js';
+import { CURRENCIES, DEFAULT_CURRENCY, costLabel } from './cost.js';
 
 // Well-known tags: offered as one-tap suggestions, and the first one on a post picks its icon and color (.tag-<name>).
 // Posts can also use any other tag; those show with ✨ and a neutral color.
@@ -11,15 +14,25 @@ const TAG_ICONS = {
   repair: '🔧', pets: '🐕', tech: '💻', cooking: '🍲', errands: '🛒',
 };
 const MAX_TAGS = 5;
-// Cost levels (must match COSTS in db.js).
-const COSTS = { free: 'Free', low: '$', medium: '$$', high: '$$$' };
 const MAX_ATTENDEES_LIMIT = 500; // must match db.js
 const attendeesLabel = (max) => (max == null ? 'No limit' : max === 1 ? '1 person' : `Up to ${max} people`);
-const COST_HINTS = { free: 'Free', low: 'Under about $20', medium: 'About $20–50', high: 'Over about $50' };
 const tagLook = (tags = []) => {
   const known = tags.find(t => TAG_ICONS[t]);
   return known ? { ico: TAG_ICONS[known], cls: `tag-${known}` } : { ico: '✨', cls: 'tag-none' };
 };
+const whenLabel = (s) => fmtWhen(s, { today: localToday() });
+// Discover's cost filter: prices in different currencies can't be compared, so it's just free vs. paid.
+const COST_FILTERS = { free: 'Free', paid: 'Paid' };
+// The currency last picked in the post form, so it's the default next time.
+const lastCurrency = () => { try { return localStorage.getItem('currency') || DEFAULT_CURRENCY; } catch { return DEFAULT_CURRENCY; } };
+const currencyName = (() => { try { const n = new Intl.DisplayNames(undefined, { type: 'currency' }); return (c) => n.of(c); } catch { return (c) => c; } })();
+// Next local date and time at `hour` o'clock (on weekday `dow`, 0 = Sunday, if given), as stored in when_text.
+function nextAt(hour, dow) {
+  const d = new Date();
+  if (d.getHours() >= hour) d.setDate(d.getDate() + 1);
+  if (dow !== undefined) while (d.getDay() !== dow) d.setDate(d.getDate() + 1);
+  return `${localToday(d)}T${String(hour).padStart(2, '0')}:00`;
+}
 const tagChips = (tags = []) => tags.map(t => `<span class="chip tag">#${esc(t)}</span>`).join('');
 // Mirror of the server's normalizeTag (db.js) so chips show what will be saved.
 const normalizeTag = (raw) => String(raw ?? '').toLowerCase().trim().replace(/^#+/, '')
@@ -41,13 +54,14 @@ const TABS = [
 ];
 
 // Rotating ideas shown above the form in the Post tab. Tapping one opens a new post pre-filled with its template.
+// when: [hour, weekday?] becomes the next such time (see nextAt).
 const POST_IDEAS = [
   {
     prompt: "Is there a local restaurant you've been meaning to check out?",
     template: {
       title: 'Try out a local restaurant together',
       details: "There's a place nearby I've been meaning to check out. Want to come along? We can each get our own check.",
-      tags: ['food', 'social'], max_attendees: 2, when_text: 'This week, dinner', cost: 'medium',
+      tags: ['food', 'social'], max_attendees: 2, when: [19],
     },
   },
   {
@@ -55,7 +69,7 @@ const POST_IDEAS = [
     template: {
       title: 'Walk around the neighborhood',
       details: 'Looking for some company on a walk. Easy pace, about an hour. Dogs welcome!',
-      tags: ['social', 'outdoors'], max_attendees: 1, when_text: 'This evening',
+      tags: ['social', 'outdoors'], max_attendees: 1, when: [18],
     },
   },
   {
@@ -63,7 +77,7 @@ const POST_IDEAS = [
     template: {
       title: 'Help tending the garden',
       details: "Weeding, watering and some general tidying. I'll provide gloves, tools and something cold to drink.",
-      tags: ['garden', 'outdoors'], max_attendees: 1, when_text: 'Saturday morning',
+      tags: ['garden', 'outdoors'], max_attendees: 1, when: [10, 6],
     },
   },
   {
@@ -71,7 +85,7 @@ const POST_IDEAS = [
     template: {
       title: 'Grocery run together',
       details: "Heading to the grocery store. Come along and we'll make a trip of it. Happy to share a ride.",
-      tags: ['errands', 'social'], max_attendees: 1, when_text: 'This weekend',
+      tags: ['errands', 'social'], max_attendees: 1, when: [11, 6],
     },
   },
   {
@@ -79,7 +93,7 @@ const POST_IDEAS = [
     template: {
       title: 'Help assembling some furniture',
       details: "Got a flat-pack piece that's a two-person job. I have the instructions and an Allen key; a drill would be a bonus. Should take an hour or two.",
-      tags: ['repair'], max_attendees: 1, when_text: 'This weekend',
+      tags: ['repair'], max_attendees: 1, when: [14, 0],
     },
   },
   {
@@ -87,7 +101,7 @@ const POST_IDEAS = [
     template: {
       title: 'Go for a hike',
       details: "Thinking of hitting a trail nearby. Moderate pace, a few hours. Bring water and good shoes, and we can carpool to the trailhead.",
-      tags: ['outdoors', 'social'], max_attendees: 2, when_text: 'Sunday morning',
+      tags: ['outdoors', 'social'], max_attendees: 2, when: [9, 0],
     },
   },
   {
@@ -95,14 +109,14 @@ const POST_IDEAS = [
     template: {
       title: 'Check out an event around town',
       details: "There's something happening around town that looks fun. Say what it is and where to find details, and anyone who's interested can come along.",
-      tags: ['events', 'social'], public_event: true, when_text: '',
+      tags: ['events', 'social'], visibility: 'public',
     },
   },
 ];
 const POST_IDEA_MS = 5000;
 
 // config.authMode: 'local' (Bored? passkeys) | '6j0' (sign in with a 6j0.org identity at config.idOrigin).
-const state = { config: { authMode: 'local' }, me: null, tab: 'discover', chat: null, discoverTags: loadSet('discoverTags'), discoverCosts: loadSet('discoverCosts') };
+const state = { config: { authMode: 'local' }, me: null, tab: 'discover', chat: null, discoverTags: loadSet('discoverTags'), discoverCosts: new Set([...loadSet('discoverCosts')].filter(c => c in COST_FILTERS)) };
 const app = document.getElementById('app');
 
 // ---------- utils ----------
@@ -141,17 +155,17 @@ function toast(msg) {
 
 // ---------- people ----------
 // Nobody has a public name. You see the nickname *you* gave someone (stored in your encrypted vault) once you've
-// connected (matched); everyone else is "A neighbor". Your own nickname for yourself is also private to you.
+// connected (matched); everyone else is "A neighbor". You are just "You".
 const isContact = (guid) => Boolean(vault.data.contacts[guid]);
 function displayName(guid) {
-  if (state.me && guid === state.me.guid) return vault.data.self.nickname || 'You';
+  if (state.me && guid === state.me.guid) return 'You';
   const c = vault.data.contacts[guid];
   return c ? (c.nickname || 'Unnamed contact') : 'A neighbor';
 }
 function hue(s) { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
-// Color comes from the GUID; the letter from your nickname for them (strangers get a plain dot).
+// Color comes from the GUID; the letter from your nickname for them (strangers and you get a plain dot).
 const avatar = (guid, cls = '') => {
-  const named = (state.me && guid === state.me.guid && vault.data.self.nickname) || vault.data.contacts[guid]?.nickname;
+  const named = vault.data.contacts[guid]?.nickname;
   return `<div class="avatar ${cls}" style="background:hsl(${hue(guid)} 55% 45%)">${named ? esc([...named][0].toUpperCase()) : '•'}</div>`;
 };
 
@@ -438,10 +452,11 @@ function eventCard(t) {
       <h2>${esc(t.title)}</h2>
       ${t.tags.length ? `<div class="meta">${tagChips(t.tags)}</div>` : ''}
       <div class="meta">
-        ${t.location ? `<span class="chip">📍 ${esc(t.location)}</span>` : ''}
-        ${t.when_text ? `<span class="chip">🗓 ${esc(t.when_text)}</span>` : ''}
-        <span class="chip" title="${esc(COST_HINTS[t.cost])}">💵 ${esc(COSTS[t.cost] || 'Free')}</span>
-        <span class="chip">${t.public_event ? '🎟️ Open to everyone' : `👥 ${attendeesLabel(t.max_attendees)}`}</span>
+        ${locationHtml(t.location, 'chip')}
+        ${t.when_text ? `<span class="chip">🗓 ${esc(whenLabel(t.when_text))}</span>` : ''}
+        <span class="chip">💵 ${esc(costLabel(t.cost_amount, t.cost_currency))}</span>
+        <span class="chip">👥 ${attendeesLabel(t.max_attendees)}</span>
+        ${t.visibility === 'private' ? `<span class="chip" title="The host shared this with you">🔒 Private</span>` : ''}
       </div>
       ${t.details ? `<div class="details">${esc(t.details)}</div>` : ''}
       <div class="who">${avatar(t.host.guid)}
@@ -467,7 +482,7 @@ async function viewDiscover(v) {
       ${tags.length ? `<div class="filter-row" role="group" aria-label="Filter by tag"><span class="label">Tags</span>
         ${tags.map(({ tag, count }) => chip('tag', tag, `${TAG_ICONS[tag] || '#'} ${esc(tag)}`, count, selTags.has(tag))).join('')}</div>` : ''}
       <div class="filter-row" role="group" aria-label="Filter by cost"><span class="label">Cost</span>
-        ${options.costs.map(({ cost, count }) => chip('cost', cost, esc(COSTS[cost]), count, selCosts.has(cost), COST_HINTS[cost])).join('')}
+        ${options.costs.map(({ cost, count }) => chip('cost', cost, esc(COST_FILTERS[cost]), count, selCosts.has(cost))).join('')}
         ${selTags.size || selCosts.size ? `<button type="button" class="chip filter clear" data-clear>Clear all</button>` : ''}
       </div>`;
   }
@@ -520,7 +535,7 @@ function deckOptions(events, filters) {
     },
     empty: filters.tags.length || filters.costs.length
       ? `<div class="empty"><div class="big">🔎</div><h3>No matches for these filters</h3>
-          <p>${[filters.tags.length && filters.tags.map(t => '#' + esc(t)).join(' or '), filters.costs.length && filters.costs.map(c => esc(COSTS[c])).join(' or ')].filter(Boolean).join(' · ')}</p>
+          <p>${[filters.tags.length && filters.tags.map(t => '#' + esc(t)).join(' or '), filters.costs.length && filters.costs.map(c => esc(COST_FILTERS[c])).join(' or ')].filter(Boolean).join(' · ')}</p>
           <p>Nothing open matches right now. Try other filters, or see everything.</p>
           <button class="btn" id="clearFilters">Show all posts</button></div>`
       : `<div class="empty"><div class="big">🌤</div><h3>Still bored?</h3>
@@ -641,7 +656,7 @@ async function viewChat(v, id) {
         ${avatar(m.other)}
         <div class="grow" style="flex:1;min-width:0">
           <button type="button" class="link" id="rename" title="Change the nickname only you see">${esc(name)} ✎</button>
-          <div class="sub" style="color:var(--muted);font-size:.85rem">${tagLook(m.tags).ico} ${esc(m.title)}${m.when_text ? ' · ' + esc(m.when_text) : ''}${m.location ? ' · ' + esc(m.location) : ''}</div>
+          <div class="sub" style="color:var(--muted);font-size:.85rem">${tagLook(m.tags).ico} ${esc(m.title)}${m.when_text ? ' · ' + esc(whenLabel(m.when_text)) : ''}${m.location ? ' · ' + locationHtml(m.location) : ''}</div>
         </div>
         ${m.role === 'host' && m.status === 'accepted' ? `<button class="btn small" id="happened">It happened</button>` : ''}
       </div>
@@ -723,31 +738,163 @@ function eventFormFields(t = {}) {
         <div class="tag-box"><input class="tag-input" placeholder="Add tags, e.g. garden, social" aria-label="Add a tag" maxlength="30" enterkeyhint="done"></div>
         <div class="tag-suggest"></div>
       </div>
-      <div class="two">
-        <input name="location" placeholder="📍 Where" maxlength="100" value="${val('location')}">
-        <input name="when_text" placeholder="🗓 When" maxlength="100" value="${val('when_text')}">
+      <div class="loc-field">
+          <input name="location" placeholder="📍 Where: lat,lon" maxlength="100" value="${val('location')}"
+            title="Latitude,longitude, e.g. 32.719649,-117.220272" autocomplete="off" spellcheck="false">
+          <button type="button" class="btn ghost small loc-pick" aria-label="Pick on a map" title="Pick on a map">🗺️</button>
       </div>
-      <fieldset class="cost-pick"><legend style="float:left;margin-right:10px">💵 Cost</legend><div class="seg">
-        ${Object.entries(COSTS).map(([k, label]) => `<label title="${esc(COST_HINTS[k])}"><input type="radio" name="cost" value="${k}" ${(t.cost || 'free') === k ? 'checked' : ''}><span>${label}</span></label>`).join('')}
-      </div></fieldset>
-      <label class="switch-row"><input type="checkbox" name="public_event" ${t.public_event ? 'checked' : ''}>
-        🎟️ Open to everyone <small>Public, or ticketed elsewhere, so no attendee cap</small></label>
-      <label class="inline max-attendees" ${t.public_event ? 'hidden' : ''}>👥 Max attendees
+      ${whenInputs(t.when_text)}
+      ${costInputs(t)}
+      ${audienceInputs(t)}
+      <label class="inline max-attendees">👥 Max attendees
         <input name="max_attendees" type="number" inputmode="numeric" step="1" min="${Math.max(1, t.matched || 0)}" max="${MAX_ATTENDEES_LIMIT}"
           placeholder="No limit" value="${t.max_attendees ?? ''}">
         <small>Leave blank for no limit</small></label>`;
 }
 
+// "When": the browser's date and time picker for the first (or only) time, plus a Repeats menu whose choices
+// follow the date picked (see public/when.js).
+const repeatOptionsHtml = (start, selected) => repeatOptions(start)
+  .map(o => `<option value="${o.rule}" data-kind="${o.kind}" ${o.kind === selected ? 'selected' : ''}>${esc(o.label)}</option>`).join('');
+function whenInputs(v = '') {
+  const w = parseWhen(v);
+  return `
+      <label class="inline when-field">🗓 When
+        <input name="when_text" type="datetime-local" value="${esc(w?.start ?? '')}"></label>
+      <label class="inline when-field">🔁 Repeats
+        <select name="when_repeat" ${w ? '' : 'disabled'}>${repeatOptionsHtml(w?.start, w?.repeat.kind)}</select></label>`;
+}
+// New date → new repeat choices, keeping the same kind of repeat where it still exists. "The Nth weekday" and
+// "the last weekday" stand in for each other, since a date near the end of a month may offer only one of them.
+function mountWhenFields(form) {
+  const input = form.querySelector('input[name=when_text]'), sel = form.querySelector('select[name=when_repeat]');
+  if (!input || !sel) return;
+  input.addEventListener('input', () => {
+    const kind = sel.selectedOptions[0]?.dataset.kind || 'once', kinds = repeatOptions(input.value).map(o => o.kind);
+    const keep = kinds.includes(kind) ? kind
+      : ['nthday', 'lastday'].includes(kind) ? kinds.find(k => k === 'nthday' || k === 'lastday') : 'once';
+    sel.innerHTML = repeatOptionsHtml(input.value, keep);
+    sel.disabled = !input.value;
+  });
+}
+
+// Cost: an amount (blank or 0 = free) and a currency, which defaults to the last one picked.
+function costInputs(t = {}) {
+  const cur = t.cost_currency || lastCurrency();
+  return `
+      <div class="cost-field">
+        <label for="costAmount">💵 Cost</label>
+        <input id="costAmount" name="cost_amount" type="number" inputmode="decimal" min="0" step="any" placeholder="Free"
+          value="${t.cost_amount ? esc(t.cost_amount) : ''}">
+        <select name="cost_currency" aria-label="Currency" title="${esc(currencyName(cur))}">
+          ${CURRENCIES.map(c => `<option value="${c}" ${c === cur ? 'selected' : ''}>${c} · ${esc(currencyName(c))}</option>`).join('')}
+        </select>
+      </div>`;
+}
+function mountCostFields(form) {
+  const sel = form.querySelector('select[name=cost_currency]');
+  sel?.addEventListener('change', () => {
+    sel.title = currencyName(sel.value);
+    try { localStorage.setItem('currency', sel.value); } catch {}
+  });
+}
+
 // Chip-style tag input inside eventFormFields. Keeps the hidden "tags" input in sync (comma-separated).
 // Enter or comma adds a tag, Backspace on an empty box removes the last, suggestions add with one tap.
-// Open-to-everyone switch: hides the attendee cap (the server ignores it too) and adds #events as a convenience.
-function mountPublicEventSwitch(form) {
-  const box = form.querySelector('input[name=public_event]'), cap = form.querySelector('.max-attendees');
-  if (!box || !cap) return;
-  box.addEventListener('change', () => {
-    cap.hidden = box.checked;
-    if (box.checked) form.querySelector('.tag-editor')?.dispatchEvent(new CustomEvent('tag:add', { detail: 'events' }));
+// ---------- who can see a post ----------
+// Public posts show in everyone's Discover, even guests'. Private ones only for the contacts and groups (contact
+// tags) the host picks. Contacts live only in the encrypted vault, so the browser expands the pick into account
+// GUIDs for the server, and keeps the pick itself in the vault (audiences[eventId]) so it can re-send the list when
+// group membership changes (syncAudiences).
+const emptyAudience = () => ({ groups: [], contacts: [] });
+const audienceOf = (eventId) => vault.data.audiences?.[eventId] || emptyAudience();
+function audienceGuids({ groups = [], contacts = [] }) {
+  const all = vault.data.contacts;
+  return [...new Set([...contacts.filter(g => all[g]), ...Object.keys(all).filter(g => (all[g].tags || []).some(t => groups.includes(t)))])];
+}
+const contactGroups = () => {
+  const counts = {};
+  for (const c of Object.values(vault.data.contacts)) for (const t of c.tags || []) counts[t] = (counts[t] || 0) + 1;
+  return Object.entries(counts).sort(([a], [b]) => a.localeCompare(b));
+};
+
+function audienceInputs(t = {}) {
+  const vis = t.visibility || 'private';
+  return `
+      <fieldset class="seg-pick"><legend>Who can see it?</legend><div class="seg">
+        <label><input type="radio" name="visibility" value="private" ${vis === 'private' ? 'checked' : ''}><span>🔒 Private</span></label>
+        <label><input type="radio" name="visibility" value="public" ${vis === 'public' ? 'checked' : ''}><span>🌐 Public</span></label>
+      </div></fieldset>
+      <div class="audience" ${vis === 'public' ? 'hidden' : ''} data-audience="${esc(JSON.stringify(t.id ? audienceOf(t.id) : emptyAudience()))}"></div>`;
+}
+
+// Draws the group and contact chips; form.audience() returns the current pick.
+function mountAudience(form) {
+  const box = form.querySelector('.audience');
+  if (!box) return;
+  const pick = JSON.parse(box.dataset.audience);
+  const radios = form.querySelectorAll('input[name=visibility]');
+  const draw = () => {
+    const groups = contactGroups();
+    const contacts = Object.keys(vault.data.contacts).sort((a, b) => displayName(a).localeCompare(displayName(b)));
+    const n = audienceGuids(pick).length;
+    const chip = (kind, value, label, on) =>
+      `<button type="button" class="chip filter ${on ? 'on' : ''}" data-${kind}="${esc(value)}" aria-pressed="${on}">${label}</button>`;
+    box.innerHTML = !contacts.length
+      ? `<p class="note">You don't have any contacts yet; people are added when you match with them. Until then only you
+          can see a private post. Make it public to find people.</p>`
+      : `${groups.length ? `<div class="filter-row" role="group" aria-label="Groups"><span class="label">Groups</span>
+          ${groups.map(([g, count]) => chip('group', g, `${CONTACT_TAGS[g] || '#'} ${esc(g)} <span class="n">${count}</span>`, pick.groups.includes(g))).join('')}</div>` : ''}
+        <div class="filter-row" role="group" aria-label="Contacts"><span class="label">People</span>
+          ${contacts.map(g => chip('contact', g, esc(displayName(g)), pick.contacts.includes(g))).join('')}</div>
+        <p class="note">${n ? `Only you and ${n === 1 ? '1 person' : `${n} people`} can see this.` : 'Only you can see this until you pick someone.'}
+          ${pick.groups.length ? 'People you add to these groups later will see it too.' : ''}</p>`;
+  };
+  box.addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    const [list, v] = b.dataset.group ? [pick.groups, b.dataset.group] : [pick.contacts, b.dataset.contact];
+    const i = list.indexOf(v);
+    if (i >= 0) list.splice(i, 1); else list.push(v);
+    draw();
   });
+  radios.forEach(r => r.addEventListener('change', () => { box.hidden = form.querySelector('input[name=visibility]:checked').value === 'public'; }));
+  form.audience = () => (form.querySelector('input[name=visibility]:checked')?.value === 'public' ? null : pick);
+  draw();
+}
+
+// Create or update a post from its form, including who can see it, and remember the pick in the vault.
+async function saveEvent(form, id) {
+  const pick = form.audience?.() ?? null;
+  const body = { ...formData(form), viewers: pick ? audienceGuids(pick) : [] };
+  const r = id ? await api(`/api/events/${id}`, { method: 'PATCH', body }) : await api('/api/events', { method: 'POST', body });
+  const eventId = id || r.id;
+  const had = Boolean(vault.data.audiences?.[eventId]);
+  if (hasKeys() && (pick || had)) {
+    await vault.update(api, (d) => {
+      d.audiences ||= {};
+      if (pick) d.audiences[eventId] = { groups: [...pick.groups], contacts: [...pick.contacts] };
+      else delete d.audiences[eventId];
+    }).catch(err => toast(err.message));
+  }
+  return r;
+}
+
+// What a new post's audience is, for the toast after posting.
+function postedMessage(form) {
+  const pick = form.audience?.();
+  if (!pick) return 'Posted! Anyone can now swipe on it.';
+  const n = audienceGuids(pick).length;
+  return n ? `Posted! ${n === 1 ? '1 person' : `${n} people`} can now swipe on it.` : 'Posted. Only you can see it until you share it with someone.';
+}
+
+// After contacts' groups change, re-send who can see each private post shared with a group.
+async function syncAudiences() {
+  const entries = Object.entries(vault.data.audiences || {}).filter(([, a]) => a.groups?.length);
+  const gone = [];
+  await Promise.all(entries.map(([id, a]) => api(`/api/events/${id}/viewers`, { method: 'PUT', body: { viewers: audienceGuids(a) } })
+    .catch(err => { if (/not found/i.test(err.message)) gone.push(id); })));
+  if (gone.length) await vault.update(api, (d) => { for (const id of gone) delete d.audiences?.[id]; });
 }
 
 // suggestions: { tag: icon } offered as one-tap chips (post tags by default; contacts use CONTACT_TAGS).
@@ -807,7 +954,10 @@ function openPostSheet(t = {}) {
     </form>`;
   document.body.appendChild(sheet);
   sheet.querySelectorAll('.tag-editor').forEach(mountTagEditor);
-  mountPublicEventSwitch(sheet.querySelector('form'));
+  mountAudience(sheet.querySelector('form'));
+  mountLocationField(sheet.querySelector('form'));
+  mountWhenFields(sheet.querySelector('form'));
+  mountCostFields(sheet.querySelector('form'));
   const close = () => sheet.remove();
   sheet.querySelector('#cancelSheet').onclick = close;
   sheet.onclick = (e) => { if (e.target === sheet) close(); };
@@ -815,11 +965,11 @@ function openPostSheet(t = {}) {
     e.preventDefault();
     try {
       if (editing) {
-        const r = await api(`/api/events/${t.id}`, { method: 'PATCH', body: formData(e.target) });
+        const r = await saveEvent(e.target, t.id);
         toast(r.notified ? `Saved. Asked ${r.notified} attendee${r.notified > 1 ? 's' : ''} to re-confirm.` : 'Saved');
       } else {
-        await api('/api/events', { method: 'POST', body: formData(e.target) });
-        toast('Posted! Neighbors can now swipe on it.');
+        await saveEvent(e.target);
+        toast(postedMessage(e.target));
       }
       close();
       render();
@@ -829,7 +979,7 @@ function openPostSheet(t = {}) {
 }
 
 // Cycle through POST_IDEAS; pauses while hovered, while the form has focus, or while a sheet is open.
-// Tap the idea to open its template; tap › to skip ahead.
+// Tap the idea to open its template; tap ‹ or › to step back or ahead.
 function rotatePostIdeas(el) {
   const text = el.querySelector('.text');
   let i = Math.floor(Math.random() * POST_IDEAS.length);
@@ -838,9 +988,14 @@ function rotatePostIdeas(el) {
     text.textContent = POST_IDEAS[i].prompt; text.classList.add('in');
   };
   const next = () => { i = (i + 1) % POST_IDEAS.length; show(); };
+  const prev = () => { i = (i - 1 + POST_IDEAS.length) % POST_IDEAS.length; show(); };
   show();
-  el.querySelector('.idea-open').onclick = () => openPostSheet({ ...POST_IDEAS[i].template });
+  el.querySelector('.idea-open').onclick = () => {
+    const { when, ...t } = POST_IDEAS[i].template;
+    openPostSheet({ ...t, when_text: when ? nextAt(...when) : '' });
+  };
   el.querySelector('.idea-next').onclick = next;
+  el.querySelector('.idea-prev').onclick = prev;
   const timer = setInterval(() => {
     if (!document.body.contains(el)) return clearInterval(timer);
     if (el.matches(':hover') || document.activeElement?.closest('#newEvent') || document.querySelector('.sheet')) return;
@@ -861,6 +1016,7 @@ async function viewPost(v) {
       <button type="button" class="idea-open" title="Start a post from this idea">
         <span class="ico">💡</span><span class="text" aria-live="polite"></span>
       </button>
+      <button type="button" class="idea-prev" aria-label="Previous idea" title="Previous idea">‹</button>
       <button type="button" class="idea-next" aria-label="Next idea" title="Next idea">›</button>
     </div>
     <form class="stack" id="newEvent">
@@ -875,7 +1031,7 @@ async function viewPost(v) {
           <div class="grow">
             <div class="title">${esc(t.title)}</div>
             ${t.tags.length ? `<div class="sub">${t.tags.map(x => '#' + esc(x)).join(' ')}</div>` : ''}
-            <div class="sub">${t.public_event ? `${t.matched} going · open to everyone` : t.max_attendees == null ? `${t.matched} matched · no limit` : `${t.matched}/${t.max_attendees} matched`}${t.awaiting ? ` · ${t.awaiting} to re-confirm` : ''}${t.when_text ? ' · ' + esc(t.when_text) : ''}</div>
+            <div class="sub">${t.visibility === 'public' ? '🌐 Public' : `🔒 ${t.viewers ? `${t.viewers} can see` : 'Only you'}`} · ${t.max_attendees == null ? `${t.matched} matched · no limit` : `${t.matched}/${t.max_attendees} matched`}${t.awaiting ? ` · ${t.awaiting} to re-confirm` : ''}${t.when_text ? ' · ' + esc(whenLabel(t.when_text)) : ''}</div>
           </div>
           ${statusPill(t)}
           ${t.status !== 'past' ? `<button class="btn ghost small" data-edit="${t.id}" aria-label="Edit">✎</button>
@@ -884,38 +1040,39 @@ async function viewPost(v) {
     </div>`;
   rotatePostIdeas(v.querySelector('#postIdea'));
   v.querySelectorAll('.tag-editor').forEach(mountTagEditor);
-  mountPublicEventSwitch(v.querySelector('#newEvent'));
+  mountAudience(v.querySelector('#newEvent'));
+  mountLocationField(v.querySelector('#newEvent'));
+  mountWhenFields(v.querySelector('#newEvent'));
+  mountCostFields(v.querySelector('#newEvent'));
   v.querySelector('#newEvent').onsubmit = async (e) => {
     e.preventDefault();
-    try { await api('/api/events', { method: 'POST', body: formData(e.target) }); toast('Posted! Neighbors can now swipe on it.'); render(); }
+    try { await saveEvent(e.target); toast(postedMessage(e.target)); render(); }
     catch (err) { toast(err.message); }
   };
   v.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openPostSheet(events.find(t => t.id === Number(b.dataset.edit))));
   v.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
     if (!confirm('Remove this post?')) return;
     await api(`/api/events/${b.dataset.del}`, { method: 'DELETE' });
+    if (vault.data.audiences?.[b.dataset.del]) await vault.update(api, (d) => { delete d.audiences[b.dataset.del]; }).catch(() => {});
     render();
   });
 }
 
-// Edit the nickname and tags you keep for a contact (or yourself). Saved only in your encrypted vault.
+// Edit the nickname and tags you keep for a contact. Saved only in your encrypted vault.
 function openContactSheet(guid, onSaved) {
-  const self = guid === state.me.guid;
-  const c = self ? vault.data.self : (vault.data.contacts[guid] || { nickname: '', tags: [] });
+  const c = vault.data.contacts[guid] || { nickname: '', tags: [] };
   const sheet = document.createElement('div');
   sheet.className = 'sheet';
   sheet.innerHTML = `
     <form class="stack panel" id="contactForm">
-      <h2>${self ? 'Your nickname' : 'Contact'}</h2>
-      <p class="note">${self ? 'What you call yourself here. Only you see it.'
-        : 'Only you see the nickname and tags you give them. They pick their own name for you.'}</p>
-      <input name="nickname" maxlength="60" placeholder="${self ? 'e.g. BigPeePeeMan2000' : 'e.g. Robert from work'}" value="${esc(c.nickname)}">
-      ${self ? '' : `
+      <h2>Contact</h2>
+      <p class="note">Only you see the nickname and tags you give them. They pick their own name for you.</p>
+      <input name="nickname" maxlength="60" placeholder="e.g. Robert from work" value="${esc(c.nickname)}">
       <div class="tag-editor" data-tags="${esc(JSON.stringify(c.tags || []))}">
         <input type="hidden" name="tags">
         <div class="tag-box"><input class="tag-input" placeholder="Tags, e.g. family, work" aria-label="Add a tag" maxlength="30"></div>
         <div class="tag-suggest"></div>
-      </div>`}
+      </div>
       <div class="two">
         <button type="button" class="btn ghost" id="cancelSheet">Cancel</button>
         <button class="btn">Save</button>
@@ -933,10 +1090,10 @@ function openContactSheet(guid, onSaved) {
     const tags = String(f.tags || '').split(',').filter(Boolean);
     try {
       await vault.update(api, (d) => {
-        if (self) d.self.nickname = nickname;
-        else d.contacts[guid] = { ...(d.contacts[guid] || { added: new Date().toISOString() }), nickname, tags };
+        d.contacts[guid] = { ...(d.contacts[guid] || { added: new Date().toISOString() }), nickname, tags };
       });
       close(); toast('Saved. Only you can see this.');
+      syncAudiences().catch(err => toast(err.message));
       onSaved?.();
     } catch (err) { toast(err.message); }
   };
@@ -959,8 +1116,7 @@ async function viewProfile(v) {
 
   v.innerHTML = `
     <div class="me-head">${avatar(me.guid)}
-      <div class="grow"><h2>${esc(vault.data.self.nickname || 'You')}</h2>
-        <button type="button" class="link" id="editSelf">${vault.data.self.nickname ? 'Change' : 'Give yourself'} a nickname only you see ✎</button></div>
+      <div class="grow"><h2>You</h2></div>
     </div>
     <div class="stats">
       <div class="stat"><b>${me.hosted}</b><span>events hosted</span></div>
@@ -997,7 +1153,6 @@ async function viewProfile(v) {
 
     <button class="btn danger" id="logout" style="margin-top:24px">Sign out</button>`;
 
-  v.querySelector('#editSelf').onclick = () => openContactSheet(me.guid, () => render());
   v.querySelectorAll('[data-contact]').forEach(b => b.onclick = () => openContactSheet(b.dataset.contact, () => render()));
   v.querySelectorAll('[data-ctag]').forEach(b => b.onclick = () => {
     sel.has(b.dataset.ctag) ? sel.delete(b.dataset.ctag) : sel.add(b.dataset.ctag); render();
@@ -1030,7 +1185,7 @@ if (state.config.authMode === '6j0' && hasIdCallback()) {
   try {
     const res = await finishIdSignIn(api);
     await enterApp(res.created ? 'profile' : 'discover');
-    toast(res.created ? 'Account created! Give yourself a nickname only you can see.' : 'Welcome back!');
+    toast(res.created ? 'Account created!' : 'Welcome back!');
   } catch (e) {
     await refreshMe();
     if (state.me && !hasKeys()) state.tab = 'account';

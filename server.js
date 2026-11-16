@@ -3,7 +3,9 @@ import { readFile } from 'node:fs/promises';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { newChallenge, takeChallenge, verifyRegistration, verifyAssertion, WebAuthnError } from './webauthn.js';
 import { verifyIdToken, IdTokenError } from './idtoken.js';
-import { db, parseTags, setEventTags, MAX_TAGS, COSTS, COST_LABELS, MAX_ATTENDEES_LIMIT } from './db.js';
+import { composeWhen, whenLabel } from './public/when.js';
+import { parseCost, costLabel } from './public/cost.js';
+import { db, parseTags, setEventTags, MAX_TAGS, MAX_ATTENDEES_LIMIT, MAX_VIEWERS } from './db.js';
 
 const PORT = Number(process.env.PORT || 3000);
 // Passkeys are bound to an origin. Defaults to whatever host the browser used (fine for localhost);
@@ -120,21 +122,48 @@ function maxAttendeesField(v) {
   return n;
 }
 
+// Location: "lat,lon" with 6 decimals, e.g. "32.719649,-117.220272", or blank.
+function locationField(v) {
+  const s = str(v, 100, { field: 'Location' });
+  if (!s) return s;
+  const m = /^(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)$/.exec(s);
+  const lat = m && Number(m[1]), lon = m && Number(m[2]);
+  if (!m || Math.abs(lat) > 90 || Math.abs(lon) > 180)
+    throw new HttpError(400, 'Where must be "latitude,longitude", e.g. 32.719649,-117.220272, or picked on the map');
+  return `${lat.toFixed(6)},${lon.toFixed(6)}`;
+}
+
+// When: a date and time, optionally repeating; format in public/when.js. Blank = unspecified.
+function whenField(start, repeat) {
+  const s = str(start, 100, { field: 'When' });
+  const rule = str(repeat, 100, { field: 'Repeats' });
+  if (!s) return s;
+  const v = composeWhen(s, rule);
+  if (!v) throw new HttpError(400, rule ? "That repeat doesn't fit the date picked" : 'When must be a date and time');
+  return v;
+}
+
+function costFields(amount, currency) {
+  const c = parseCost(amount, currency);
+  if (c.error) throw new HttpError(400, c.error);
+  return c;
+}
+
 function eventFields(body) {
-  // Open-to-everyone events (public, or ticketed elsewhere) never have a cap.
-  const publicEvent = [true, 'on', 'true', '1', 1].includes(body.public_event) ? 1 : 0;
+  const cost = costFields(body.cost_amount, body.cost_currency);
   return {
-    public_event: publicEvent,
+    visibility: body.visibility === 'public' ? 'public' : 'private',
     title: str(body.title, 100, { required: true, field: 'Title' }),
     details: str(body.details, 1000, { field: 'Details' }),
     tags: tagsField(body.tags),
-    cost: COSTS.includes(body.cost) ? body.cost : 'free',
-    location: str(body.location, 100, { field: 'Location' }),
-    when_text: str(body.when_text, 100, { field: 'When' }),
-    max_attendees: publicEvent ? null : maxAttendeesField(body.max_attendees),
+    cost_amount: cost.amount,
+    cost_currency: cost.currency,
+    location: locationField(body.location),
+    when_text: whenField(body.when_text, body.when_repeat),
+    max_attendees: maxAttendeesField(body.max_attendees),
   };
 }
-const FIELD_LABELS = { title: 'Title', details: 'Details', tags: 'Tags', location: 'Where', when_text: 'When', cost: 'Cost', public_event: 'Open to everyone', max_attendees: 'Max attendees' };
+const FIELD_LABELS = { title: 'Title', details: 'Details', tags: 'Tags', location: 'Where', when_text: 'When', cost: 'Cost', visibility: 'Visibility', max_attendees: 'Max attendees' };
 
 // Recompute open/full/past for a live event from its matched attendees. Call inside a transaction.
 function syncEventStatus(eventId) {
@@ -146,6 +175,22 @@ function syncEventStatus(eventId) {
   // No limit → stays open for more people until the host removes it.
   const status = t.max_attendees === null || accepted + attended < t.max_attendees ? 'open' : accepted === 0 ? 'past' : 'full';
   if (status !== t.status) q('UPDATE events SET status = ? WHERE id = ?').run(status, eventId);
+}
+
+// Private events: replace who may see one. guids come from the host's browser (contacts and groups expanded);
+// unknown GUIDs and the host are skipped. Call inside a transaction.
+function viewerIds(guids, hostId) {
+  if (guids === undefined) return undefined;
+  if (!Array.isArray(guids) || guids.length > MAX_VIEWERS || !guids.every(g => typeof g === 'string' && g.length <= 64))
+    throw new HttpError(400, `Share with up to ${MAX_VIEWERS} people`);
+  const find = q('SELECT id FROM users WHERE guid = ?');
+  return [...new Set(guids.map(g => find.get(g)?.id).filter(id => id && id !== hostId))];
+}
+function setViewers(eventId, ids) {
+  if (ids === undefined) return;
+  q('DELETE FROM event_viewers WHERE event_id = ?').run(eventId);
+  const ins = q('INSERT INTO event_viewers (event_id, user_id) VALUES (?, ?)');
+  for (const id of ids) ins.run(eventId, id);
 }
 
 function loadEvent(id) {
@@ -334,21 +379,26 @@ route('GET', '/api/me', async ({ user, res }) => {
   send(res, 200, { ...publicUser(user), counts });
 });
 
+const COST_FILTERS = ['free', 'paid'];
+
 // Open events from other people that I haven't swiped on yet.
-const DISCOVERABLE = `t.status = 'open' AND t.host_id != :me
+// Who may see an event (alias t) at all: anyone if it's public, otherwise its host and chosen viewers.
+const VISIBLE = `(t.visibility = 'public' OR t.host_id = :me
+  OR EXISTS (SELECT 1 FROM event_viewers v WHERE v.event_id = t.id AND v.user_id = :me))`;
+const DISCOVERABLE = `t.status = 'open' AND t.host_id != :me AND ${VISIBLE}
   AND NOT EXISTS (SELECT 1 FROM swipes s WHERE s.event_id = t.id AND s.attendee_id = :me)`;
 
 // The Discover deck (also shown to signed-out guests). ?tags=a,b keeps events with ANY of those tags;
-// ?cost=free,low keeps events at ANY of those costs. When both are given, an event must match both.
+// ?cost=free or ?cost=paid keeps only free or paid events (both, or neither, = all). When both are given, an event must match both.
 route('GET', '/api/discover', async ({ user, query, res }) => {
   const tags = parseTags(query.get('tags'));
-  const costs = String(query.get('cost') || '').split(',').filter(c => COSTS.includes(c));
+  const costs = String(query.get('cost') || '').split(',').filter(c => COST_FILTERS.includes(c));
   const rows = q(`
     SELECT t.*, u.guid AS host_guid, ${TAGS_COL}
     FROM events t JOIN users u ON u.id = t.host_id
     WHERE ${DISCOVERABLE}
       AND (:tags = '[]' OR EXISTS (SELECT 1 FROM event_tags tt WHERE tt.event_id = t.id AND tt.tag IN (SELECT value FROM json_each(:tags))))
-      AND (:costs = '[]' OR t.cost IN (SELECT value FROM json_each(:costs)))
+      AND (:costs = '[]' OR (CASE WHEN t.cost_amount > 0 THEN 'paid' ELSE 'free' END) IN (SELECT value FROM json_each(:costs)))
     ORDER BY t.created_at DESC, t.id DESC
     LIMIT 30`).all({ me: user?.id ?? -1, tags: JSON.stringify(tags), costs: JSON.stringify(costs) });
   send(res, 200, rows.map(({ host_id, host_guid, ...t }) =>
@@ -362,13 +412,14 @@ route('GET', '/api/discover/filters', async ({ user, res }) => {
     SELECT tt.tag, COUNT(*) AS count FROM event_tags tt JOIN events t ON t.id = tt.event_id
     WHERE ${DISCOVERABLE}
     GROUP BY tt.tag ORDER BY count DESC, tt.tag LIMIT 40`).all({ me });
-  const byCost = Object.fromEntries(q(`SELECT t.cost, COUNT(*) AS count FROM events t WHERE ${DISCOVERABLE} GROUP BY t.cost`)
-    .all({ me }).map(r => [r.cost, r.count]));
-  send(res, 200, { tags, costs: COSTS.map(cost => ({ cost, count: byCost[cost] || 0 })) });
+  const byCost = Object.fromEntries(q(`
+    SELECT CASE WHEN t.cost_amount > 0 THEN 'paid' ELSE 'free' END AS cost, COUNT(*) AS count
+    FROM events t WHERE ${DISCOVERABLE} GROUP BY 1`).all({ me }).map(r => [r.cost, r.count]));
+  send(res, 200, { tags, costs: COST_FILTERS.map(cost => ({ cost, count: byCost[cost] || 0 })) });
 }, { auth: 'optional' });
 
 route('POST', '/api/events/:id/swipe', async ({ user, params, body, res }) => {
-  const event = q('SELECT * FROM events WHERE id = ?').get(params.id);
+  const event = q(`SELECT * FROM events t WHERE t.id = :id AND ${VISIBLE}`).get({ id: params.id, me: user.id });
   if (!event || event.status !== 'open') throw new HttpError(404, 'That event is no longer open');
   if (event.host_id === user.id) throw new HttpError(400, "You can't swipe on your own event");
   const yes = body.yes ? 1 : 0;
@@ -509,7 +560,8 @@ route('GET', '/api/events', async ({ user, res }) => {
     SELECT t.*, ${TAGS_COL},
       (SELECT COUNT(*) FROM swipes s WHERE s.event_id = t.id AND s.yes = 1 AND s.status = 'pending') AS pending,
       (SELECT COUNT(*) FROM swipes s WHERE s.event_id = t.id AND s.status IN ('accepted', 'attended')) AS matched,
-      (SELECT COUNT(*) FROM swipes s WHERE s.event_id = t.id AND s.status = 'accepted' AND s.reconfirm = 1) AS awaiting
+      (SELECT COUNT(*) FROM swipes s WHERE s.event_id = t.id AND s.status = 'accepted' AND s.reconfirm = 1) AS awaiting,
+      (SELECT COUNT(*) FROM event_viewers v WHERE v.event_id = t.id) AS viewers
     FROM events t WHERE t.host_id = ? AND t.status != 'cancelled'
     ORDER BY t.status = 'past', t.id DESC`).all(user.id).map(withTags));
 });
@@ -518,9 +570,10 @@ route('POST', '/api/events', async ({ user, body, res }) => {
   const f = eventFields(body);
   const id = tx(() => {
     const { lastInsertRowid } = q(`
-      INSERT INTO events (host_id, title, details, location, when_text, cost, public_event, max_attendees)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`).run(user.id, f.title, f.details, f.location, f.when_text, f.cost, f.public_event, f.max_attendees);
+      INSERT INTO events (host_id, title, details, location, when_text, cost_amount, cost_currency, visibility, max_attendees)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(user.id, f.title, f.details, f.location, f.when_text, f.cost_amount, f.cost_currency, f.visibility, f.max_attendees);
     setEventTags(lastInsertRowid, f.tags);
+    setViewers(lastInsertRowid, viewerIds(body.viewers ?? [], user.id));
     return lastInsertRowid;
   });
   send(res, 200, loadEvent(id));
@@ -536,20 +589,26 @@ route('PATCH', '/api/events/:id', async ({ user, params, body, res }) => {
   if (f.max_attendees !== null && f.max_attendees < filled)
     throw new HttpError(400, `${filled} ${filled > 1 ? 'people are' : 'person is'} already matched, so max attendees must be at least ${filled} (or blank for no limit)`);
 
-  const changed = Object.keys(FIELD_LABELS).filter(k => JSON.stringify(f[k]) !== JSON.stringify(event[k]));
-  if (!changed.length) return send(res, 200, { event, notified: 0 });
+  const cost = (e) => costLabel(e.cost_amount, e.cost_currency, 'en-US');
+  const value = (e, k) => (k === 'cost' ? cost(e) : e[k]);
+  const changed = Object.keys(FIELD_LABELS).filter(k => JSON.stringify(value(f, k)) !== JSON.stringify(value(event, k)));
+  // Who can see it isn't something attendees are told about or asked to re-confirm.
+  const viewers = viewerIds(body.viewers, user.id);
+  if (!changed.length) { tx(() => setViewers(event.id, viewers)); return send(res, 200, { event, notified: 0 }); }
   const show = (v) => (Array.isArray(v) ? (v.length ? v.join(', ') : '(none)') : v === null ? 'No limit' : v === '' ? '(none)' : String(v));
   const notice = '✏️ The post was updated:\n' +
     changed.map(k => k === 'details' ? '• Details were changed'
-      : k === 'cost' ? `• Cost: ${COST_LABELS[event.cost]} → ${COST_LABELS[f.cost]}`
-      : k === 'public_event' ? (f.public_event ? '• Now open to everyone' : '• No longer open to everyone')
+      : k === 'cost' ? `• Cost: ${cost(event)} → ${cost(f)}`
+      : k === 'visibility' ? (f.visibility === 'public' ? '• Now public' : '• Now private')
+      : k === 'when_text' ? `• When: ${show(whenLabel(event.when_text, { locale: 'en-US' }))} → ${show(whenLabel(f.when_text, { locale: 'en-US' }))}`
       : `• ${FIELD_LABELS[k]}: ${show(event[k])} → ${show(f[k])}`).join('\n') +
     '\nPlease re-confirm you can still make it.';
 
   const notified = tx(() => {
-    q(`UPDATE events SET title = ?, details = ?, location = ?, when_text = ?, cost = ?, public_event = ?, max_attendees = ? WHERE id = ?`)
-      .run(f.title, f.details, f.location, f.when_text, f.cost, f.public_event, f.max_attendees, event.id);
+    q(`UPDATE events SET title = ?, details = ?, location = ?, when_text = ?, cost_amount = ?, cost_currency = ?, visibility = ?, max_attendees = ? WHERE id = ?`)
+      .run(f.title, f.details, f.location, f.when_text, f.cost_amount, f.cost_currency, f.visibility, f.max_attendees, event.id);
     setEventTags(event.id, f.tags);
+    setViewers(event.id, viewers);
     const attendees = q(`SELECT id FROM swipes WHERE event_id = ? AND status = 'accepted'`).all(event.id);
     for (const a of attendees) {
       q('UPDATE swipes SET reconfirm = 1 WHERE id = ?').run(a.id);
@@ -559,6 +618,15 @@ route('PATCH', '/api/events/:id', async ({ user, params, body, res }) => {
     return attendees.length;
   });
   send(res, 200, { event: loadEvent(event.id), notified });
+});
+
+// Replace who may see my private event. The browser calls this when the contacts in a group it was shared with change.
+route('PUT', '/api/events/:id/viewers', async ({ user, params, body, res }) => {
+  const event = q('SELECT id, host_id FROM events WHERE id = ?').get(params.id);
+  if (!event || event.host_id !== user.id) throw new HttpError(404, 'Event not found');
+  const ids = viewerIds(body.viewers, user.id) ?? [];
+  tx(() => setViewers(event.id, ids));
+  send(res, 200, { viewers: ids.length });
 });
 
 route('DELETE', '/api/events/:id', async ({ user, params, res }) => {
@@ -582,14 +650,14 @@ route('GET', '/api/ledger', async ({ user, res }) => {
 // ---------- server ----------
 
 const STATIC = {
-  '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/secure.js': 'secure.js', '/style.css': 'style.css',
+  '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/secure.js': 'secure.js', '/style.css': 'style.css', '/location.js': 'location.js', '/when.js': 'when.js', '/cost.js': 'cost.js',
   '/fonts/bungee-latin.woff2': 'fonts/bungee-latin.woff2', // Bungee, SIL OFL 1.1 (see public/fonts/Bungee-OFL.txt)
 };
 const MIME = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8', woff2: 'font/woff2' };
 
 // Everything is served from this origin; a strict CSP keeps injected scripts away from the keys in the page.
-// (style-src allows inline style attributes used in the markup.)
-const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; " +
+// (style-src allows inline style attributes used in the markup; img-src allows OSM tiles for the location picker.)
+const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://tile.openstreetmap.org; " +
   "font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
 
 const server = http.createServer(async (req, res) => {

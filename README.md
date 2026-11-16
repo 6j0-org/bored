@@ -54,13 +54,13 @@ This is a prototype, so there are no database migrations. After a schema change,
 
 | Step | Who | Where |
 |---|---|---|
-| Post an event (title, details, up to 5 tags, where/when, cost, max attendees or no limit, or open to everyone) | Host | **Post** |
-| Swipe right on events you're in for (filter by tags and/or cost) | Attendee | **Discover** |
+| Post an event (title, details, up to 5 tags, where (map pin), when (date, time, optional repeat), cost and currency, max attendees or no limit, public or shared with chosen contacts/groups) | Host | **Post** |
+| Swipe right on events you're in for (filter by tags and/or free/paid) | Attendee | **Discover** |
 | Swipe right on people who want to join | Host | **Confirm** |
 | Match → chat to sort out details | Both | **Plans** |
 | "It happened" to close it out | Host | Plan chat |
 
-A post stays in the deck until it reaches its max attendees. Posts with no limit stay open until the host removes them. Events that are **open to everyone** (public, or ticketed elsewhere) never have a cap.
+A post stays in the deck until it reaches its max attendees. Posts with no limit stay open until the host removes them. Posts are **private** by default: only the contacts and groups (contact tags) the host picks can see them. **Public** posts show for everyone, including signed-out guests.
 
 ## Privacy model
 
@@ -68,8 +68,8 @@ A post stays in the deck until it reaches its max attendees. Posts with no limit
   never a name, email or password. Lose every passkey and the account is gone: the app nudges people to keep their
   add a second passkey (another device or a security key) (Profile → Passkeys).
 - **Names are private.** You see only the nicknames *you* gave people, and only once you've matched with them;
-  everyone else is "A neighbor". Your nickname for yourself is also visible only to you.
-- **The vault** (your nickname, plus nickname + tags for each contact) is encrypted in the browser with a random
+  everyone else is "A neighbor".
+- **The vault** (nickname + tags for each contact, and who each of your private posts is shared with) is encrypted in the browser with a random
   vault key. That key is wrapped by a key derived from each passkey's PRF output, so the server only stores ciphertext.
 - **With a 6j0.org identity** (`AUTH_MODE=6j0`) the passkeys (and the optional password) live on the identity server instead. After sign-in it
   sends the browser back with a signed token and Bored?'s own *app key*, encrypted to a one-time key the page made
@@ -80,7 +80,8 @@ A post stays in the deck until it reaches its max attendees. Posts with no limit
   encrypted under the vault key, so any of your passkeys can read your chats on a new device. Prototype caveat:
   static keys, so no forward secrecy.
 - **What the server still knows:** which GUIDs swiped on, matched and messaged which other GUIDs, and when;
-  post contents (public); IP addresses. See `TODO.md` for the full list of open security and privacy issues. Match records are kept for now.
+  post contents; who each private post is shared with (the browser expands your picked contacts and groups into
+  GUIDs, and re-sends them when your groups change); IP addresses. See `TODO.md` for the full list of open security and privacy issues. Match records are kept for now.
 - `public/secure.js` holds all client-side crypto; `webauthn.js` verifies passkeys on the server with `node:crypto` only.
 - Pages are served with a strict Content-Security-Policy (same-origin scripts only) to keep injected code away from keys.
 
@@ -92,6 +93,8 @@ A post stays in the deck until it reaches its max attendees. Posts with no limit
 - `db.js`: SQLite schema, tag helpers
 - `public/app.js`: single-page front-end (vanilla JS, swipe deck with pointer/touch/keyboard)
 - `public/secure.js`: passkeys + PRF, 6j0.org identity handoff, encrypted vault, key storage, E2E chat crypto
-- `public/fonts/`: bundled Bungee title font (SIL OFL 1.1, license alongside). The app loads nothing from outside its own server.
+- `public/location.js`: "lat,lon" locations, links to the viewer's maps app, and a small OpenStreetMap pin picker
+- `public/when.js`, `public/cost.js`: event time (with repeat rules) and cost formats, shared by server and browser
+- `public/fonts/`: bundled Bungee title font (SIL OFL 1.1, license alongside). The app loads nothing from outside its own server, except OpenStreetMap tiles while the location picker is open.
 - `seed.js`: demo data
 - `TODO.md`: open security and privacy issues, by priority

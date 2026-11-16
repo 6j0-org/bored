@@ -28,8 +28,14 @@ about **connections and metadata**, and about the limits of doing end-to-end enc
   same color follows a person across posts. Derive from a per-post or per-viewer value instead.
 - [ ] **P1: Public activity counts.** Hosted/attended counts per GUID (`stats()` in `server.js`) are public on every
   card and reveal how active someone is. Consider coarse buckets, or hide them.
-- [ ] **P1: Post contents are public and identifying.** Location and time fields are free text. Warn people when
-  posting, and consider coarse neighborhoods instead of addresses.
+- [ ] **P1: Post contents are identifying.** Public posts are visible to anyone, and "Where" is exact coordinates
+  (the picker warns about this). Consider rounding coordinates or coarse neighborhoods.
+- [ ] **P1: Private posts reveal who they're shared with.** The server stores the viewer GUIDs for each private
+  post (`event_viewers`), which exposes part of the host's contact graph. Post contents are also plaintext on the
+  server. Consider encrypting private posts per viewer.
+- [ ] **P2: The location picker contacts OpenStreetMap.** While it's open, the browser fetches tiles from
+  tile.openstreetmap.org, which sees the viewer's IP, the area they look at, and (via Referer) this site's origin.
+  Consider self-hosting tiles or proxying them.
 - [ ] **P2: Timestamps everywhere** (`created_at` on users, passkeys, posts, swipes, messages; `last_used_at` on
   passkeys) enable timing correlation. Reduce precision or drop where not needed.
 

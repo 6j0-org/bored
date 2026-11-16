@@ -99,10 +99,24 @@ about **connections and metadata**, and about the limits of doing end-to-end enc
   passkeys with no backup), and an authenticator allow-list if needed.
 - [ ] **P2: Error messages** on sign-in reveal whether a passkey is registered ("This passkey isn't registered…").
   This is low risk, but could be made generic.
-- [ ] **P2: Lost passkey = lost account (by design).** Keep the nudges (Bitwarden, second device). Consider an
+- [ ] **P2: Lost passkey = lost account (by design).** Keep the nudges (second device or security key). Consider an
   optional, user-held recovery key (printed or saved offline) that wraps the vault key, never escrowed by us.
 - [ ] **P2: PRF support varies** across browsers and passkey managers. Signup is blocked without it; keep the
   supported list in the UI current. If a passkey provider is compromised, so is that passkey's vault access.
+  **State as of 2026-11-15:**
+  - **Bitwarden** doesn't return PRF results for passkeys stored in it. We tested the browser extension in LibreWolf
+    and Chromium on Arch Linux, and the app as a passkey provider on GrapheneOS with Vanadium: the extension
+    results were empty every time. Its November 2025 "PRF" release is about logging *into* Bitwarden with a passkey
+    from somewhere else. Storing passkeys that support PRF is an open feature request:
+    https://community.bitwarden.com/t/support-for-storing-prf-capable-passkeys-in-bitwarden-vault/82239
+  - **KeePassXC** stores passkeys, but PRF isn't in a released version; the pull request reportedly targets 2.8.1.
+  - **Proton Pass, KeePassDX:** status unknown.
+  - **Works:** security keys with hmac-secret (YubiKey 5, Nitrokey 3, SoloKey 2), Google Password Manager,
+    iCloud Keychain (macOS/iOS 18+).
+  - So no free, open-source password manager supports PRF in a released version yet. The 6j0.org identity server
+    is adding a username + password fallback for now. **Follow up:** recheck Bitwarden and KeePassXC, and once one
+    ships PRF, update the advice text (`PRF_ADVICE` in 6j0-org-id `public/id.js`, `UPGRADE_ADVICE` in
+    `public/app.js`) to recommend it again.
 
 ### With a 6j0.org identity (`AUTH_MODE=6j0`)
 

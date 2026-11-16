@@ -333,11 +333,12 @@ async function enterApp(tab = 'discover') {
 }
 
 const PASSKEY_ADVICE = `Your passkey <b>is</b> your account: there's no email or password to recover it with.
-  Keep it in a password manager like <b>Bitwarden</b>, or add a second device in Profile, so losing one device
-  doesn't lose your account.`;
-const UPGRADE_ADVICE = `Bored? encrypts your contacts and chats with a key that only your passkey can make, and this
-  browser or passkey manager can't do that yet. Please update to the latest <b>Chrome</b>, <b>Edge</b>, <b>Safari</b>
-  (macOS/iOS 18 or newer) or <b>Firefox</b>, or store your passkey in <b>Bitwarden</b>, then try again.`;
+  Add a second passkey in Profile (another device or a security key), so losing one device doesn't lose your account.`;
+const UPGRADE_ADVICE = `Bored? encrypts your contacts and chats with a key that only your passkey can make, using a
+  passkey feature called <b>PRF</b>. This browser or passkey manager doesn't support it. <b>Some password managers,
+  including Bitwarden, don't support it yet.</b><br><br>
+  Passkeys that do: a <b>security key</b> (YubiKey 5, Nitrokey 3, SoloKey 2 and similar), <b>Google Password
+  Manager</b> (Chrome, Android) and <b>iCloud Keychain</b> (Safari on macOS/iOS 18 or newer).`;
 
 const idHost = () => new URL(state.config.idOrigin).host;
 
@@ -351,10 +352,10 @@ function viewAccountId(v) {
            Join something fun, or host your own.`}</p>
       <button class="btn" id="idSignIn">🔑 ${unlocking ? 'Unlock' : 'Continue'} with ${esc(idHost())}</button>
       <div class="error" id="authErr"></div>
-      <div class="notice"><b>No usernames, passwords or email.</b> Bored? uses your anonymous 6j0.org identity: one
-        passkey for every 6j0.org app. New here? You can create one on the next screen.
+      <div class="notice"><b>No names or email.</b> Bored? uses your anonymous 6j0.org identity: one sign-in, with a
+        passkey or a username and password, for every 6j0.org app. New here? You can create one on the next screen.
         Nobody sees a name for you unless they've connected with you, and then only the nickname <em>they</em> chose.
-        Your contacts and chats are encrypted with a key only your passkey can unlock.</div>
+        Your contacts and chats are encrypted with a key only you can unlock.</div>
       ${unlocking ? `<button class="btn danger" id="logout">Sign out</button>` : ''}
     </div>`;
   v.querySelector('#idSignIn').onclick = async () => {
@@ -523,8 +524,10 @@ function deckOptions(events, filters) {
           <p>Nothing open matches right now. Try other filters, or see everything.</p>
           <button class="btn" id="clearFilters">Show all posts</button></div>`
       : `<div class="empty"><div class="big">🌤</div><h3>Still bored?</h3>
-          <p>Nothing new right now. Check back later, or post something you think people would enjoy.</p>
-          <button class="btn" id="goPost">Post something</button></div>`,
+          ${state.me
+            ? `<p>Nothing new right now. Check back later, or post something you think people would enjoy.</p>
+          <button class="btn" id="goPost">Post something</button>`
+            : `<p>Nothing new right now. Check back later.</p>`}</div>`,
   };
 }
 
@@ -979,12 +982,12 @@ async function viewProfile(v) {
     </div>
 
     ${idMode ? `<div class="section-title">Sign-in</div>
-    <div class="notice">You sign in with your 6j0.org identity. Add or remove passkeys at
-      <a href="${esc(state.config.idOrigin)}/">${esc(idHost())}</a>. Keep at least two, so losing one device doesn't lose your account.</div>` : `
+    <div class="notice">You sign in with your 6j0.org identity. Manage your passkeys and password at
+      <a href="${esc(state.config.idOrigin)}/">${esc(idHost())}</a>. Keep at least two ways to sign in, so losing one doesn't lose your account.</div>` : `
     <div class="section-title">Passkeys</div>
     <div class="notice ${passkeys.length < 2 ? 'warn' : ''}">${passkeys.length < 2
-      ? `<b>You only have one passkey.</b> If you lose it, your account is gone for good. Add another one: on your phone (scan the QR code your browser offers), on a security key, or in a password manager like <b>Bitwarden</b>.`
-      : `You have ${passkeys.length} passkeys, so losing one device won't lock you out. Keep them in a password manager like <b>Bitwarden</b> for extra safety.`}</div>
+      ? `<b>You only have one passkey.</b> If you lose it, your account is gone for good. Add another one: on your phone (scan the QR code your browser offers) or on a security key.`
+      : `You have ${passkeys.length} passkeys, so losing one device won't lock you out.`}</div>
     <div class="list">
       ${passkeys.map((p, i) => `<div class="row"><div class="dot tag-none">🔑</div>
         <div class="grow"><div class="title">Passkey ${i + 1}</div><div class="sub">Added ${fmt(p.created_at)} · last used ${fmt(p.last_used_at)}</div></div>
@@ -1006,7 +1009,7 @@ async function viewProfile(v) {
       await addPasskey(api, nextStep);
       toast('Passkey added. You now have a backup.'); render();
     } catch (e) {
-      toast(e instanceof PrfUnsupportedError ? "That passkey manager can't create the encryption key. Try Bitwarden, your phone, or an updated browser."
+      toast(e instanceof PrfUnsupportedError ? "That passkey manager can't create the encryption key (some, including Bitwarden, don't support it). Try a security key or your phone."
         : e?.name === 'NotAllowedError' ? 'Passkey request was cancelled.' : e?.name === 'InvalidStateError' ? 'That device already has a passkey for this account.' : e.message);
     }
   });

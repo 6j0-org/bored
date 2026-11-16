@@ -18,7 +18,9 @@ npm start      # http://localhost:3000
 
 To try matching and chat, create two accounts in two different browsers or browser profiles. Passkeys need a
 **secure context** (`http://localhost` counts) and a browser + passkey manager that supports the WebAuthn **PRF**
-extension (current Chrome/Edge, Safari on macOS/iOS 18+, Firefox, Bitwarden). Signup is blocked otherwise.
+extension: e.g. a security key (YubiKey 5 etc.), Google Password Manager (Chrome, Android) or iCloud Keychain
+(Safari on macOS/iOS 18+). Some password managers, including Bitwarden, don't support PRF yet. Signup is blocked
+otherwise.
 
 Env vars: `PORT` (default 3000), `DB_PATH` (default `./data.sqlite`), `ORIGIN` (e.g. `https://bored.example`; required
 behind HTTPS/proxies, passkeys are bound to it; also turns on `Secure` cookies), `RP_ID` (passkey domain; defaults to
@@ -30,7 +32,7 @@ the `ORIGIN` hostname).
 
 - `local` (default): Bored? runs its own passkeys, as described below. Works on its own.
 - `6j0`: people sign in with an anonymous identity from a [6j0.org identity server](https://gitlab.com/6j0-org/id),
-  so one passkey covers every 6j0.org app. Set `ID_ORIGIN` (e.g. `https://id.6j0.org`). Optional: `ID_APP` (this
+  so one sign-in (passkey, or username + password) covers every 6j0.org app. Set `ID_ORIGIN` (e.g. `https://id.6j0.org`). Optional: `ID_APP` (this
   app's name in the identity server's `APPS`; default `bored`) and `ID_JWKS_URL` (where to fetch its public keys;
   default `ID_ORIGIN/.well-known/jwks.json`). The local passkey endpoints are switched off.
 
@@ -64,12 +66,12 @@ A post stays in the deck until it reaches its max attendees. Posts with no limit
 
 - **Accounts** are a server-assigned GUID plus one or more passkeys. The server stores each passkey's public key,
   never a name, email or password. Lose every passkey and the account is gone: the app nudges people to keep their
-  passkey in a password manager like Bitwarden or to add a second device (Profile → Passkeys).
+  add a second passkey (another device or a security key) (Profile → Passkeys).
 - **Names are private.** You see only the nicknames *you* gave people, and only once you've matched with them;
   everyone else is "A neighbor". Your nickname for yourself is also visible only to you.
 - **The vault** (your nickname, plus nickname + tags for each contact) is encrypted in the browser with a random
   vault key. That key is wrapped by a key derived from each passkey's PRF output, so the server only stores ciphertext.
-- **With a 6j0.org identity** (`AUTH_MODE=6j0`) the passkeys live on the identity server instead. After sign-in it
+- **With a 6j0.org identity** (`AUTH_MODE=6j0`) the passkeys (and the optional password) live on the identity server instead. After sign-in it
   sends the browser back with a signed token and Bored?'s own *app key*, encrypted to a one-time key the page made
   and carried in the URL fragment (which never reaches a server). The vault key is wrapped by a key derived from the
   app key. Other 6j0.org apps get different app keys, so they can't read Bored? data, and Bored? gives the account

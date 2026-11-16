@@ -258,7 +258,7 @@ export async function addPasskey(api, nextStep) {
   const unlock = await prfFromGet(existing);
   const wrapped = opts.existing.find(p => p.credentialId === unlock.credentialId).wrappedKey;
   const raw = await openBytes(await kekFromPrf(unlock.prf), wrapped);
-  await nextStep('Confirmed. Now create the new passkey: on this device, your phone (scan the QR code), a security key, or a password manager like Bitwarden.', 'Create new passkey');
+  await nextStep('Confirmed. Now create the new passkey: on this device, your phone (scan the QR code), or a security key. It must support PRF: some password managers, including Bitwarden, do not.', 'Create new passkey');
   const { prf, payload } = await createPasskey(opts, existing, nextStep);
   const body = { ...payload, wrappedKey: await seal(await kekFromPrf(prf), raw) };
   raw.fill(0);

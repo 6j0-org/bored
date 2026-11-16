@@ -228,7 +228,7 @@ route('POST', '/api/passkey/login/verify', async ({ req, body, res }) => {
   send(res, 200, keyBundle(user, pk.wrapped_key), newSession(res, user.id));
 }, { auth: false, mode: 'local' });
 
-// Add another passkey to my account (e.g. a phone, a security key, or a password manager like Bitwarden).
+// Add another passkey to my account (e.g. a phone, a security key, or a password manager that supports PRF).
 // The browser unlocks the vault key with an existing passkey, then wraps it for the new one.
 route('POST', '/api/passkey/add/options', async ({ req, user, res }) => {
   const mine = q('SELECT credential_id, wrapped_key FROM passkeys WHERE user_id = ?').all(user.id);

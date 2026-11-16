@@ -6,6 +6,7 @@ import {
 import { locationHtml, mountLocationField } from './location.js';
 import { parseWhen, repeatOptions, whenLabel as fmtWhen, localToday } from './when.js';
 import { CURRENCIES, DEFAULT_CURRENCY, costLabel } from './cost.js';
+import { toSvg as identicon } from './vendor/jdenticon-3.3.0.js';
 
 // Well-known tags: offered as one-tap suggestions, and the first one on a post picks its icon and color (.tag-<name>).
 // Posts can also use any other tag; those show with no icon.
@@ -155,23 +156,24 @@ function toast(msg) {
 
 // ---------- people ----------
 // Nobody has a public name. You see the nickname *you* gave someone (stored in your encrypted vault) once you've
-// connected (matched); everyone else is "A neighbor". You are just "You".
+// connected (matched); everyone else has no name, and cards leave it out (contactName). You are just "You".
 const isContact = (guid) => Boolean(vault.data.contacts[guid]);
 function displayName(guid) {
   if (state.me && guid === state.me.guid) return 'You';
   const c = vault.data.contacts[guid];
-  return c ? (c.nickname || 'Unnamed contact') : 'A neighbor';
+  return c ? (c.nickname || 'Unnamed contact') : '';
 }
-function hue(s) { let h = 0; for (const c of String(s)) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
-// Color comes from the GUID; the letter from your nickname for them (strangers and you get a plain dot).
-const avatar = (guid, cls = '') => {
-  const named = vault.data.contacts[guid]?.nickname;
-  return `<div class="avatar ${cls}" style="background:hsl(${hue(guid)} 55% 45%)">${named ? esc([...named][0].toUpperCase()) : '•'}</div>`;
-};
+// A contact's name, or '' for anyone else.
+const contactName = (guid) => (isContact(guid) ? displayName(guid) : '');
+// Everyone's avatar is the Jdenticon of their GUID. The server only sends GUIDs of people you've matched with; for
+// anyone else it sends `icon`, the SHA-1 of the GUID, which Jdenticon draws as the very same picture.
+const avatar = (key, cls = '') => key
+  ? `<div class="avatar icon ${cls}">${identicon(key, 100)}</div>`
+  : `<div class="avatar anon ${cls}" aria-hidden="true"></div>`;
 
 // Add anyone I've matched with to my contacts (unnamed until I give them a nickname).
 async function ensureContacts(matches) {
-  const missing = [...new Set(matches.map(m => m.other))].filter(g => !isContact(g));
+  const missing = [...new Set(matches.map(m => m.other))].filter(g => g && !isContact(g));
   if (!missing.length) return;
   await vault.update(api, (d) => { for (const g of missing) d.contacts[g] ||= { nickname: '', tags: [], added: new Date().toISOString() }; });
 }
@@ -457,10 +459,11 @@ function eventCard(t) {
         <span class="chip">💵 ${esc(costLabel(t.cost_amount, t.cost_currency))}</span>
         <span class="chip">👥 ${attendeesLabel(t.max_attendees)}</span>
         ${t.visibility === 'private' ? `<span class="chip" title="The host shared this with you">🔒 Private</span>` : ''}
+        ${t.status === 'full' ? `<span class="chip warn" title="Say yes to join the waitlist">Full: join the waitlist</span>` : ''}
       </div>
       ${t.details ? `<div class="details">${esc(t.details)}</div>` : ''}
-      <div class="who">${avatar(t.host.guid)}
-        <div><b>${esc(displayName(t.host.guid))}</b>
+      <div class="who">${avatar(t.host.guid || t.host.icon)}
+        <div>${contactName(t.host.guid) ? `<b>${esc(contactName(t.host.guid))}</b>` : ''}
           <small>Hosted ${t.host.hosted} · Attended ${t.host.attended}</small></div>
       </div>
     </div>`;
@@ -527,7 +530,9 @@ function deckOptions(events, filters) {
         return;
       }
       await api(`/api/events/${t.id}/swipe`, { method: 'POST', body: { yes } });
-      if (yes) toast(`Asked to join “${t.title}”! You'll match if the host swipes yes too.`);
+      if (yes) toast(t.status === 'full'
+        ? `Asked to join the waitlist for “${t.title}”. If the host says yes, you'll get the next open spot.`
+        : `Asked to join “${t.title}”! You'll match if the host swipes yes too.`);
     },
     onUndo: async (t, yes) => {
       if (state.me) await api(`/api/events/${t.id}/swipe`, { method: 'DELETE' });
@@ -552,12 +557,13 @@ async function viewConfirm(v) {
     items: interested,
     renderCard: (o) => `
       <div class="hero ${tagLook(o.tags).cls}">
-        ${avatar(o.attendee.guid, 'big')}
+        ${avatar(o.attendee.guid || o.attendee.icon, 'big')}
       </div>
       <div class="body">
-        <div class="meta"><span class="chip">${tagLook(o.tags).ico ? tagLook(o.tags).ico + ' ' : ''}wants to join: <b>${esc(o.title)}</b></span></div>
-        <h2>${esc(displayName(o.attendee.guid))}</h2>
+        <div class="meta"><span class="chip">${tagLook(o.tags).ico ? tagLook(o.tags).ico + ' ' : ''}${contactName(o.attendee.guid) ? 'wants' : 'Wants'} to join: <b>${esc(o.title)}</b></span></div>
+        ${contactName(o.attendee.guid) ? `<h2>${esc(contactName(o.attendee.guid))}</h2>` : ''}
         ${o.note ? `<div class="details">“${esc(o.note)}”</div>` : ''}
+        ${o.full ? `<p class="note">This post is full, so saying yes puts them on the waitlist. They'll be matched automatically when a spot opens.</p>` : ''}
         <div class="who" style="justify-content:space-around;text-align:center">
           <div><b>${o.attendee.hosted}</b><small>events hosted</small></div>
           <div><b>${o.attendee.attended}</b><small>events attended</small></div>
@@ -568,13 +574,14 @@ async function viewConfirm(v) {
       const r = await api(`/api/confirm/${o.id}/respond`, { method: 'POST', body: { yes } });
       await refreshMe();
       shellRefreshBadges();
-      if (r.match) showMatch(o.attendee.guid, o.title, r.matchId);
+      if (r.match) showMatch(r.other, o.title, r.matchId);
+      else if (r.waitlisted) toast(`Added ${contactName(o.attendee.guid) || 'them'} to the waitlist for “${o.title}”`);
     },
     onUndo: async (o, yes) => {
       await api(`/api/confirm/${o.id}/undo`, { method: 'POST' });
       await refreshMe();
       shellRefreshBadges();
-      toast(yes ? `Unmatched with ${displayName(o.attendee.guid)}` : 'Undone');
+      toast(yes ? (contactName(o.attendee.guid) ? `Unmatched with ${contactName(o.attendee.guid)}` : 'Unmatched') : 'Undone');
     },
     empty: `<div class="empty"><div class="big">🙋</div><h3>Nobody to confirm</h3>
       <p>When someone swipes yes on one of your posts, they'll show up here for you to swipe back.</p></div>`,
@@ -622,7 +629,8 @@ async function viewPlans(v) {
     v.querySelector('#goD').onclick = () => go('discover');
     return;
   }
-  const active = matches.filter(m => m.status === 'accepted'), past = matches.filter(m => m.status !== 'accepted');
+  const active = matches.filter(m => m.status === 'accepted'), waiting = matches.filter(m => m.status === 'waitlisted');
+  const past = matches.filter(m => !['accepted', 'waitlisted'].includes(m.status));
   const pill = (m) =>
     m.status === 'attended' ? `<span class="pill">Happened ✓</span>`
     : m.status === 'withdrawn' ? `<span class="pill">Dropped out</span>`
@@ -637,10 +645,28 @@ async function viewPlans(v) {
       </div>
       ${pill(m)}
     </button>`;
+  // Waitlist rows have no chat yet: that opens when a spot does and they're matched.
+  const waitRow = (m) => `
+    <div class="row">
+      ${tagLook(m.tags).ico ? `<div class="dot ${tagLook(m.tags).cls}">${tagLook(m.tags).ico}</div>` : ''}
+      <div class="grow">
+        <div class="title">${esc(m.title)}</div>
+        <div class="sub">${contactName(m.other) ? `Hosted by ${esc(contactName(m.other))} · ` : ''}#${m.waitlist_pos} on the waitlist</div>
+      </div>
+      <button class="btn ghost small" data-leave="${m.event_id}">Leave</button>
+    </div>`;
   v.innerHTML = `
     ${active.length ? `<div class="section-title">Happening</div><div class="list">${active.map(row).join('')}</div>` : ''}
+    ${waiting.length ? `<div class="section-title">Waitlist</div>
+      <p class="note">These posts are full. You'll be matched automatically, in order, when a spot opens.</p>
+      <div class="list">${waiting.map(waitRow).join('')}</div>` : ''}
     ${past.length ? `<div class="section-title">Past</div><div class="list">${past.map(row).join('')}</div>` : ''}`;
-  v.querySelectorAll('.row').forEach(r => r.onclick = () => { state.chat = Number(r.dataset.id); render(); });
+  v.querySelectorAll('button.row').forEach(r => r.onclick = () => { state.chat = Number(r.dataset.id); render(); });
+  v.querySelectorAll('[data-leave]').forEach(b => b.onclick = async () => {
+    if (!confirm('Leave this waitlist?')) return;
+    try { await api(`/api/events/${b.dataset.leave}/swipe`, { method: 'DELETE' }); toast('Left the waitlist'); render(); }
+    catch (err) { toast(err.message); }
+  });
 }
 
 async function viewChat(v, id) {
@@ -659,6 +685,7 @@ async function viewChat(v, id) {
           <div class="sub" style="color:var(--muted);font-size:.85rem">${tagLook(m.tags).ico ? tagLook(m.tags).ico + ' ' : ''}${esc(m.title)}${m.when_text ? ' · ' + esc(whenLabel(m.when_text)) : ''}${m.location ? ' · ' + locationHtml(m.location) : ''}</div>
         </div>
         ${m.role === 'host' && m.status === 'accepted' ? `<button class="btn small" id="happened">It happened</button>` : ''}
+        ${m.role === 'attendee' && m.status === 'accepted' && !m.reconfirm ? `<button class="btn ghost small" id="leave">Can't make it</button>` : ''}
       </div>
       <div class="msgs" id="msgs"></div>
       ${m.status === 'accepted' && m.reconfirm && m.role === 'attendee' ? `
@@ -718,6 +745,11 @@ async function viewChat(v, id) {
       await refreshMe(); render();
     } catch (err) { toast(err.message); }
   };
+  v.querySelector('#leave')?.addEventListener('click', async () => {
+    if (!confirm(`Drop out of “${m.title}”? ${name} will be told, and your spot goes to the next person on the waitlist.`)) return;
+    try { await api(`/api/matches/${id}/leave`, { method: 'POST' }); toast(`You've dropped out`); await refreshMe(); render(); }
+    catch (err) { toast(err.message); }
+  });
   v.querySelector('#stillIn')?.addEventListener('click', () => reconfirm(true));
   v.querySelector('#cantGo')?.addEventListener('click', () => reconfirm(false));
   v.querySelector('#happened')?.addEventListener('click', async () => {
@@ -1042,7 +1074,7 @@ async function viewPost(v) {
           <div class="grow">
             <div class="title">${esc(t.title)}</div>
             ${t.tags.length ? `<div class="sub">${t.tags.map(x => '#' + esc(x)).join(' ')}</div>` : ''}
-            <div class="sub">${t.visibility === 'public' ? '🌐 Public' : `🔒 ${t.viewers ? `${t.viewers} can see` : 'Only you'}`} · ${t.max_attendees == null ? `${t.matched} matched · no limit` : `${t.matched}/${t.max_attendees} matched`}${t.awaiting ? ` · ${t.awaiting} to re-confirm` : ''}${t.when_text ? ' · ' + esc(whenLabel(t.when_text)) : ''}</div>
+            <div class="sub">${t.visibility === 'public' ? '🌐 Public' : `🔒 ${t.viewers ? `${t.viewers} can see` : 'Only you'}`} · ${t.max_attendees == null ? `${t.matched} matched · no limit` : `${t.matched}/${t.max_attendees} matched`}${t.waitlisted ? ` · ${t.waitlisted} waitlisted` : ''}${t.awaiting ? ` · ${t.awaiting} to re-confirm` : ''}${t.when_text ? ' · ' + esc(whenLabel(t.when_text)) : ''}</div>
           </div>
           ${statusPill(t)}
           ${t.status !== 'past' ? `<button class="btn ghost small" data-edit="${t.id}" aria-label="Edit">✎</button>

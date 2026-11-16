@@ -65,7 +65,8 @@ CREATE TABLE IF NOT EXISTS events (
 
 -- One row per (event, would-be attendee) swipe.
 -- yes=0 means "pass" (never shown again).
--- status for yes-swipes: pending (waiting on host) | accepted (it's a match!) | declined | attended (host marked it happened) | withdrawn
+-- status for yes-swipes: pending (waiting on host) | accepted (it's a match!) | waitlisted (host said yes but it was full;
+--   matched automatically, first come first served, when a spot opens) | declined | attended (host marked it happened) | withdrawn
 CREATE TABLE IF NOT EXISTS swipes (
   id          INTEGER PRIMARY KEY,
   event_id    INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,

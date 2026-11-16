@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { newChallenge, takeChallenge, verifyRegistration, verifyAssertion, WebAuthnError } from './webauthn.js';
 import { verifyIdToken, IdTokenError } from './idtoken.js';
 import { composeWhen, whenLabel } from './public/when.js';
@@ -165,10 +165,34 @@ function eventFields(body) {
 }
 const FIELD_LABELS = { title: 'Title', details: 'Details', tags: 'Tags', location: 'Where', when_text: 'When', cost: 'Cost', visibility: 'Visibility', max_attendees: 'Max attendees' };
 
-// Recompute open/full/past for a live event from its matched attendees. Call inside a transaction.
+// GUIDs are only ever sent for people you've matched with (now or before, on either side). Those are your contacts,
+// which your browser keys by GUID. Anyone else stays anonymous, so nobody can link someone's posts or requests
+// together, or share private posts with strangers by GUID. SQL: true when users `a` and `b` have matched.
+const MATCHED = (a, b) => `EXISTS (SELECT 1 FROM swipes ms JOIN events mt ON mt.id = ms.event_id
+  WHERE ms.status IN ('accepted', 'attended', 'withdrawn')
+    AND ((ms.attendee_id = ${a} AND mt.host_id = ${b}) OR (mt.host_id = ${a} AND ms.attendee_id = ${b})))`;
+
+// Everyone's avatar is the Jdenticon of their GUID. Jdenticon draws from the SHA-1 of its input, so sending that hash
+// lets any browser draw the same icon without learning the GUID (which a SHA-1 of 122 random bits doesn't reveal).
+const iconHash = (guid) => createHash('sha1').update(guid).digest('hex');
+
+// Taken spots on an event: matched attendees, including ones who already went.
+const filledSpots = (eventId) =>
+  q(`SELECT COUNT(*) n FROM swipes WHERE event_id = ? AND status IN ('accepted', 'attended')`).get(eventId).n;
+const isFull = (t) => t.max_attendees !== null && filledSpots(t.id) >= t.max_attendees;
+
+// Recompute open/full/past for a live event from its matched attendees, first moving people up from the waitlist
+// (first come, first served) into any open spots. Call inside a transaction.
 function syncEventStatus(eventId) {
-  const t = q('SELECT status, max_attendees FROM events WHERE id = ?').get(eventId);
+  const t = q('SELECT id, host_id, status, max_attendees FROM events WHERE id = ?').get(eventId);
   if (!t || !['open', 'full'].includes(t.status)) return;
+  const room = t.max_attendees === null ? -1 : t.max_attendees - filledSpots(eventId); // -1 = no limit (SQLite LIMIT)
+  if (room !== 0) {
+    for (const { id } of q(`SELECT id FROM swipes WHERE event_id = ? AND status = 'waitlisted' ORDER BY id LIMIT ?`).all(eventId, room)) {
+      q(`UPDATE swipes SET status = 'accepted', reconfirm = 0 WHERE id = ?`).run(id);
+      systemMessage(id, t.host_id, "🎉 A spot opened up, so you're off the waitlist and in!");
+    }
+  }
   const { accepted, attended } = q(`
     SELECT COALESCE(SUM(status = 'accepted'), 0) accepted, COALESCE(SUM(status = 'attended'), 0) attended
     FROM swipes WHERE event_id = ?`).get(eventId);
@@ -178,13 +202,13 @@ function syncEventStatus(eventId) {
 }
 
 // Private events: replace who may see one. guids come from the host's browser (contacts and groups expanded);
-// unknown GUIDs and the host are skipped. Call inside a transaction.
+// unknown GUIDs, the host, and anyone the host hasn't matched with are skipped. Call inside a transaction.
 function viewerIds(guids, hostId) {
   if (guids === undefined) return undefined;
   if (!Array.isArray(guids) || guids.length > MAX_VIEWERS || !guids.every(g => typeof g === 'string' && g.length <= 64))
     throw new HttpError(400, `Share with up to ${MAX_VIEWERS} people`);
-  const find = q('SELECT id FROM users WHERE guid = ?');
-  return [...new Set(guids.map(g => find.get(g)?.id).filter(id => id && id !== hostId))];
+  const find = q(`SELECT id FROM users u WHERE u.guid = :guid AND u.id != :host AND ${MATCHED(':host', 'u.id')}`);
+  return [...new Set(guids.map(guid => find.get({ guid, host: hostId })?.id).filter(Boolean))];
 }
 function setViewers(eventId, ids) {
   if (ids === undefined) return;
@@ -372,7 +396,7 @@ route('POST', '/api/logout', async ({ req, res }) => {
 route('GET', '/api/me', async ({ user, res }) => {
   const counts = {
     confirm: q(`SELECT COUNT(*) n FROM swipes s JOIN events t ON t.id = s.event_id
-               WHERE t.host_id = ? AND s.yes = 1 AND s.status = 'pending' AND t.status = 'open'`).get(user.id).n,
+               WHERE t.host_id = ? AND s.yes = 1 AND s.status = 'pending' AND t.status IN ('open', 'full')`).get(user.id).n,
     plans: q(`SELECT COUNT(*) n FROM swipes s JOIN events t ON t.id = s.event_id
                 WHERE s.status = 'accepted' AND (s.attendee_id = ? OR t.host_id = ?)`).get(user.id, user.id).n,
   };
@@ -385,7 +409,8 @@ const COST_FILTERS = ['free', 'paid'];
 // Who may see an event (alias t) at all: anyone if it's public, otherwise its host and chosen viewers.
 const VISIBLE = `(t.visibility = 'public' OR t.host_id = :me
   OR EXISTS (SELECT 1 FROM event_viewers v WHERE v.event_id = t.id AND v.user_id = :me))`;
-const DISCOVERABLE = `t.status = 'open' AND t.host_id != :me AND ${VISIBLE}
+// Full events stay in the deck: saying yes asks to join the waitlist.
+const DISCOVERABLE = `t.status IN ('open', 'full') AND t.host_id != :me AND ${VISIBLE}
   AND NOT EXISTS (SELECT 1 FROM swipes s WHERE s.event_id = t.id AND s.attendee_id = :me)`;
 
 // The Discover deck (also shown to signed-out guests). ?tags=a,b keeps events with ANY of those tags;
@@ -394,15 +419,15 @@ route('GET', '/api/discover', async ({ user, query, res }) => {
   const tags = parseTags(query.get('tags'));
   const costs = String(query.get('cost') || '').split(',').filter(c => COST_FILTERS.includes(c));
   const rows = q(`
-    SELECT t.*, u.guid AS host_guid, ${TAGS_COL}
+    SELECT t.*, u.guid AS host_raw, CASE WHEN ${MATCHED(':me', 't.host_id')} THEN u.guid END AS host_guid, ${TAGS_COL}
     FROM events t JOIN users u ON u.id = t.host_id
     WHERE ${DISCOVERABLE}
       AND (:tags = '[]' OR EXISTS (SELECT 1 FROM event_tags tt WHERE tt.event_id = t.id AND tt.tag IN (SELECT value FROM json_each(:tags))))
       AND (:costs = '[]' OR (CASE WHEN t.cost_amount > 0 THEN 'paid' ELSE 'free' END) IN (SELECT value FROM json_each(:costs)))
     ORDER BY t.created_at DESC, t.id DESC
     LIMIT 30`).all({ me: user?.id ?? -1, tags: JSON.stringify(tags), costs: JSON.stringify(costs) });
-  send(res, 200, rows.map(({ host_id, host_guid, ...t }) =>
-    withTags({ ...t, host: { guid: host_guid, ...stats(host_id) } })));
+  send(res, 200, rows.map(({ host_id, host_raw, host_guid, ...t }) =>
+    withTags({ ...t, host: { ...(host_guid ? { guid: host_guid } : {}), icon: iconHash(host_raw), ...stats(host_id) } })));
 }, { auth: 'optional' });
 
 // Filter options for Discover: tags and costs, each with how many discoverable events match.
@@ -420,7 +445,7 @@ route('GET', '/api/discover/filters', async ({ user, res }) => {
 
 route('POST', '/api/events/:id/swipe', async ({ user, params, body, res }) => {
   const event = q(`SELECT * FROM events t WHERE t.id = :id AND ${VISIBLE}`).get({ id: params.id, me: user.id });
-  if (!event || event.status !== 'open') throw new HttpError(404, 'That event is no longer open');
+  if (!event || !['open', 'full'].includes(event.status)) throw new HttpError(404, 'That event is no longer open');
   if (event.host_id === user.id) throw new HttpError(400, "You can't swipe on your own event");
   const yes = body.yes ? 1 : 0;
   q(`INSERT INTO swipes (event_id, attendee_id, yes, note, status) VALUES (?, ?, ?, ?, ?)
@@ -429,11 +454,11 @@ route('POST', '/api/events/:id/swipe', async ({ user, params, body, res }) => {
   send(res, 200, { ok: true });
 });
 
-// Undo my swipe on an event, as long as the host hasn't matched with me yet.
+// Undo my swipe on an event, as long as the host hasn't matched with me yet. Also how I leave its waitlist.
 route('DELETE', '/api/events/:id/swipe', async ({ user, params, res }) => {
   const sw = q('SELECT * FROM swipes WHERE event_id = ? AND attendee_id = ?').get(params.id, user.id);
   if (!sw) throw new HttpError(404, 'Nothing to undo');
-  if (sw.yes && sw.status !== 'pending')
+  if (sw.yes && !['pending', 'waitlisted'].includes(sw.status))
     throw new HttpError(409, sw.status === 'accepted' || sw.status === 'attended'
       ? "They've already matched with you. Message them in Plans if you need to back out."
       : 'They already responded');
@@ -444,29 +469,35 @@ route('DELETE', '/api/events/:id/swipe', async ({ user, params, res }) => {
 // Confirm tab: people who swiped "yes" on my open events, waiting for me to swipe back.
 route('GET', '/api/confirm', async ({ user, res }) => {
   const rows = q(`
-    SELECT s.id, s.note, s.created_at, t.id AS event_id, t.title, ${TAGS_COL}, t.max_attendees,
-           u.id AS attendee_id, u.guid
+    SELECT s.id, s.note, s.created_at, t.id AS event_id, t.title, ${TAGS_COL}, t.max_attendees, t.status = 'full' AS full,
+           u.id AS attendee_id, u.guid AS raw, CASE WHEN ${MATCHED(':me', 'u.id')} THEN u.guid END AS guid
     FROM swipes s JOIN events t ON t.id = s.event_id JOIN users u ON u.id = s.attendee_id
-    WHERE t.host_id = ? AND s.yes = 1 AND s.status = 'pending' AND t.status = 'open'
-    ORDER BY s.created_at, s.id`).all(user.id);
-  send(res, 200, rows.map(({ attendee_id, guid, ...r }) => withTags({ ...r, attendee: { guid, ...stats(attendee_id) } })));
+    WHERE t.host_id = :me AND s.yes = 1 AND s.status = 'pending' AND t.status IN ('open', 'full')
+    ORDER BY s.created_at, s.id`).all({ me: user.id });
+  send(res, 200, rows.map(({ attendee_id, raw, guid, full, ...r }) =>
+    withTags({ ...r, full: Boolean(full), attendee: { ...(guid ? { guid } : {}), icon: iconHash(raw), ...stats(attendee_id) } })));
 });
 
 route('POST', '/api/confirm/:id/respond', async ({ user, params, body, res }) => {
   const interest = q(`
     SELECT s.*, t.host_id, t.status AS event_status
     FROM swipes s JOIN events t ON t.id = s.event_id WHERE s.id = ?`).get(params.id);
-  if (!interest || interest.host_id !== user.id || interest.status !== 'pending' || interest.event_status !== 'open')
+  if (!interest || interest.host_id !== user.id || interest.status !== 'pending' || !['open', 'full'].includes(interest.event_status))
     throw new HttpError(404, 'Request not found');
   if (!body.yes) {
     q(`UPDATE swipes SET status = 'declined' WHERE id = ?`).run(interest.id);
     return send(res, 200, { match: false });
   }
-  tx(() => {
-    q(`UPDATE swipes SET status = 'accepted' WHERE id = ?`).run(interest.id);
+  // A yes on a full event puts them on the waitlist; they're matched automatically when a spot opens.
+  const waitlisted = tx(() => {
+    const full = isFull(q('SELECT id, max_attendees FROM events WHERE id = ?').get(interest.event_id));
+    q(`UPDATE swipes SET status = ? WHERE id = ?`).run(full ? 'waitlisted' : 'accepted', interest.id);
     syncEventStatus(interest.event_id);
+    return full;
   });
-  send(res, 200, { match: true, matchId: interest.id });
+  if (waitlisted) return send(res, 200, { match: false, waitlisted: true });
+  // Now that they've matched, the host's browser may know who it is (to add them to contacts).
+  send(res, 200, { match: true, matchId: interest.id, other: q('SELECT guid FROM users WHERE id = ?').get(interest.attendee_id).guid });
 });
 
 // Undo my response to someone interested: a "no thanks", or a fresh match nobody has messaged on yet.
@@ -475,7 +506,7 @@ route('POST', '/api/confirm/:id/undo', async ({ user, params, res }) => {
     SELECT s.*, t.host_id, t.status AS event_status
     FROM swipes s JOIN events t ON t.id = s.event_id WHERE s.id = ?`).get(params.id);
   if (!interest || interest.host_id !== user.id || !interest.yes) throw new HttpError(404, 'Request not found');
-  if (!['declined', 'accepted'].includes(interest.status) || !['open', 'full'].includes(interest.event_status))
+  if (!['declined', 'accepted', 'waitlisted'].includes(interest.status) || !['open', 'full'].includes(interest.event_status))
     throw new HttpError(409, 'That can no longer be undone');
   if (interest.status === 'accepted' && q('SELECT 1 FROM messages WHERE swipe_id = ? LIMIT 1').get(interest.id))
     throw new HttpError(409, "You've already started chatting, so this match can't be undone");
@@ -492,19 +523,26 @@ route('GET', '/api/matches', async ({ user, res }) => {
            t.host_id, s.attendee_id, cu.guid AS host_guid, hu.guid AS attendee_guid,
            cu.chat_pubkey AS host_pubkey, hu.chat_pubkey AS attendee_pubkey,
            (SELECT body FROM messages m WHERE m.swipe_id = s.id ORDER BY m.id DESC LIMIT 1) AS last_message,
-           (SELECT kind FROM messages m WHERE m.swipe_id = s.id ORDER BY m.id DESC LIMIT 1) AS last_kind
+           (SELECT kind FROM messages m WHERE m.swipe_id = s.id ORDER BY m.id DESC LIMIT 1) AS last_kind,
+           CASE WHEN s.status = 'waitlisted' THEN (SELECT COUNT(*) FROM swipes w
+             WHERE w.event_id = s.event_id AND w.status = 'waitlisted' AND w.id <= s.id) END AS waitlist_pos,
+           s.status = 'waitlisted' AND ${MATCHED(':me', 't.host_id')} AS known_host
     FROM swipes s JOIN events t ON t.id = s.event_id
     JOIN users cu ON cu.id = t.host_id JOIN users hu ON hu.id = s.attendee_id
-    WHERE s.status IN ('accepted', 'attended', 'withdrawn') AND (s.attendee_id = ? OR t.host_id = ?)
-    ORDER BY s.status != 'accepted', s.id DESC`).all(user.id, user.id);
+    WHERE (s.status IN ('accepted', 'attended', 'withdrawn') AND (s.attendee_id = :me OR t.host_id = :me))
+       OR (s.status = 'waitlisted' AND s.attendee_id = :me AND t.status IN ('open', 'full'))
+    ORDER BY s.status != 'accepted', s.id DESC`).all({ me: user.id });
   // "other" is the GUID of the person on the other side; the browser turns it into the nickname *you* gave them.
   send(res, 200, rows.map(({ host_id, attendee_id, host_guid, attendee_guid, host_pubkey, attendee_pubkey, ...r }) => {
     const mine = host_id === user.id;
+    // On a waitlist you haven't matched yet, so the host stays anonymous (unless you matched before).
+    const known = r.status !== 'waitlisted' || r.known_host;
+    delete r.known_host;
     return withTags({
       ...r,
       role: mine ? 'host' : 'attendee',
-      other: mine ? attendee_guid : host_guid,
-      other_pubkey: JSON.parse((mine ? attendee_pubkey : host_pubkey) || 'null'),
+      other: known ? (mine ? attendee_guid : host_guid) : null,
+      other_pubkey: known ? JSON.parse((mine ? attendee_pubkey : host_pubkey) || 'null') : null,
     });
   }));
 });
@@ -555,12 +593,26 @@ route('POST', '/api/matches/:id/reconfirm', async ({ user, params, body, res }) 
   send(res, 200, { ok: true, withdrawn: !body.yes });
 });
 
+// Attendee can't make it anymore. Frees their spot, which goes to the first person on the waitlist.
+route('POST', '/api/matches/:id/leave', async ({ user, params, res }) => {
+  const m = loadMatch(params.id, user.id);
+  if (m.attendee_id !== user.id) throw new HttpError(403, 'Only the attendee can drop out');
+  if (m.status !== 'accepted') throw new HttpError(409, 'This match has ended');
+  tx(() => {
+    q(`UPDATE swipes SET status = 'withdrawn', reconfirm = 0 WHERE id = ?`).run(m.id);
+    systemMessage(m.id, user.id, "🚪 Can't make it anymore, so dropped out.");
+    syncEventStatus(m.event_id);
+  });
+  send(res, 200, { ok: true });
+});
+
 route('GET', '/api/events', async ({ user, res }) => {
   send(res, 200, q(`
     SELECT t.*, ${TAGS_COL},
       (SELECT COUNT(*) FROM swipes s WHERE s.event_id = t.id AND s.yes = 1 AND s.status = 'pending') AS pending,
       (SELECT COUNT(*) FROM swipes s WHERE s.event_id = t.id AND s.status IN ('accepted', 'attended')) AS matched,
       (SELECT COUNT(*) FROM swipes s WHERE s.event_id = t.id AND s.status = 'accepted' AND s.reconfirm = 1) AS awaiting,
+      (SELECT COUNT(*) FROM swipes s WHERE s.event_id = t.id AND s.status = 'waitlisted') AS waitlisted,
       (SELECT COUNT(*) FROM event_viewers v WHERE v.event_id = t.id) AS viewers
     FROM events t WHERE t.host_id = ? AND t.status != 'cancelled'
     ORDER BY t.status = 'past', t.id DESC`).all(user.id).map(withTags));
@@ -585,7 +637,7 @@ route('PATCH', '/api/events/:id', async ({ user, params, body, res }) => {
   if (!event || event.host_id !== user.id) throw new HttpError(404, 'Event not found');
   if (!['open', 'full'].includes(event.status)) throw new HttpError(409, 'Finished posts can no longer be edited');
   const f = eventFields(body);
-  const filled = q(`SELECT COUNT(*) n FROM swipes WHERE event_id = ? AND status IN ('accepted', 'attended')`).get(event.id).n;
+  const filled = filledSpots(event.id);
   if (f.max_attendees !== null && f.max_attendees < filled)
     throw new HttpError(400, `${filled} ${filled > 1 ? 'people are' : 'person is'} already matched, so max attendees must be at least ${filled} (or blank for no limit)`);
 
@@ -651,6 +703,7 @@ route('GET', '/api/ledger', async ({ user, res }) => {
 
 const STATIC = {
   '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/secure.js': 'secure.js', '/style.css': 'style.css', '/location.js': 'location.js', '/when.js': 'when.js', '/cost.js': 'cost.js',
+  '/vendor/jdenticon-3.3.0.js': 'vendor/jdenticon-3.3.0.js', // Jdenticon 3.3.0 browser ES module, MIT (license in the file)
   '/fonts/bungee-latin.woff2': 'fonts/bungee-latin.woff2', // Bungee, SIL OFL 1.1 (see public/fonts/Bungee-OFL.txt)
 };
 const MIME = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8', woff2: 'font/woff2' };

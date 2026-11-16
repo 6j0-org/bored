@@ -68,7 +68,12 @@ A post stays in the deck until it reaches its max attendees. Posts with no limit
   never a name, email or password. Lose every passkey and the account is gone: the app nudges people to keep their
   add a second passkey (another device or a security key) (Profile → Passkeys).
 - **Names are private.** You see only the nicknames *you* gave people, and only once you've matched with them;
-  everyone else is "A neighbor".
+  everyone else has no name.
+- **GUIDs are only shared with matches.** The API sends someone's GUID only to people they've matched with, so
+  strangers can't link one person's posts or requests together. Everyone's avatar is the [Jdenticon](https://jdenticon.com) of
+  their GUID (vendored in `public/vendor/`). For people you haven't matched with, the server sends the SHA-1 of
+  the GUID instead, which draws the same icon but doesn't reveal the GUID. The icon does follow a person across
+  their posts.
 - **The vault** (nickname + tags for each contact, and who each of your private posts is shared with) is encrypted in the browser with a random
   vault key. That key is wrapped by a key derived from each passkey's PRF output, so the server only stores ciphertext.
 - **With a 6j0.org identity** (`AUTH_MODE=6j0`) the passkeys (and the optional password) live on the identity server instead. After sign-in it

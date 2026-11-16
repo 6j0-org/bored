@@ -21,11 +21,12 @@ about **connections and metadata**, and about the limits of doing end-to-end enc
 - [ ] **P1: The "Your circle" stats come from the graph.** `/api/ledger` computes events-together counts per pair on the
   server, so the server must know the pairs. Move this to the client (count from your own encrypted vault) once
   matches are protected.
-- [ ] **P1: Posts are linkable to one account.** Every post carries the host's GUID (`/api/discover` returns
-  `host.guid`, even to guests), so anyone can link all of one person's posts. Combined with "Where"/"When",
-  that can de-anonymize people. Use a per-post pseudonym in public responses.
-- [ ] **P1: Avatars leak identity.** Avatar colors are derived from the GUID (`hue(guid)` in `public/app.js`), so the
-  same color follows a person across posts. Derive from a per-post or per-viewer value instead.
+- [x] **P1: Posts are linkable to one account.** Fixed: the API only sends a GUID for people you've matched with
+  (`MATCHED` in `server.js`), so Discover, Confirm and waitlist entries are anonymous, and private posts can only
+  be shared with people you've matched with. The hosted/attended counts on cards can still hint at who it is.
+- [ ] **P1: Avatars link posts to one person.** By design, everyone has one Jdenticon, the same for every viewer
+  (the API sends strangers its hash, `iconHash` in `server.js`, not the GUID). So anyone can still tell which posts
+  are from the same host. A per-post or per-viewer icon would stop that, at the cost of people having one face.
 - [ ] **P1: Public activity counts.** Hosted/attended counts per GUID (`stats()` in `server.js`) are public on every
   card and reveal how active someone is. Consider coarse buckets, or hide them.
 - [ ] **P1: Post contents are identifying.** Public posts are visible to anyone, and "Where" is exact coordinates

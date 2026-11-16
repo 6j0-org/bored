@@ -523,8 +523,10 @@ function deckOptions(events, filters) {
           <p>Nothing open matches right now. Try other filters, or see everything.</p>
           <button class="btn" id="clearFilters">Show all posts</button></div>`
       : `<div class="empty"><div class="big">🌤</div><h3>Still bored?</h3>
-          <p>Nothing new right now. Check back later, or post something you think people would enjoy.</p>
-          <button class="btn" id="goPost">Post something</button></div>`,
+          ${state.me
+            ? `<p>Nothing new right now. Check back later, or post something you think people would enjoy.</p>
+          <button class="btn" id="goPost">Post something</button>`
+            : `<p>Nothing new right now. Check back later.</p>`}</div>`,
   };
 }
 

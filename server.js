@@ -184,7 +184,7 @@ function costFields(amount, currency) {
 
 function eventFields(body) {
   const cost = costFields(body.cost_amount, body.cost_currency);
-  return {
+  const f = {
     visibility: body.visibility === 'public' ? 'public' : 'private',
     title: str(body.title, 100, { required: true, field: 'Title' }),
     details: str(body.details, 1000, { field: 'Details' }),
@@ -193,18 +193,24 @@ function eventFields(body) {
     cost_currency: cost.currency,
     location: locationField(body.location),
     location_name: str(body.location_name, 100, { field: 'Where' }),
+    online: [1, 2].includes(Number(body.online)) ? Number(body.online) : 0, // 0 in person, 1 online, 2 both
     when_text: whenField(body.when_text, body.when_repeat),
     max_attendees: maxAttendeesField(body.max_attendees),
   };
+  // An online-only post has no place.
+  if (f.online === 1) { f.location = ''; f.location_name = ''; }
+  return f;
 }
 const FIELD_LABELS = { title: 'Title', details: 'Details', tags: 'Tags', location: 'Where', when_text: 'When', cost: 'Cost', visibility: 'Visibility', max_attendees: 'Max attendees' };
 
-// GUIDs are only ever sent for people you've matched with (now or before, on either side). Those are your contacts,
-// which your browser keys by GUID. Anyone else stays anonymous, so nobody can link someone's posts or requests
-// together, or share private posts with strangers by GUID. SQL: true when users `a` and `b` have matched.
-const MATCHED = (a, b) => `EXISTS (SELECT 1 FROM swipes ms JOIN events mt ON mt.id = ms.event_id
+// GUIDs are only ever sent for people you've matched with (now or before, on either side) or connected with through
+// an invitation. Those are your contacts, which your browser keys by GUID. Anyone else stays anonymous, so nobody can
+// link someone's posts or requests together, or share private posts with strangers by GUID.
+// SQL: true when users `a` and `b` have matched or are connected.
+const MATCHED = (a, b) => `(EXISTS (SELECT 1 FROM swipes ms JOIN events mt ON mt.id = ms.event_id
   WHERE ms.status IN ('accepted', 'attended', 'withdrawn')
-    AND ((ms.attendee_id = ${a} AND mt.host_id = ${b}) OR (mt.host_id = ${a} AND ms.attendee_id = ${b})))`;
+    AND ((ms.attendee_id = ${a} AND mt.host_id = ${b}) OR (mt.host_id = ${a} AND ms.attendee_id = ${b})))
+  OR EXISTS (SELECT 1 FROM connections mc WHERE (mc.a = ${a} AND mc.b = ${b}) OR (mc.a = ${b} AND mc.b = ${a})))`;
 
 // Everyone's avatar is the Jdenticon of their GUID. Jdenticon draws from the SHA-1 of its input, so sending that hash
 // lets any browser draw the same icon without learning the GUID (which a SHA-1 of 122 random bits doesn't reveal).
@@ -430,7 +436,8 @@ route('POST', '/api/logout', async ({ req, res }) => {
 route('GET', '/api/me', async ({ user, res }) => {
   const counts = {
     confirm: q(`SELECT COUNT(*) n FROM swipes s JOIN events t ON t.id = s.event_id
-               WHERE t.host_id = ? AND s.yes = 1 AND s.status = 'pending' AND t.status IN ('open', 'full')`).get(user.id).n,
+               WHERE t.host_id = ? AND s.yes = 1 AND s.status = 'pending' AND t.status IN ('open', 'full')`).get(user.id).n
+      + q(`SELECT COUNT(*) n FROM connection_requests WHERE owner_id = ? AND status = 'pending'`).get(user.id).n,
     plans: q(`SELECT COUNT(*) n FROM swipes s JOIN events t ON t.id = s.event_id
                 WHERE s.status = 'accepted' AND (s.attendee_id = ? OR t.host_id = ?)`).get(user.id, user.id).n,
   };
@@ -454,9 +461,22 @@ function dateRange(from, to) {
   return DAY_RE.test(from || '') && DAY_RE.test(to || '') && from <= to ? { from, to } : null;
 }
 
-// The Discover deck (also shown to signed-out guests). ?tags=a,b keeps events with ANY of those tags;
-// ?cost=free or ?cost=paid keeps only free or paid events (both, or neither, = all); ?from=&to= keeps events that
-// happen (or repeat) on one of those days. Every filter given must match.
+// Distance filter: ?near=lat,lon&km=N, the viewer's spot (the browser rounds it to about a kilometre) and a radius.
+const MAX_RADIUS_KM = 1000;
+function nearFilter(near, km) {
+  const m = /^(-?\d{1,3}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)$/.exec(near || '');
+  const lat = m && Number(m[1]), lon = m && Number(m[2]), r = Number(km);
+  return m && Math.abs(lat) <= 90 && Math.abs(lon) <= 180 && r > 0 && r <= MAX_RADIUS_KM ? { lat, lon, km: r } : null;
+}
+// Great-circle distance in km from { lat, lon } to an event's "lat,lon" location (Infinity without one).
+function distanceKm({ lat, lon }, location) {
+  const m = /^(-?[\d.]+),(-?[\d.]+)$/.exec(location || '');
+  if (!m) return Infinity;
+  const rad = Math.PI / 180, dLat = (m[1] - lat) * rad, dLon = (m[2] - lon) * rad;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat * rad) * Math.cos(m[1] * rad) * Math.sin(dLon / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(a)); // Earth's mean diameter, km
+}
+
 // Map picker: a friendly name for a spot (signed-in hosts only). ?lat=&lon=
 route('GET', '/api/places/reverse', async ({ req, query, res }) => {
   const lat = Number(query.get('lat')), lon = Number(query.get('lon'));
@@ -466,10 +486,18 @@ route('GET', '/api/places/reverse', async ({ req, query, res }) => {
   send(res, 200, { name: await reverseGeocode(lat, lon, lang) });
 });
 
+// The Discover deck (also shown to signed-out guests). ?tags=a,b keeps events with ANY of those tags;
+// ?cost=free or ?cost=paid keeps only free or paid events (both, or neither, = all); ?from=&to= keeps events that
+// happen (or repeat) on one of those days. Where: ?near=&km= keeps events within that distance, and ?online=1 events
+// you can join online (online only, or both); given both, either one will do (e.g. "within 10 miles, or online").
+// Every filter given must match.
 route('GET', '/api/discover', async ({ user, query, res }) => {
   const tags = parseTags(query.get('tags'));
   const costs = String(query.get('cost') || '').split(',').filter(c => COST_FILTERS.includes(c));
   const range = dateRange(query.get('from'), query.get('to'));
+  const near = nearFilter(query.get('near'), query.get('km'));
+  const online = query.get('online') === '1';
+  const placed = (t) => (near && distanceKm(near, t.location) <= near.km) || (online && t.online > 0);
   const rows = q(`
     SELECT t.*, u.guid AS host_raw, CASE WHEN ${MATCHED(':me', 't.host_id')} THEN u.guid END AS host_guid, ${TAGS_COL}
     FROM events t JOIN users u ON u.id = t.host_id
@@ -477,18 +505,27 @@ route('GET', '/api/discover', async ({ user, query, res }) => {
       AND (:tags = '[]' OR EXISTS (SELECT 1 FROM event_tags tt WHERE tt.event_id = t.id AND tt.tag IN (SELECT value FROM json_each(:tags))))
       AND (:costs = '[]' OR (CASE WHEN t.cost_amount > 0 THEN 'paid' ELSE 'free' END) IN (SELECT value FROM json_each(:costs)))
       AND (:dated = 0 OR t.when_text != '')
+      AND (:located = 0 OR t.location != '' OR t.online > 0)
     ORDER BY t.created_at DESC, t.id DESC
     LIMIT :limit`).all({ me: user?.id ?? -1, tags: JSON.stringify(tags), costs: JSON.stringify(costs),
-      dated: range ? 1 : 0, limit: range ? -1 : 30 }) // repeats are matched in JS, so the date filter reads all, then cuts
-    .filter(t => !range || occursBetween(t.when_text, range.from, range.to)).slice(0, 30);
+      dated: range ? 1 : 0, located: near || online ? 1 : 0, limit: range || near || online ? -1 : 30 }) // date and place are checked in JS, so those read all, then cut
+    .filter(t => !range || occursBetween(t.when_text, range.from, range.to))
+    .filter(t => !(near || online) || placed(t)).slice(0, 30);
   send(res, 200, rows.map(({ host_id, host_raw, host_guid, ...t }) =>
     withTags({ ...t, host: { ...(host_guid ? { guid: host_guid } : {}), icon: iconHash(host_raw), ...stats(host_id) } })));
 }, { auth: 'optional' });
 
 // Filter options for Discover: tags and costs, each with how many discoverable events match. ?dates=key:from:to,…
-// (the browser's own day ranges, e.g. today:2026-11-15:2026-11-15) adds a count for each of those ranges.
+// (the browser's own day ranges, e.g. today:2026-11-15:2026-11-15) adds a count for each of those ranges, and
+// ?near=lat,lon&radii=km,km,… a count for each of those distances.
 route('GET', '/api/discover/filters', async ({ user, query, res }) => {
   const me = user?.id ?? -1;
+  const center = nearFilter(query.get('near'), 1);
+  const radii = center ? String(query.get('radii') || '').split(',').slice(0, 10).map(Number).filter(k => k > 0 && k <= MAX_RADIUS_KM) : [];
+  const located = radii.length ? q(`SELECT t.location FROM events t WHERE ${DISCOVERABLE} AND t.location != ''`).all({ me })
+    .map(t => distanceKm(center, t.location)) : [];
+  const distances = radii.map(km => ({ km, count: located.filter(d => d <= km).length }));
+  const online = q(`SELECT COUNT(*) n FROM events t WHERE ${DISCOVERABLE} AND t.online > 0`).get({ me }).n;
   const ranges = String(query.get('dates') || '').split(',').slice(0, 10).map(x => x.split(':'))
     .map(([key, from, to]) => ({ key, range: dateRange(from, to) })).filter(x => /^[a-z]{1,20}$/.test(x.key || '') && x.range);
   const dated = ranges.length ? q(`SELECT t.when_text FROM events t WHERE ${DISCOVERABLE} AND t.when_text != ''`).all({ me }) : [];
@@ -500,7 +537,7 @@ route('GET', '/api/discover/filters', async ({ user, query, res }) => {
   const byCost = Object.fromEntries(q(`
     SELECT CASE WHEN t.cost_amount > 0 THEN 'paid' ELSE 'free' END AS cost, COUNT(*) AS count
     FROM events t WHERE ${DISCOVERABLE} GROUP BY 1`).all({ me }).map(r => [r.cost, r.count]));
-  send(res, 200, { tags, costs: COST_FILTERS.map(cost => ({ cost, count: byCost[cost] || 0 })), dates });
+  send(res, 200, { tags, costs: COST_FILTERS.map(cost => ({ cost, count: byCost[cost] || 0 })), dates, distances, online });
 }, { auth: 'optional' });
 
 route('POST', '/api/events/:id/swipe', async ({ user, params, body, res }) => {
@@ -579,7 +616,7 @@ route('POST', '/api/confirm/:id/undo', async ({ user, params, res }) => {
 
 route('GET', '/api/matches', async ({ user, res }) => {
   const rows = q(`
-    SELECT s.id, s.status, s.note, s.reconfirm, t.id AS event_id, t.title, ${TAGS_COL}, t.location, t.location_name, t.when_text, t.status AS event_status,
+    SELECT s.id, s.status, s.note, s.reconfirm, t.id AS event_id, t.title, ${TAGS_COL}, t.location, t.location_name, t.online, t.when_text, t.status AS event_status,
            t.host_id, s.attendee_id, cu.guid AS host_guid, hu.guid AS attendee_guid,
            cu.chat_pubkey AS host_pubkey, hu.chat_pubkey AS attendee_pubkey,
            (SELECT body FROM messages m WHERE m.swipe_id = s.id ORDER BY m.id DESC LIMIT 1) AS last_message,
@@ -682,8 +719,8 @@ route('POST', '/api/events', async ({ user, body, res }) => {
   const f = eventFields(body);
   const id = tx(() => {
     const { lastInsertRowid } = q(`
-      INSERT INTO events (host_id, title, details, location, location_name, when_text, cost_amount, cost_currency, visibility, max_attendees)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(user.id, f.title, f.details, f.location, f.location_name, f.when_text, f.cost_amount, f.cost_currency, f.visibility, f.max_attendees);
+      INSERT INTO events (host_id, title, details, location, location_name, online, when_text, cost_amount, cost_currency, visibility, max_attendees)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(user.id, f.title, f.details, f.location, f.location_name, f.online, f.when_text, f.cost_amount, f.cost_currency, f.visibility, f.max_attendees);
     setEventTags(lastInsertRowid, f.tags);
     setViewers(lastInsertRowid, viewerIds(body.viewers ?? [], user.id));
     return lastInsertRowid;
@@ -702,8 +739,9 @@ route('PATCH', '/api/events/:id', async ({ user, params, body, res }) => {
     throw new HttpError(400, `${filled} ${filled > 1 ? 'people are' : 'person is'} already matched, so max attendees must be at least ${filled} (or blank for no limit)`);
 
   const cost = (e) => costLabel(e.cost_amount, e.cost_currency, 'en-US');
-  const where = (e) => e.location_name || e.location;
-  const value = (e, k) => (k === 'cost' ? cost(e) : k === 'location' ? `${e.location_name}|${e.location}` : e[k]);
+  const place = (e) => e.location_name || e.location;
+  const where = (e) => (e.online === 1 ? 'Online' : e.online === 2 ? `${place(e) || 'In person'} and online` : place(e));
+  const value = (e, k) => (k === 'cost' ? cost(e) : k === 'location' ? `${e.online}|${e.location_name}|${e.location}` : e[k]);
   const changed = Object.keys(FIELD_LABELS).filter(k => JSON.stringify(value(f, k)) !== JSON.stringify(value(event, k)));
   // Who can see it isn't something attendees are told about or asked to re-confirm.
   const viewers = viewerIds(body.viewers, user.id);
@@ -719,8 +757,8 @@ route('PATCH', '/api/events/:id', async ({ user, params, body, res }) => {
     '\nPlease re-confirm you can still make it.';
 
   const notified = tx(() => {
-    q(`UPDATE events SET title = ?, details = ?, location = ?, location_name = ?, when_text = ?, cost_amount = ?, cost_currency = ?, visibility = ?, max_attendees = ? WHERE id = ?`)
-      .run(f.title, f.details, f.location, f.location_name, f.when_text, f.cost_amount, f.cost_currency, f.visibility, f.max_attendees, event.id);
+    q(`UPDATE events SET title = ?, details = ?, location = ?, location_name = ?, online = ?, when_text = ?, cost_amount = ?, cost_currency = ?, visibility = ?, max_attendees = ? WHERE id = ?`)
+      .run(f.title, f.details, f.location, f.location_name, f.online, f.when_text, f.cost_amount, f.cost_currency, f.visibility, f.max_attendees, event.id);
     setEventTags(event.id, f.tags);
     setViewers(event.id, viewers);
     const attendees = q(`SELECT id FROM swipes WHERE event_id = ? AND status = 'accepted'`).all(event.id);
@@ -750,6 +788,117 @@ route('DELETE', '/api/events/:id', async ({ user, params, res }) => {
 });
 
 // How many events I've been to with each person (as host or attendee), by GUID. The browser shows them under the nicknames in my encrypted contacts.
+// ---------- invitations to connect ----------
+// The link is ${origin}/#invite=<token>. The token stays in the URL fragment, so it never reaches a server's logs;
+// we keep only its SHA-256. The owner's browser keeps the token itself (in their encrypted vault) to share it again.
+const MAX_INVITES = 20;
+const tokenHash = (t) => createHash('sha256').update(String(t)).digest('hex');
+function findInvite(token) {
+  if (typeof token !== 'string' || !/^[A-Za-z0-9_-]{20,64}$/.test(token)) throw new HttpError(404, 'That invitation link is not valid, or was deleted');
+  const inv = q('SELECT * FROM invites WHERE token_hash = ?').get(tokenHash(token));
+  if (!inv) throw new HttpError(404, 'That invitation link is not valid, or was deleted');
+  return inv;
+}
+const connected = (x, y) => Boolean(q('SELECT 1 FROM connections WHERE a = ? AND b = ?').get(Math.min(x, y), Math.max(x, y)));
+
+route('GET', '/api/invites', async ({ user, res }) => {
+  send(res, 200, q('SELECT id, uses, created_at FROM invites WHERE owner_id = ? ORDER BY id DESC').all(user.id));
+});
+
+route('POST', '/api/invites', async ({ user, res }) => {
+  if (q('SELECT COUNT(*) n FROM invites WHERE owner_id = ?').get(user.id).n >= MAX_INVITES)
+    throw new HttpError(409, `You can have up to ${MAX_INVITES} invitations. Delete one first.`);
+  const token = randomBytes(24).toString('base64url');
+  const { lastInsertRowid } = q('INSERT INTO invites (owner_id, token_hash) VALUES (?, ?)').run(user.id, tokenHash(token));
+  send(res, 200, { id: Number(lastInsertRowid), token, uses: 0 });
+});
+
+// Deleting an invitation stops new people using it; people already connected through it stay connected.
+route('DELETE', '/api/invites/:id', async ({ user, params, res }) => {
+  const r = q('DELETE FROM invites WHERE id = ? AND owner_id = ?').run(params.id, user.id);
+  if (!r.changes) throw new HttpError(404, 'Invitation not found');
+  send(res, 200, { ok: true });
+});
+
+// Before saying yes: the inviter's icon (not their GUID), and whether this is your own link, you're already
+// connected, or you've already asked.
+const requestOf = (ownerId, requesterId) =>
+  q('SELECT * FROM connection_requests WHERE owner_id = ? AND requester_id = ?').get(ownerId, requesterId);
+route('POST', '/api/invites/preview', async ({ user, body, res }) => {
+  const inv = findInvite(body.token);
+  const owner = q('SELECT guid FROM users WHERE id = ?').get(inv.owner_id);
+  const asked = user && requestOf(inv.owner_id, user.id);
+  send(res, 200, {
+    icon: iconHash(owner.guid), mine: user?.id === inv.owner_id,
+    connected: Boolean(user && connected(user.id, inv.owner_id)), requested: Boolean(asked && asked.status !== 'accepted'),
+  });
+}, { auth: 'optional' });
+
+// The invitee says yes: ask the owner to connect, with the nickname they suggest for themselves (body.note, encrypted
+// with the link's key, which we never see). Nothing is shared until the owner confirms. Asking again while pending
+// updates the nickname; asking again after being declined quietly changes nothing, so a "no" stays a no.
+route('POST', '/api/invites/accept', async ({ user, body, res }) => {
+  const inv = findInvite(body.token);
+  if (inv.owner_id === user.id) throw new HttpError(400, "That's your own invitation. Share it with someone else.");
+  if (connected(user.id, inv.owner_id)) return send(res, 200, { status: 'connected' });
+  const note = sealed(body.note, 'nickname', 1000);
+  q(`INSERT INTO connection_requests (owner_id, requester_id, invite_id, note) VALUES (?, ?, ?, ?)
+     ON CONFLICT (owner_id, requester_id) DO UPDATE SET note = excluded.note, invite_id = excluded.invite_id
+     WHERE connection_requests.status = 'pending'`).run(inv.owner_id, user.id, inv.id, note);
+  send(res, 200, { status: 'requested' });
+});
+
+// Confirm tab: people who used one of my invitation links and are waiting for me. Icon and their encrypted suggested
+// nickname (note) only, no GUID until I say yes.
+route('GET', '/api/connection-requests', async ({ user, res }) => {
+  const rows = q(`
+    SELECT r.id, r.created_at, r.requester_id, r.invite_id, r.note, u.guid
+    FROM connection_requests r JOIN users u ON u.id = r.requester_id
+    WHERE r.owner_id = ? AND r.status = 'pending' ORDER BY r.id`).all(user.id);
+  send(res, 200, rows.map(({ requester_id, guid, ...r }) => ({ ...r, requester: { icon: iconHash(guid), ...stats(requester_id) } })));
+});
+
+function loadRequest(id, userId) {
+  const r = q('SELECT * FROM connection_requests WHERE id = ?').get(id);
+  if (!r || r.owner_id !== userId) throw new HttpError(404, 'Request not found');
+  return r;
+}
+
+route('POST', '/api/connection-requests/:id/respond', async ({ user, params, body, res }) => {
+  const r = loadRequest(params.id, user.id);
+  if (r.status !== 'pending') throw new HttpError(409, 'You already answered this request');
+  if (!body.yes) {
+    q(`UPDATE connection_requests SET status = 'declined' WHERE id = ?`).run(r.id);
+    return send(res, 200, { connected: false });
+  }
+  tx(() => {
+    q(`UPDATE connection_requests SET status = 'accepted' WHERE id = ?`).run(r.id);
+    q('INSERT OR IGNORE INTO connections (a, b) VALUES (?, ?)').run(Math.min(r.owner_id, r.requester_id), Math.max(r.owner_id, r.requester_id));
+    if (r.invite_id) q('UPDATE invites SET uses = uses + 1 WHERE id = ?').run(r.invite_id);
+  });
+  send(res, 200, { connected: true, guid: q('SELECT guid FROM users WHERE id = ?').get(r.requester_id).guid });
+});
+
+// Undo my answer (right after swiping): back to pending, and an accept is disconnected again.
+route('POST', '/api/connection-requests/:id/undo', async ({ user, params, res }) => {
+  const r = loadRequest(params.id, user.id);
+  if (r.status === 'pending') return send(res, 200, { ok: true });
+  tx(() => {
+    if (r.status === 'accepted') {
+      q('DELETE FROM connections WHERE a = ? AND b = ?').run(Math.min(r.owner_id, r.requester_id), Math.max(r.owner_id, r.requester_id));
+      if (r.invite_id) q('UPDATE invites SET uses = MAX(uses - 1, 0) WHERE id = ?').run(r.invite_id);
+    }
+    q(`UPDATE connection_requests SET status = 'pending' WHERE id = ?`).run(r.id);
+  });
+  send(res, 200, { ok: true });
+});
+
+// Everyone I'm connected with through invitations, so my browser can add them to my contacts.
+route('GET', '/api/connections', async ({ user, res }) => {
+  send(res, 200, q(`SELECT u.guid FROM connections c JOIN users u ON u.id = CASE WHEN c.a = ? THEN c.b ELSE c.a END
+    WHERE c.a = ? OR c.b = ?`).all(user.id, user.id, user.id));
+});
+
 route('GET', '/api/ledger', async ({ user, res }) => {
   const rows = q(`
     SELECT u.guid, COUNT(*) AS together
@@ -765,10 +914,14 @@ route('GET', '/api/ledger', async ({ user, res }) => {
 
 const STATIC = {
   '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/secure.js': 'secure.js', '/style.css': 'style.css', '/location.js': 'location.js', '/when.js': 'when.js', '/cost.js': 'cost.js', '/ics.js': 'ics.js',
-  '/vendor/jdenticon-3.3.0.js': 'vendor/jdenticon-3.3.0.js', // Jdenticon 3.3.0 browser ES module, MIT (license in the file)
   '/fonts/bungee-latin.woff2': 'fonts/bungee-latin.woff2', // Bungee, SIL OFL 1.1 (see public/fonts/Bungee-OFL.txt)
 };
-const MIME = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8', woff2: 'font/woff2' };
+// Browser files from npm packages (package.json), served from our own origin like everything else: npm is only
+// needed to install them, never while the app runs. Paths are relative to this file.
+const VENDOR = {
+  '/vendor/jdenticon.js': 'node_modules/jdenticon/dist/jdenticon-module.mjs', // Jdenticon avatars, MIT
+};
+const MIME = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', mjs: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8', woff2: 'font/woff2' };
 
 // Everything is served from this origin; a strict CSP keeps injected scripts away from the keys in the page.
 // (style-src allows inline style attributes used in the markup; img-src allows OSM tiles for the location picker.)
@@ -778,13 +931,13 @@ const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inl
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   try {
-    if (req.method === 'GET' && STATIC[url.pathname]) {
-      const file = STATIC[url.pathname];
+    if (req.method === 'GET' && (STATIC[url.pathname] || VENDOR[url.pathname])) {
+      const file = STATIC[url.pathname] ? './public/' + STATIC[url.pathname] : './' + VENDOR[url.pathname];
       res.writeHead(200, {
         'Content-Type': MIME[file.split('.').pop()], 'Cache-Control': 'no-cache',
         'Content-Security-Policy': CSP, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
       });
-      return res.end(await readFile(new URL('./public/' + file, import.meta.url)));
+      return res.end(await readFile(new URL(file, import.meta.url)));
     }
     for (const r of routes) {
       const m = r.method === req.method && url.pathname.match(r.re);

@@ -12,7 +12,7 @@ about **connections and metadata**, and about the limits of doing end-to-end enc
 ## 1. Social graph and metadata the server still sees
 
 - [ ] **P0: The match graph is in plaintext.** `swipes` (who asked to join whose event, accepted/declined/attended) links
-  host and attendee GUIDs, with timestamps. That *is* the social graph. Match records are intentionally kept for
+  host and attendee GUIDs, with timestamps. So does `connections` (people who connected through an invitation). That *is* the social graph. Match records are intentionally kept for
   now; we need another way to protect them. Ideas: per-match pseudonymous IDs instead of account GUIDs, private set
   intersection / blind matching, sealed-sender-style message routing, or client-encrypted match records the server
   can't attribute.

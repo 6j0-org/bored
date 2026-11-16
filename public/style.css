@@ -113,6 +113,7 @@ nav.tabs button.active { color: var(--accent); font-weight: 700; }
 .avatar.big { width: 112px; height: 112px; font-size: 3rem; border: 4px solid #fff; box-shadow: var(--shadow); }
 .avatar.icon { background: #fff; overflow: hidden; }
 .avatar.icon svg { width: 82%; height: 82%; }
+.invite-from { display: grid; place-items: center; }
 .avatar.anon { background: var(--line); } /* only if an icon is missing */
 .who small { color: var(--muted); display: block; }
 
@@ -151,7 +152,9 @@ nav.tabs button.active { color: var(--accent); font-weight: 700; }
 .tag-cooking  { background: linear-gradient(135deg, #fca5a5, #b91c1c); }
 .tag-errands  { background: linear-gradient(135deg, #67e8f9, #0e7490); }
 .tag-none     { background: linear-gradient(135deg, #d6d3d1, #57534e); }
-.tag-social   { background: linear-gradient(135deg, #fde047, #db2777); }
+.tag-fitness  { background: linear-gradient(135deg, #fdba74, #dc2626); }
+.tag-games    { background: linear-gradient(135deg, #a5b4fc, #4338ca); }
+.tag-movies   { background: linear-gradient(135deg, #d8b4fe, #7e22ce); }
 .tag-outdoors { background: linear-gradient(135deg, #bef264, #3f6212); }
 .tag-events   { background: linear-gradient(135deg, #a5b4fc, #be123c); }
 .tag-food     { background: linear-gradient(135deg, #fed7aa, #9a3412); }

@@ -119,6 +119,42 @@ CREATE INDEX IF NOT EXISTS idx_messages_swipe ON messages(swipe_id);
 const MIGRATIONS = [
   // 1: a friendly name for a post's location, shown instead of the coordinates, e.g. "Ocean Beach Pier"; '' = none.
   `ALTER TABLE events ADD COLUMN location_name TEXT NOT NULL DEFAULT ''`,
+  // 2: drop the "social" tag. Everything in the app is social, so it said nothing.
+  `DELETE FROM event_tags WHERE tag = 'social'`,
+  // 3: online posts. 0 = in person, 1 = online only (location and location_name are then ''), 2 = both, e.g. a
+  //    city hall meeting with a video call (location is the in-person part).
+  `ALTER TABLE events ADD COLUMN online INTEGER NOT NULL DEFAULT 0`,
+  // 4: invitations to connect. An invite is a link its owner shares however they like, usable until they delete it.
+  //    Only a hash of the link's token is stored. Connecting takes both people: whoever opens the link asks to
+  //    connect (a connection_request), and the owner confirms or declines it in their Confirm tab.
+  //    A connection (a < b) makes two people contacts, just like a match does.
+  `CREATE TABLE invites (
+     id         INTEGER PRIMARY KEY,
+     owner_id   INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     token_hash TEXT NOT NULL UNIQUE,
+     uses       INTEGER NOT NULL DEFAULT 0,  -- how many people connected through it (confirmed)
+     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+   );
+   CREATE INDEX idx_invites_owner ON invites(owner_id);
+   CREATE TABLE connections (
+     a          INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     b          INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     created_at TEXT NOT NULL DEFAULT (datetime('now')),
+     PRIMARY KEY (a, b),
+     CHECK (a < b)
+   );
+   CREATE INDEX idx_connections_b ON connections(b);
+   -- status: pending (waiting for the invite's owner) | accepted (connected) | declined
+   CREATE TABLE connection_requests (
+     id           INTEGER PRIMARY KEY,
+     owner_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     requester_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     invite_id    INTEGER REFERENCES invites(id) ON DELETE SET NULL,
+     status       TEXT NOT NULL DEFAULT 'pending',
+     note         TEXT NOT NULL DEFAULT '', -- the nickname the requester suggests, encrypted with the invite link's key
+     created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+     UNIQUE (owner_id, requester_id)
+   );`,
 ];
 
 export function migrate() {

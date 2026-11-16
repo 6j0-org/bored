@@ -20,7 +20,7 @@ function fold(line) {
 
 const stamp = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d+/, ''); // 20261115T203000Z
 
-// e: { id, title, details?, location? ("lat,lon"), location_name?, when_text }. Returns the file's text, or null without a valid time.
+// e: { id, title, details?, location? ("lat,lon"), location_name?, online? (0 in person, 1 online, 2 both), when_text }. Returns the file's text, or null without a valid time.
 // Times are "floating" (no zone), like the post itself: 6:30 PM wherever you are. Posts have no end time, so the
 // calendar entry gets an hour.
 export function icsFor(e, { origin = location.origin } = {}) {
@@ -37,7 +37,10 @@ export function icsFor(e, { origin = location.origin } = {}) {
     ...(w.rule ? [`RRULE:${w.rule}`] : []),
     `SUMMARY:${text(e.title)}`,
     ...(e.details ? [`DESCRIPTION:${text(e.details)}`] : []),
-    ...(e.location_name || geo ? [`LOCATION:${text(e.location_name || `${geo[1]},${geo[2]}`)}`] : []),
+    ...(e.online === 1 ? ['LOCATION:Online'] : []),
+    ...(e.online !== 1 && (e.location_name || geo)
+      ? [`LOCATION:${text((e.location_name || `${geo[1]},${geo[2]}`) + (e.online === 2 ? ' and online' : ''))}`]
+      : e.online === 2 ? ['LOCATION:In person and online'] : []),
     ...(geo ? [`GEO:${geo[1]};${geo[2]}`] : []),
     'END:VEVENT', 'END:VCALENDAR',
   ];

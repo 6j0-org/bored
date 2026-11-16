@@ -1,9 +1,12 @@
-# Bored? server. No npm packages: just Node (>= 24, for the built-in node:sqlite) and the app's own files.
+# Bored? server: Node (>= 24, for the built-in node:sqlite), the app's own files, and the npm packages in
+# package.json (installed at build time from the lock file; nothing is fetched while the app runs).
 # seed.js is left out on purpose: demo data must never land in a real database.
 FROM node:24-alpine
 
 WORKDIR /app
-COPY package.json server.js db.js webauthn.js idtoken.js ./
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts
+COPY server.js db.js webauthn.js idtoken.js ./
 COPY public ./public
 
 # The SQLite database (accounts, posts, encrypted vaults and chats) lives here; mount a volume to keep it.

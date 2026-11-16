@@ -267,7 +267,11 @@ export async function addPasskey(api, nextStep) {
 
 // ---------- vault: your private names for yourself and your contacts ----------
 // { v: 1, contacts: { [guid]: { nickname, tags: [], added } },
-//   audiences: { [eventId]: { groups: [tag], contacts: [guid] } } }  (who each of my private posts is shared with)
+//   audiences: { [eventId]: { groups: [tag], contacts: [guid] } },  (who each of my private posts is shared with)
+//   prefs: { distanceUnit: 'km' | 'mi' },  (settings from Profile)
+//   invites: { [inviteId]: { token, key, name } },  (my invitation links, so I can share them again; the server has
+//     only hashes. name is the nickname I suggested; key decrypts the nicknames people suggest when they ask)
+//   pendingNames: { [iconHash]: nickname } }  (nicknames for inviters I've asked to connect with, applied once they confirm)
 const emptyVault = () => ({ v: 1, contacts: {}, audiences: {} });
 
 export const vault = {
@@ -296,11 +300,24 @@ export const vault = {
         this._sealed = null; await this.load(api);
       }
     }
-    throw new Error("Couldn't save your contacts. Please try again.");
+    throw new Error("Couldn't save. Please try again.");
   },
 };
 
 export const hasKeys = () => Boolean(keys);
+
+// ---------- invitations ----------
+// Each invitation link carries a random AES key in its #fragment, next to the token. The fragment never reaches a
+// server, so the person who opens the link can send the inviter their suggested nickname encrypted with it, and
+// the server, which only stores and relays the ciphertext, can't read it.
+export const newInviteKey = () => b64u.enc(crypto.getRandomValues(new Uint8Array(32)));
+const inviteKey = (k) => subtle.importKey('raw', b64u.dec(k), 'AES-GCM', false, ['encrypt', 'decrypt']);
+export const sealForInvite = async (k, text) => seal(await inviteKey(k), text);
+export async function openForInvite(k, sealedStr) {
+  try { return await openText(await inviteKey(k), sealedStr); } catch { return null; }
+}
+// SHA-1 of a GUID in hex: the server's `icon` for someone (see iconHash in server.js), so a GUID can be matched to an icon.
+export const sha1Hex = async (s) => [...new Uint8Array(await subtle.digest('SHA-1', te.encode(s)))].map(b => b.toString(16).padStart(2, '0')).join('');
 
 // ---------- E2E chat ----------
 const chatKeys = new Map(); // matchId -> AES key

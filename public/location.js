@@ -75,7 +75,11 @@ function unproject(x, y, z) {
 
 // Opens a full-screen map. Resolves to "lat,lon" for the chosen spot, '' if the person cleared the location,
 // or undefined if they cancelled.
-export function pickLocation(initial = '', initialName = '') {
+// Options: title; note (the hint under the map); nameField: false hides the place name box and never looks one up;
+// clearLabel for the button that resolves to ''.
+const POST_NOTE = `Tap the map to drop the pin. Anyone who can see your post can see this spot, so a nearby
+  landmark may be better than your front door.`;
+export function pickLocation(initial = '', initialName = '', { title = 'Where?', note = POST_NOTE, nameField = true, clearLabel = 'No location' } = {}) {
   return new Promise((resolve) => {
     let pin = parseLatLon(initial);
     let z = pin ? 16 : 3;
@@ -85,7 +89,7 @@ export function pickLocation(initial = '', initialName = '') {
     sheet.className = 'sheet map-sheet';
     sheet.innerHTML = `
       <div class="panel stack">
-        <h2>Where?</h2>
+        <h2>${esc(title)}</h2>
         <div class="map" tabindex="0" aria-label="Map. Drag to move, tap to place the pin, plus and minus keys to zoom.">
           <div class="tiles"></div>
           <div class="pin" hidden>${MAP_PIN_SVG}</div>
@@ -97,15 +101,14 @@ export function pickLocation(initial = '', initialName = '') {
         </div>
         <div class="map-status"><span class="coords"></span>
           <button type="button" class="btn ghost small" data-here>Use my location</button></div>
-        <label>Place name
+        <label ${nameField ? '' : 'hidden'}>Place name
           <input class="place-name" maxlength="100" placeholder="e.g. Ocean Beach Pier" value="${esc(initialName)}"></label>
-        <p class="note">Tap the map to drop the pin. Anyone who can see your post can see this spot, so a nearby
-          landmark may be better than your front door.</p>
+        <p class="note">${esc(note)}</p>
         <div class="two">
           <button type="button" class="btn ghost" data-cancel>Cancel</button>
           <button type="button" class="btn" data-done>Use this spot</button>
         </div>
-        <button type="button" class="btn ghost small" data-clear>No location</button>
+        <button type="button" class="btn ghost small" data-clear>${esc(clearLabel)}</button>
       </div>`;
     document.body.appendChild(sheet);
     const map = sheet.querySelector('.map'), tiles = sheet.querySelector('.tiles'), pinEl = sheet.querySelector('.pin');
@@ -115,7 +118,7 @@ export function pickLocation(initial = '', initialName = '') {
     let typed = Boolean(initialName), lookup = 0;
     nameEl.addEventListener('input', () => { typed = Boolean(nameEl.value.trim()); });
     const pinMoved = async () => {
-      if (typed) return;
+      if (typed || !nameField) return;
       const n = ++lookup;
       nameEl.placeholder = 'Looking up a name…';
       const name = await lookUpName(pin);
@@ -257,6 +260,11 @@ export function mountLocationField(form) {
   const name = form.querySelector('input[name=location_name]'), coords = form.querySelector('input[name=location]');
   const btn = form.querySelector('.loc-pick');
   if (!name || !coords || !btn) return;
+  // In person / Online / Both: an online-only post has no place, so the Place box hides for it.
+  const place = form.querySelector('.loc-place');
+  form.querySelectorAll('input[name=online]').forEach(r => r.addEventListener('change', () => {
+    if (place) place.hidden = r.value === '1' && r.checked;
+  }));
   // Clearing the name clears the spot too, so an empty box means no location.
   name.addEventListener('input', () => { if (!name.value.trim()) coords.value = ''; });
   btn.onclick = async () => {

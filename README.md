@@ -9,9 +9,11 @@ Accounts are anonymous: a random GUID and a passkey. No usernames, passwords or 
 
 ## Run
 
-Needs Node ≥ 24 (uses the built-in `node:sqlite`). No dependencies.
+Needs Node ≥ 24 (uses the built-in `node:sqlite`). npm packages are only for the browser (see `VENDOR` in
+`server.js`); they're installed once, then served from this server, so the running app never needs npm or a CDN.
 
 ```sh
+npm ci         # install the exact versions in package-lock.json
 npm run seed   # optional: demo posts from demo accounts (they have no passkeys, so nobody can sign in as them)
 npm start      # http://localhost:3000
 ```
@@ -73,7 +75,7 @@ A post stays in the deck until it reaches its max attendees. Posts with no limit
   everyone else has no name.
 - **GUIDs are only shared with matches.** The API sends someone's GUID only to people they've matched with, so
   strangers can't link one person's posts or requests together. Everyone's avatar is the [Jdenticon](https://jdenticon.com) of
-  their GUID (vendored in `public/vendor/`). For people you haven't matched with, the server sends the SHA-1 of
+  their GUID (the `jdenticon` npm package, served by this server). For people you haven't matched with, the server sends the SHA-1 of
   the GUID instead, which draws the same icon but doesn't reveal the GUID. The icon does follow a person across
   their posts.
 - **The vault** (nickname + tags for each contact, and who each of your private posts is shared with) is encrypted in the browser with a random
@@ -83,6 +85,11 @@ A post stays in the deck until it reaches its max attendees. Posts with no limit
   and carried in the URL fragment (which never reaches a server). The vault key is wrapped by a key derived from the
   app key. Other 6j0.org apps get different app keys, so they can't read Bored? data, and Bored? gives the account
   its own public GUID, so people can't link your Bored? account to your accounts in other apps.
+- **Invitations to connect** are links (`/#invite=<token>`). The token stays in the URL fragment, so it isn't sent
+  in requests or logged; the server stores only its SHA-256, and the owner's encrypted vault keeps the link to share
+  again. Connecting makes two people contacts, the same as matching (the server records the pair in `connections`).
+- **Your location for the distance filter** stays in your browser (`localStorage`). Discover sends the server only a
+  rough spot, rounded to 2 decimals (about a kilometre), and only while a distance is picked.
 - **Chat is end-to-end encrypted** (ECDH P-256 → HKDF per match → AES-GCM). Your chat private key is stored
   encrypted under the vault key, so any of your passkeys can read your chats on a new device. Prototype caveat:
   static keys, so no forward secrecy.

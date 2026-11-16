@@ -4,10 +4,15 @@
   "private": true,
   "description": "Swipe through local events. When you and the host both say yes, it's on.",
   "type": "module",
-  "engines": { "node": ">=24" },
+  "engines": {
+    "node": ">=24"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
     "seed": "node seed.js"
+  },
+  "dependencies": {
+    "jdenticon": "3.3.0"
   }
 }

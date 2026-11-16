@@ -2,18 +2,19 @@
 import {
   prfSupport, createAccount, signIn, addPasskey, loadKeys, clearKeys, hasKeys, vault,
   encryptMessage, decryptMessage, PrfUnsupportedError, startIdSignIn, finishIdSignIn, hasIdCallback,
+  newInviteKey, sealForInvite, openForInvite, sha1Hex,
 } from './secure.js';
-import { locationHtml, mountLocationField, PIN_SVG } from './location.js';
+import { locationHtml, mountLocationField, pickLocation, PIN_SVG } from './location.js';
 import { parseWhen, repeatOptions, whenLabel as fmtWhen, localToday } from './when.js';
 import { CURRENCIES, DEFAULT_CURRENCY, costLabel } from './cost.js';
-import { toSvg as identicon } from './vendor/jdenticon-3.3.0.js';
+import { toSvg as identicon } from './vendor/jdenticon.js';
 import { addToCalendar } from './ics.js';
 
 // Well-known tags: offered as one-tap suggestions, and the first one on a post picks its icon and color (.tag-<name>).
 // Posts can also use any other tag; those show with no icon.
 const TAG_ICONS = {
-  social: '🎉', outdoors: '🥾', events: '🎟️', food: '🍽️', garden: '🌱', hauling: '🚚', moving: '📦',
-  repair: '🔧', pets: '🐕', tech: '💻', cooking: '🍲', errands: '🛒',
+  outdoors: '🥾', events: '🎟️', food: '🍽️', garden: '🌱', hauling: '🚚', moving: '📦',
+  repair: '🔧', pets: '🐕', tech: '💻', cooking: '🍲', errands: '🛒', fitness: '🏋️', games: '🎮', movies: '🎬',
 };
 const MAX_TAGS = 5;
 const MAX_ATTENDEES_LIMIT = 500; // must match db.js
@@ -25,6 +26,20 @@ const tagLook = (tags = []) => {
 const whenLabel = (s) => fmtWhen(s, { today: localToday() });
 // Discover's cost filter: prices in different currencies can't be compared, so it's just free vs. paid.
 const COST_FILTERS = { free: 'Free', paid: 'Paid' };
+// Discover's distance filter: your spot (kept on this device only) and a radius, in the unit you picked in Profile
+// (kept in your encrypted vault, prefs.distanceUnit: 'km' | 'mi'). Kilometres by default, and for guests.
+const useMiles = () => vault.data.prefs?.distanceUnit === 'mi';
+const kmPerUnit = () => (useMiles() ? 1.609344 : 1);
+const RADII = [1, 5, 10, 25, 50];
+const DEFAULT_RADIUS = 10;
+function fmtDistance(n) {
+  try { return new Intl.NumberFormat(undefined, { style: 'unit', unit: useMiles() ? 'mile' : 'kilometer', unitDisplay: 'short' }).format(n); }
+  catch { return `${n} ${useMiles() ? 'mi' : 'km'}`; }
+}
+function loadJson(key, fallback) { try { return JSON.parse(localStorage.getItem(key)) ?? fallback; } catch { return fallback; } }
+// The server only ever gets a rough spot, rounded to 2 decimals (about a kilometre).
+const roughSpot = ({ lat, lon }) => `${lat.toFixed(2)},${lon.toFixed(2)}`;
+
 // Discover's date filter (pick one): day ranges in your own calendar, worked out each time they're used.
 const DATE_FILTERS = { today: 'Today', tomorrow: 'Tomorrow', weekend: 'This weekend', week: 'Next 7 days' };
 function dateFilterRange(key, now = new Date()) {
@@ -74,7 +89,7 @@ const POST_IDEAS = [
     template: {
       title: 'Try out a local restaurant together',
       details: "There's a place nearby I've been meaning to check out. Want to come along? We can each get our own check.",
-      tags: ['food', 'social'], max_attendees: 2, when: [19],
+      tags: ['food'], max_attendees: 2, when: [19],
     },
   },
   {
@@ -82,7 +97,7 @@ const POST_IDEAS = [
     template: {
       title: 'Walk around the neighborhood',
       details: 'Looking for some company on a walk. Easy pace, about an hour. Dogs welcome!',
-      tags: ['social', 'outdoors'], max_attendees: 1, when: [18],
+      tags: ['outdoors'], max_attendees: 1, when: [18],
     },
   },
   {
@@ -98,7 +113,7 @@ const POST_IDEAS = [
     template: {
       title: 'Grocery run together',
       details: "Heading to the grocery store. Come along and we'll make a trip of it. Happy to share a ride.",
-      tags: ['errands', 'social'], max_attendees: 1, when: [11, 6],
+      tags: ['errands'], max_attendees: 1, when: [11, 6],
     },
   },
   {
@@ -114,7 +129,7 @@ const POST_IDEAS = [
     template: {
       title: 'Go for a hike',
       details: "Thinking of hitting a trail nearby. Moderate pace, a few hours. Bring water and good shoes, and we can carpool to the trailhead.",
-      tags: ['outdoors', 'social'], max_attendees: 2, when: [9, 0],
+      tags: ['outdoors'], max_attendees: 2, when: [9, 0],
     },
   },
   {
@@ -122,7 +137,39 @@ const POST_IDEAS = [
     template: {
       title: 'Check out an event around town',
       details: "There's something happening around town that looks fun. Say what it is and where to find details, and anyone who's interested can come along.",
-      tags: ['events', 'social'], visibility: 'public',
+      tags: ['events'], visibility: 'public',
+    },
+  },
+  {
+    prompt: 'Want to work out or go to the gym with a friend?',
+    template: {
+      title: 'Work out together',
+      details: "Heading to the gym. It's easier to stick with it when someone's expecting you. Any fitness level is welcome.",
+      tags: ['fitness'], max_attendees: 1, when: [7],
+    },
+  },
+  {
+    prompt: 'Want someone to play a video game with?',
+    template: {
+      title: 'Play a video game together',
+      details: "Couch co-op or online, I'm up for most things. Say what you like to play and what you play on.",
+      tags: ['games'], max_attendees: 1, when: [20],
+    },
+  },
+  {
+    prompt: 'Want to watch a movie together?',
+    template: {
+      title: 'Watch a movie',
+      details: "At the theater or on my couch, either works. Let's pick something we both want to see. Snacks on me.",
+      tags: ['movies'], max_attendees: 2, when: [19, 5],
+    },
+  },
+  {
+    prompt: 'Want to binge a TV series together?',
+    template: {
+      title: 'Binge a TV series',
+      details: "Starting a series and looking for company. A few episodes at a time, with snacks.",
+      tags: ['movies'], max_attendees: 2, when: [19, 6],
     },
   },
 ];
@@ -131,6 +178,9 @@ const POST_IDEA_MS = 5000;
 // config.authMode: 'local' (Bored? passkeys) | '6j0' (sign in with a 6j0.org identity at config.idOrigin).
 const state = { config: { authMode: 'local' }, me: null, tab: 'discover', chat: null, discoverTags: loadSet('discoverTags'), discoverCosts: new Set([...loadSet('discoverCosts')].filter(c => c in COST_FILTERS)),
   discoverDate: (() => { try { const d = localStorage.getItem('discoverDate'); return d in DATE_FILTERS ? d : ''; } catch { return ''; } })(),
+  discoverNear: (() => { const n = loadJson('discoverNear', null); return n && Number.isFinite(n.lat) && Number.isFinite(n.lon) ? n : null; })(),
+  discoverOnline: loadJson('discoverOnline', false) === true,
+  discoverRadius: (() => { const r = Number(loadJson('discoverRadius', 0)); return RADII.includes(r) ? r : 0; })(),
   filtersOpen: false };
 const app = document.getElementById('app');
 
@@ -145,6 +195,9 @@ function saveDiscoverFilters() {
     localStorage.setItem('discoverTags', JSON.stringify([...state.discoverTags]));
     localStorage.setItem('discoverCosts', JSON.stringify([...state.discoverCosts]));
     localStorage.setItem('discoverDate', state.discoverDate);
+    localStorage.setItem('discoverNear', JSON.stringify(state.discoverNear));
+    localStorage.setItem('discoverRadius', JSON.stringify(state.discoverRadius));
+    localStorage.setItem('discoverOnline', JSON.stringify(state.discoverOnline));
   } catch {}
 }
 
@@ -186,11 +239,132 @@ const avatar = (key, cls = '') => key
   ? `<div class="avatar icon ${cls}">${identicon(key, 100)}</div>`
   : `<div class="avatar anon ${cls}" aria-hidden="true"></div>`;
 
-// Add anyone I've matched with to my contacts (unnamed until I give them a nickname).
-async function ensureContacts(matches) {
-  const missing = [...new Set(matches.map(m => m.other))].filter(g => g && !isContact(g));
+// Add people to my contacts, unnamed unless names[guid] gives a nickname to start with.
+async function addContacts(guids, names = {}) {
+  const missing = [...new Set(guids)].filter(g => g && !isContact(g));
   if (!missing.length) return;
-  await vault.update(api, (d) => { for (const g of missing) d.contacts[g] ||= { nickname: '', tags: [], added: new Date().toISOString() }; });
+  await vault.update(api, (d) => {
+    for (const g of missing) d.contacts[g] ||= { nickname: names[g] || '', tags: [], added: new Date().toISOString() };
+  });
+}
+// Anyone I've matched with…
+const ensureContacts = (matches) => addContacts(matches.map(m => m.other));
+// …or connected with through an invitation (theirs or mine). An inviter I asked to connect with gets the nickname I
+// picked when I asked (pendingNames, keyed by their icon, since I didn't know their GUID yet).
+async function syncConnections() {
+  if (!state.me || !hasKeys()) return;
+  try {
+    const guids = (await api('/api/connections')).map(c => c.guid).filter(g => !isContact(g));
+    if (!guids.length) return;
+    const pending = vault.data.pendingNames || {}, names = {}, used = [];
+    for (const g of guids) { const icon = await sha1Hex(g); if (pending[icon]) { names[g] = pending[icon]; used.push(icon); } }
+    await addContacts(guids, names);
+    if (used.length) await vault.update(api, (d) => { for (const i of used) delete d.pendingNames?.[i]; });
+  } catch {}
+}
+
+// ---------- invitations to connect ----------
+// A link the owner shares however they like: ${origin}/#invite=<token>&key=<key>&name=<suggested nickname>.
+// Everything after # stays in the browser. The server keeps only a hash of the token; the owner's vault keeps the
+// whole thing (invites: { [id]: { token, key, name } }) so they can share it again from any device. The name is the
+// nickname the owner suggests for themselves; key encrypts the nickname the other person suggests back.
+const inviteOf = (id) => { const v = vault.data.invites?.[id]; return typeof v === 'string' ? { token: v } : v || null; };
+const inviteLink = ({ token, key, name }) =>
+  `${location.origin}/#${new URLSearchParams({ invite: token, ...(key ? { key } : {}), ...(name ? { name } : {}) })}`;
+// Ask for the nickname to suggest, then create the invitation and share it.
+function createInvite() {
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet';
+  sheet.innerHTML = `
+    <form class="stack panel">
+      <h2>New invitation</h2>
+      <label>What should they call you?
+        <input name="name" required maxlength="60" placeholder="e.g. Evan from the garden club" autocomplete="off"></label>
+      <p class="note">This is in the link, as a suggested nickname for you. They can change it; only they see what they pick.</p>
+      <div class="two">
+        <button type="button" class="btn ghost" data-cancel>Cancel</button>
+        <button class="btn">Create and share</button>
+      </div>
+    </form>`;
+  document.body.appendChild(sheet);
+  sheet.querySelector('[data-cancel]').onclick = () => sheet.remove();
+  sheet.querySelector('form').onsubmit = async (e) => {
+    e.preventDefault();
+    const name = e.target.name.value.trim();
+    if (!name) return;
+    try {
+      const inv = await api('/api/invites', { method: 'POST' });
+      const entry = { token: inv.token, key: newInviteKey(), name };
+      await vault.update(api, (d) => { d.invites ||= {}; d.invites[inv.id] = entry; });
+      sheet.remove();
+      await shareInvite(entry);
+      render();
+    } catch (err) { toast(err.message); }
+  };
+  sheet.querySelector('input').focus();
+}
+async function shareInvite(entry) {
+  const url = inviteLink(entry);
+  if (navigator.share) {
+    try { await navigator.share({ title: 'Connect with me on Bored?', text: "Here's a link to connect with me on Bored?:", url }); return; }
+    catch (e) { if (e.name === 'AbortError') return; }
+  }
+  try { await navigator.clipboard.writeText(url); toast('Invitation link copied. Paste it to whoever you want to connect with.'); }
+  catch { prompt('Copy this invitation link:', url); }
+}
+// Someone opened an invitation link: once they're signed in, show who it's from and ask before connecting.
+const PENDING_INVITE = 'pendingInvite';
+const pendingInvite = () => { try { return JSON.parse(sessionStorage.getItem(PENDING_INVITE)); } catch { return null; } };
+const dropPendingInvite = () => { try { sessionStorage.removeItem(PENDING_INVITE); } catch {} };
+async function offerPendingInvite() {
+  const { token, key, name } = pendingInvite() || {};
+  if (!token) return;
+  if (!key) { dropPendingInvite(); return toast("That invitation link is incomplete. Ask them to share it again."); }
+  let info;
+  try { info = await api('/api/invites/preview', { method: 'POST', body: { token } }); }
+  catch (e) { dropPendingInvite(); return toast(e.message); }
+  if (info.mine) { dropPendingInvite(); return toast("That's your own invitation link. Share it with someone else."); }
+  if (info.connected) { dropPendingInvite(); return toast("You're already connected with them."); }
+  if (info.requested) { dropPendingInvite(); return toast("You've already asked to connect. They'll see it in their Confirm tab."); }
+  const ready = state.me && hasKeys();
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet';
+  sheet.innerHTML = `
+    <form class="panel stack">
+      <h2>Invitation to connect</h2>
+      <div class="invite-from">${avatar(info.icon, 'big')}</div>
+      <p>${name ? `<b>${esc(name)}</b> invited you` : 'Someone invited you'} to connect. If you say yes, they'll be asked
+        to confirm. Once they do, you'll be in each other's contacts and can share private posts with each other.</p>
+      ${ready ? `
+      <label>Your nickname for them
+        <input name="theirName" required maxlength="60" placeholder="e.g. Evan from the garden club" value="${esc(name || '')}" autocomplete="off"></label>
+      <label>What should they call you?
+        <input name="myName" required maxlength="60" placeholder="e.g. Sam from book club" autocomplete="off"></label>
+      <p class="note">Nicknames are private: only you see the one you give them, and only they see the one they give
+        you. What you suggest is encrypted so only they can read it.</p>`
+      : '<p class="note">Sign in or create an account first. This invitation will be waiting.</p>'}
+      <div class="two">
+        <button type="button" class="btn ghost" data-no>No thanks</button>
+        <button class="btn">${ready ? 'Ask to connect' : 'Sign in'}</button>
+      </div>
+    </form>`;
+  document.body.appendChild(sheet);
+  sheet.querySelector('[data-no]').onclick = () => { sheet.remove(); dropPendingInvite(); };
+  sheet.querySelector('form').onsubmit = async (e) => {
+    e.preventDefault();
+    if (!ready) { sheet.remove(); return go('account'); } // enterApp offers it again after sign-in
+    const theirName = e.target.theirName.value.trim(), myName = e.target.myName.value.trim();
+    if (!theirName || !myName) return;
+    try {
+      const note = await sealForInvite(key, myName);
+      const { status } = await api('/api/invites/accept', { method: 'POST', body: { token, note } });
+      await vault.update(api, (d) => { d.pendingNames ||= {}; d.pendingNames[info.icon] = theirName; });
+      sheet.remove();
+      dropPendingInvite();
+      if (status === 'connected') { await syncConnections(); return toast("You're already connected with them."); }
+      toast("Request sent. You'll be connected once they confirm.");
+    } catch (err) { toast(err.message); }
+  };
 }
 const formData = (form) => Object.fromEntries(new FormData(form));
 
@@ -359,8 +533,10 @@ async function render() {
 async function enterApp(tab = 'discover') {
   await refreshMe();
   await vault.load(api);
+  await syncConnections();
   state.tab = tab; state.chat = null;
   render();
+  offerPendingInvite();
 }
 
 const PASSKEY_ADVICE = `Your passkey <b>is</b> your account: there's no email or password to recover it with.
@@ -462,6 +638,13 @@ async function signOut() {
   render();
 }
 
+// Where a post happens, as HTML: its place (linked to the map), "Online", or both ("City Hall and online").
+// e.online: 0 in person, 1 online only, 2 both. '' when nothing is known.
+function whereHtml(e, { icon = true } = {}) {
+  const place = e.online !== 1 && (e.location || e.location_name) ? locationHtml(e.location, '', { icon, name: e.location_name }) : '';
+  return e.online === 1 ? 'Online' : e.online === 2 ? `${place || 'In person'} and online` : place;
+}
+
 // A Discover card: each detail has a label, and no emoji.
 function eventCard(t) {
   const fact = (label, value) => `<dt>${label}</dt><dd>${value}</dd>`;
@@ -471,7 +654,7 @@ function eventCard(t) {
       ${t.status === 'full' ? `<div class="meta"><span class="chip warn" title="Say yes to join the waitlist">Full: join the waitlist</span></div>` : ''}
       <dl class="facts">
         ${t.when_text ? fact('When', `<button type="button" class="link" data-ics="${t.id}" title="Add to your calendar">${esc(whenLabel(t.when_text))}</button>`) : ''}
-        ${t.location || t.location_name ? fact('Where', locationHtml(t.location, '', { icon: false, name: t.location_name })) : ''}
+        ${whereHtml(t) ? fact('Where', whereHtml(t, { icon: false })) : ''}
         ${fact('Cost', esc(costLabel(t.cost_amount, t.cost_currency)))}
         ${fact('Max attendees', attendeesLabel(t.max_attendees))}
         ${fact('Who can see it', t.visibility === 'private' ? 'Private: the host shared it with you' : 'Public')}
@@ -493,8 +676,11 @@ async function viewDiscover(v) {
   // All the filters sit in one panel that opens and closes; its heading says how many are on.
   function drawFilters() {
     const selTags = state.discoverTags, selCosts = state.discoverCosts, selDate = state.discoverDate;
-    const on = selTags.size + selCosts.size + (selDate ? 1 : 0);
+    const near = state.discoverNear, radius = near ? state.discoverRadius : 0;
+    const online = state.discoverOnline;
+    const on = selTags.size + selCosts.size + (selDate ? 1 : 0) + (radius ? 1 : 0) + (online ? 1 : 0);
     const dateCount = Object.fromEntries((options.dates || []).map(d => [d.key, d.count]));
+    const distCount = Object.fromEntries(RADII.map((r, i) => [r, options.distances?.[i]?.count ?? 0]));
     // Keep selected tags visible even when no open posts carry them right now.
     const tags = [...options.tags, ...[...selTags].filter(t => !options.tags.some(a => a.tag === t)).map(tag => ({ tag, count: 0 }))];
     const chip = (kind, value, label, count, on, title = '') => `
@@ -506,6 +692,12 @@ async function viewDiscover(v) {
         <div class="filter-body">
           <div class="filter-row" role="group" aria-label="Filter by date"><span class="label">When</span>
             ${Object.entries(DATE_FILTERS).map(([key, label]) => chip('date', key, label, dateCount[key] ?? 0, selDate === key)).join('')}</div>
+          <div class="filter-row" role="group" aria-label="Filter by distance"><span class="label">Near</span>
+            <button type="button" class="chip filter" data-near-pick title="${near ? 'Change your location' : 'Pick your location on a map'}">${near ? esc(near.label) : 'Pick on map'}</button>
+            <button type="button" class="chip filter" data-near-gps>Use my location</button>
+            ${near ? RADII.map(r => chip('radius', r, `Within ${esc(fmtDistance(r))}`, distCount[r], radius === r)).join('') : ''}
+            ${chip('online', '1', radius ? 'Or online' : 'Online', options.online ?? 0, online,
+              radius ? 'Also show online posts' : 'Only show online posts')}</div>
           ${tags.length ? `<div class="filter-row" role="group" aria-label="Filter by tag"><span class="label">Tags</span>
             ${tags.map(({ tag, count }) => chip('tag', tag, `${TAG_ICONS[tag] || '#'} ${esc(tag)}`, count, selTags.has(tag))).join('')}</div>` : ''}
           <div class="filter-row" role="group" aria-label="Filter by cost"><span class="label">Cost</span>
@@ -522,25 +714,58 @@ async function viewDiscover(v) {
     if (state.discoverTags.size) params.set('tags', [...state.discoverTags].join(','));
     if (state.discoverCosts.size) params.set('cost', [...state.discoverCosts].join(','));
     if (state.discoverDate) { const [from, to] = dateFilterRange(state.discoverDate); params.set('from', from); params.set('to', to); }
-    const dates = Object.keys(DATE_FILTERS).map(k => [k, ...dateFilterRange(k)].join(':')).join(',');
+    const near = state.discoverNear;
+    if (near && state.discoverRadius) { params.set('near', roughSpot(near)); params.set('km', String(state.discoverRadius * kmPerUnit())); }
+    if (state.discoverOnline) params.set('online', '1');
+    const fp = new URLSearchParams({ dates: Object.keys(DATE_FILTERS).map(k => [k, ...dateFilterRange(k)].join(':')).join(',') });
+    if (near) { fp.set('near', roughSpot(near)); fp.set('radii', RADII.map(r => r * kmPerUnit()).join(',')); }
     let opts;
-    [events, opts] = await Promise.all([api('/api/discover' + (params.size ? `?${params}` : '')), api(`/api/discover/filters?dates=${dates}`)]);
+    [events, opts] = await Promise.all([api('/api/discover' + (params.size ? `?${params}` : '')), api(`/api/discover/filters?${fp}`)]);
     options = opts;
     drawFilters();
-    mountDeck(host, deckOptions(events, { tags: [...state.discoverTags], costs: [...state.discoverCosts], date: state.discoverDate }));
+    mountDeck(host, deckOptions(events, { tags: [...state.discoverTags], costs: [...state.discoverCosts], date: state.discoverDate,
+      near: [near && state.discoverRadius && `Within ${fmtDistance(state.discoverRadius)} of ${near.label.toLowerCase()}`,
+        state.discoverOnline && 'online'].filter(Boolean).join(' or ').replace(/^online$/, 'Online') }));
   }
-  const clearAll = () => { state.discoverTags.clear(); state.discoverCosts.clear(); state.discoverDate = ''; };
+  // Clearing the filters keeps your location; it only turns the distance off.
+  const clearAll = () => { state.discoverTags.clear(); state.discoverCosts.clear(); state.discoverDate = ''; state.discoverRadius = 0; state.discoverOnline = false; };
+  const setNear = (lat, lon, label) => {
+    state.discoverNear = { lat, lon, label };
+    if (!state.discoverRadius) state.discoverRadius = DEFAULT_RADIUS;
+  };
+  const refresh = () => { saveDiscoverFilters(); load().catch(err => toast(err.message)); };
   const toggle = (set, value) => (set.has(value) ? set.delete(value) : set.add(value));
 
-  filtersEl.addEventListener('click', (e) => {
+  filtersEl.addEventListener('click', async (e) => {
     const b = e.target.closest('button');
     if (!b) return;
+    if (b.hasAttribute('data-near-pick')) {
+      const n = state.discoverNear;
+      const v = await pickLocation(n ? `${n.lat},${n.lon}` : '', '', {
+        title: 'Your location', nameField: false, clearLabel: 'Forget my location',
+        note: 'Drop the pin where you are, to see posts nearby. It stays on this device; the server only gets a rough spot, to within about a kilometre.',
+      });
+      if (v === undefined) return;
+      if (v) { const [lat, lon] = v.location.split(',').map(Number); setNear(lat, lon, 'Picked spot'); }
+      else { state.discoverNear = null; state.discoverRadius = 0; }
+      return refresh();
+    }
+    if (b.hasAttribute('data-near-gps')) {
+      if (!navigator.geolocation) return toast("This browser can't share your location.");
+      b.disabled = true;
+      navigator.geolocation.getCurrentPosition(
+        ({ coords }) => { setNear(coords.latitude, coords.longitude, 'Current location'); refresh(); },
+        () => { b.disabled = false; toast("Couldn't get your location. You can pick it on the map instead."); },
+        { timeout: 15000, maximumAge: 300000 });
+      return;
+    }
     if (b.hasAttribute('data-clear')) clearAll();
     else if (b.dataset.tag) toggle(state.discoverTags, b.dataset.tag);
     else if (b.dataset.cost) toggle(state.discoverCosts, b.dataset.cost);
     else if (b.dataset.date) state.discoverDate = state.discoverDate === b.dataset.date ? '' : b.dataset.date;
-    saveDiscoverFilters();
-    load().catch(err => toast(err.message));
+    else if (b.dataset.online) state.discoverOnline = !state.discoverOnline;
+    else if (b.dataset.radius) state.discoverRadius = state.discoverRadius === Number(b.dataset.radius) ? 0 : Number(b.dataset.radius);
+    refresh();
   });
   v.addEventListener('click', (e) => {
     const cal = e.target.closest('[data-ics]');
@@ -571,9 +796,9 @@ function deckOptions(events, filters) {
       if (state.me) await api(`/api/events/${t.id}/swipe`, { method: 'DELETE' });
       toast(yes ? `Took back your request to join “${t.title}”` : 'Undone');
     },
-    empty: filters.tags.length || filters.costs.length || filters.date
+    empty: filters.tags.length || filters.costs.length || filters.date || filters.near
       ? `<div class="empty"><div class="big">🔎</div><h3>No matches for these filters</h3>
-          <p>${[filters.date && esc(DATE_FILTERS[filters.date]), filters.tags.length && filters.tags.map(t => '#' + esc(t)).join(' or '), filters.costs.length && filters.costs.map(c => esc(COST_FILTERS[c])).join(' or ')].filter(Boolean).join(' · ')}</p>
+          <p>${[filters.near && esc(filters.near), filters.date && esc(DATE_FILTERS[filters.date]), filters.tags.length && filters.tags.map(t => '#' + esc(t)).join(' or '), filters.costs.length && filters.costs.map(c => esc(COST_FILTERS[c])).join(' or ')].filter(Boolean).join(' · ')}</p>
           <p>Nothing open matches right now. Try other filters, or see everything.</p>
           <button class="btn" id="clearFilters">Show all posts</button></div>`
       : `<div class="empty"><div class="big">🌤</div><h3>Still bored?</h3>
@@ -584,11 +809,34 @@ function deckOptions(events, filters) {
   };
 }
 
+// Confirm: people asking to join my posts, and people asking to connect through my invitation links.
+function connectCard(c) {
+  return `
+      <div class="hero tag-none">${avatar(c.requester.icon, 'big')}</div>
+      <div class="body">
+        <div class="meta"><span class="chip">Wants to connect${c.via ? ` through your invitation as “${esc(c.via)}”` : ''}</span></div>
+        <h2>${c.suggested ? esc(c.suggested) : 'Someone'}</h2>
+        ${c.suggested ? '<p class="note">The nickname they suggest for themselves. You can change it after you connect.</p>' : ''}
+        <p>They opened one of your invitation links and asked to connect. If you say yes, you'll be in each other's
+          contacts and can share private posts with each other.</p>
+        <div class="who" style="justify-content:space-around;text-align:center">
+          <div><b>${c.requester.hosted}</b><small>events hosted</small></div>
+          <div><b>${c.requester.attended}</b><small>events attended</small></div>
+        </div>
+      </div>`;
+}
+
 async function viewConfirm(v) {
-  const interested = await api('/api/confirm');
+  const [interested, requests] = await Promise.all([api('/api/confirm'), api('/api/connection-requests')]);
+  // Their suggested nickname, decrypted with the key of the invitation they used (kept in my vault).
+  for (const c of requests) {
+    const inv = c.invite_id && inviteOf(c.invite_id);
+    c.via = inv?.name || '';
+    c.suggested = inv?.key && c.note ? await openForInvite(inv.key, c.note) : null;
+  }
   mountDeck(v, {
-    items: interested,
-    renderCard: (o) => `
+    items: [...requests.map(c => ({ ...c, kind: 'connect' })), ...interested],
+    renderCard: (o) => o.kind === 'connect' ? connectCard(o) : `
       <div class="hero ${tagLook(o.tags).cls}">
         ${avatar(o.attendee.guid || o.attendee.icon, 'big')}
       </div>
@@ -604,6 +852,18 @@ async function viewConfirm(v) {
       </div>`,
     yesLabel: "Let's do it", noLabel: 'No thanks',
     onSwipe: async (o, yes) => {
+      if (o.kind === 'connect') {
+        const r = await api(`/api/connection-requests/${o.id}/respond`, { method: 'POST', body: { yes } });
+        await refreshMe();
+        shellRefreshBadges();
+        if (r.connected) {
+          o.added = !isContact(r.guid) && r.guid; // so an undo can take back a contact this just added
+          await addContacts([r.guid], o.suggested ? { [r.guid]: o.suggested } : {});
+          toast(o.suggested ? `Connected with ${o.suggested}! Change their nickname if you like.` : "Connected! Give them a nickname only you'll see.");
+          openContactSheet(r.guid, () => {});
+        }
+        return;
+      }
       const r = await api(`/api/confirm/${o.id}/respond`, { method: 'POST', body: { yes } });
       await refreshMe();
       shellRefreshBadges();
@@ -611,13 +871,21 @@ async function viewConfirm(v) {
       else if (r.waitlisted) toast(`Added ${contactName(o.attendee.guid) || 'them'} to the waitlist for “${o.title}”`);
     },
     onUndo: async (o, yes) => {
+      if (o.kind === 'connect') {
+        await api(`/api/connection-requests/${o.id}/undo`, { method: 'POST' });
+        if (o.added) await vault.update(api, (d) => { delete d.contacts[o.added]; }).catch(() => {});
+        await refreshMe();
+        shellRefreshBadges();
+        return toast(yes ? 'Disconnected' : 'Undone');
+      }
       await api(`/api/confirm/${o.id}/undo`, { method: 'POST' });
       await refreshMe();
       shellRefreshBadges();
       toast(yes ? (contactName(o.attendee.guid) ? `Unmatched with ${contactName(o.attendee.guid)}` : 'Unmatched') : 'Undone');
     },
     empty: `<div class="empty"><div class="big">🙋</div><h3>Nobody to confirm</h3>
-      <p>When someone swipes yes on one of your posts, they'll show up here for you to swipe back.</p></div>`,
+      <p>When someone swipes yes on one of your posts, or asks to connect through one of your invitation links,
+        they'll show up here for you to answer.</p></div>`,
   });
 }
 
@@ -715,7 +983,7 @@ async function viewChat(v, id) {
         ${avatar(m.other)}
         <div class="grow" style="flex:1;min-width:0">
           <button type="button" class="link" id="rename" title="Change the nickname only you see">${esc(name)} ✎</button>
-          <div class="sub" style="color:var(--muted);font-size:.85rem">${tagLook(m.tags).ico ? tagLook(m.tags).ico + ' ' : ''}${esc(m.title)}${m.when_text ? ` · <button type="button" class="link cal-link" id="addCal" title="Add to your calendar">${esc(whenLabel(m.when_text))}</button>` : ''}${m.location || m.location_name ? ' · ' + locationHtml(m.location, '', { name: m.location_name }) : ''}</div>
+          <div class="sub" style="color:var(--muted);font-size:.85rem">${tagLook(m.tags).ico ? tagLook(m.tags).ico + ' ' : ''}${esc(m.title)}${m.when_text ? ` · <button type="button" class="link cal-link" id="addCal" title="Add to your calendar">${esc(whenLabel(m.when_text))}</button>` : ''}${whereHtml(m) ? ' · ' + whereHtml(m) : ''}</div>
         </div>
         ${m.role === 'host' && m.status === 'accepted' ? `<button class="btn small" id="happened">It happened</button>` : ''}
         ${m.role === 'attendee' && m.status === 'accepted' && !m.reconfirm ? `<button class="btn ghost small" id="leave">Can't make it</button>` : ''}
@@ -738,7 +1006,7 @@ async function viewChat(v, id) {
     </div>`;
   v.querySelector('.back').onclick = () => { state.chat = null; render(); };
   v.querySelector('#rename').onclick = () => openContactSheet(m.other, () => render());
-  v.querySelector('#addCal')?.addEventListener('click', () => addToCalendar({ id: m.event_id, title: m.title, location: m.location, location_name: m.location_name, when_text: m.when_text }));
+  v.querySelector('#addCal')?.addEventListener('click', () => addToCalendar({ id: m.event_id, title: m.title, location: m.location, location_name: m.location_name, online: m.online, when_text: m.when_text }));
 
   const msgsEl = v.querySelector('#msgs');
   async function loadMsgs() {
@@ -810,11 +1078,16 @@ function eventFormFields(t = {}) {
       <div class="tag-editor" data-tags="${esc(JSON.stringify(t.tags || []))}">
         <label for="${tagsId}">Tags</label>
         <input type="hidden" name="tags">
-        <div class="tag-box"><input id="${tagsId}" class="tag-input" placeholder="e.g. garden, social" maxlength="30" enterkeyhint="done"></div>
+        <div class="tag-box"><input id="${tagsId}" class="tag-input" placeholder="e.g. garden, outdoors" maxlength="30" enterkeyhint="done"></div>
         <div class="tag-suggest"></div>
       </div>
-      <div class="field">
-        <label for="${locId}">Where</label>
+      <fieldset class="seg-pick"><legend>Where</legend><div class="seg">
+        <label><input type="radio" name="online" value="0" ${t.online ? '' : 'checked'}><span>In person</span></label>
+        <label><input type="radio" name="online" value="1" ${t.online === 1 ? 'checked' : ''}><span>Online</span></label>
+        <label><input type="radio" name="online" value="2" ${t.online === 2 ? 'checked' : ''}><span>Both</span></label>
+      </div></fieldset>
+      <div class="field loc-place" ${t.online === 1 ? 'hidden' : ''}>
+        <label for="${locId}">Place</label>
         <div class="loc-field">
           <input id="${locId}" name="location_name" maxlength="100" value="${val('location_name')}" autocomplete="off"
             placeholder="${t.location && !t.location_name ? 'Spot picked on the map (no name yet)' : 'e.g. Ocean Beach Pier'}">
@@ -1183,7 +1456,8 @@ function openContactSheet(guid, onSaved) {
 
 async function viewProfile(v) {
   const idMode = state.config.authMode === '6j0';
-  const [ledger, passkeys] = await Promise.all([api('/api/ledger'), idMode ? [] : api('/api/passkeys')]);
+  await syncConnections();
+  const [ledger, passkeys, invites] = await Promise.all([api('/api/ledger'), idMode ? [] : api('/api/passkeys'), api('/api/invites')]);
   const me = state.me;
   const history = Object.fromEntries(ledger.map(l => [l.guid, l]));
   const contacts = Object.entries(vault.data.contacts).map(([guid, c]) => ({ guid, ...c, ...(history[guid] || {}) }))
@@ -1204,8 +1478,30 @@ async function viewProfile(v) {
       <div class="stat"><b>${me.attended}</b><span>events attended</span></div>
     </div>
 
+    <div class="section-title">Settings</div>
+    <form class="stack" id="prefsForm">
+      <label>Distance units
+        <select name="distanceUnit">
+          <option value="km" ${useMiles() ? '' : 'selected'}>Kilometers</option>
+          <option value="mi" ${useMiles() ? 'selected' : ''}>Miles</option>
+        </select></label>
+    </form>
+
+    <div class="section-title">Invitations</div>
+    <p class="note">Send people a link to connect. When someone opens it and asks to connect, they show up in your
+      Confirm tab; once you say yes, you're in each other's contacts and can share private posts. Anyone with the link
+      can use it until you delete it; deleting it doesn't disconnect anyone.</p>
+    ${invites.length ? `<div class="list">${invites.map((inv, i) => `
+      <div class="row">
+        <div class="grow"><div class="title">${inviteOf(inv.id)?.name ? `As “${esc(inviteOf(inv.id).name)}”` : `Invitation ${invites.length - i}`}</div>
+          <div class="sub">Created ${fmt(inv.created_at)} · ${inv.uses === 1 ? '1 person' : `${inv.uses} people`} connected</div></div>
+        <button class="btn ghost small" data-share-invite="${inv.id}">Share</button>
+        <button class="btn danger small" data-del-invite="${inv.id}">Delete</button>
+      </div>`).join('')}</div>` : ''}
+    <button class="btn ghost" id="newInvite">Create an invitation</button>
+
     <div class="section-title">Contacts</div>
-    <p class="note">People you've matched with. Names and tags here are yours alone: they're encrypted with your passkey, and nobody else, including the server, can read them.</p>
+    <p class="note">People you've matched or connected with. Names and tags here are yours alone: they're encrypted with your passkey, and nobody else, including the server, can read them.</p>
     ${allTags.length ? `<div class="filter-row" role="group" aria-label="Filter contacts by tag"><span class="label">Tags</span>
       ${allTags.map(t => `<button type="button" class="chip filter ${sel.has(t) ? 'on' : ''}" data-ctag="${esc(t)}" aria-pressed="${sel.has(t)}">${CONTACT_TAGS[t] || '#'} ${esc(t)}</button>`).join('')}
       ${sel.size ? `<button type="button" class="chip filter clear" data-cclear>Clear</button>` : ''}</div>` : ''}
@@ -1234,6 +1530,26 @@ async function viewProfile(v) {
 
     <button class="btn danger" id="logout" style="margin-top:24px">Sign out</button>`;
 
+  v.querySelector('#newInvite').addEventListener('click', createInvite);
+  v.querySelectorAll('[data-share-invite]').forEach(b => b.onclick = () => {
+    const inv = inviteOf(b.dataset.shareInvite);
+    if (inv?.token && inv.key) shareInvite(inv);
+    else toast("This invitation's link wasn't saved to your account. Delete it and create a new one.");
+  });
+  v.querySelectorAll('[data-del-invite]').forEach(b => b.onclick = async () => {
+    if (!confirm("Delete this invitation? Its link will stop working. People who already connected through it stay connected.")) return;
+    try {
+      await api(`/api/invites/${b.dataset.delInvite}`, { method: 'DELETE' });
+      // Keep its key and name a while: requests already made through it still need them to show their nickname.
+      await vault.update(api, (d) => { const e = d.invites?.[b.dataset.delInvite]; if (e) d.invites[b.dataset.delInvite] = { key: e.key, name: e.name }; }).catch(() => {});
+      toast('Invitation deleted'); render();
+    } catch (err) { toast(err.message); }
+  });
+  v.querySelector('#prefsForm').addEventListener('change', async (e) => {
+    const { distanceUnit } = formData(e.currentTarget);
+    try { await vault.update(api, (d) => { d.prefs = { ...d.prefs, distanceUnit }; }); toast('Saved'); }
+    catch (err) { toast(err.message); }
+  });
   v.querySelectorAll('[data-contact]').forEach(b => b.onclick = () => openContactSheet(b.dataset.contact, () => render()));
   v.querySelectorAll('[data-ctag]').forEach(b => b.onclick = () => {
     sel.has(b.dataset.ctag) ? sel.delete(b.dataset.ctag) : sel.add(b.dataset.ctag); render();
@@ -1261,6 +1577,14 @@ setInterval(async () => { if (state.me && hasKeys()) { await refreshMe(); if (st
 
 // Boot: restore the session and, if this browser still holds the keys, the vault.
 try { state.config = await api('/api/config'); } catch {}
+// An invitation link (#invite=…): remember it through sign-in, and take it out of the address bar.
+{
+  const frag = new URLSearchParams(location.hash.slice(1)), token = frag.get('invite');
+  if (token) {
+    try { sessionStorage.setItem(PENDING_INVITE, JSON.stringify({ token, key: frag.get('key'), name: (frag.get('name') || '').slice(0, 60) })); } catch {}
+    history.replaceState(null, '', location.pathname + location.search);
+  }
+}
 if (state.config.authMode === '6j0' && hasIdCallback()) {
   // Back from the 6j0.org identity server with a token and this app's key.
   try {
@@ -1275,7 +1599,8 @@ if (state.config.authMode === '6j0' && hasIdCallback()) {
 } else {
   await refreshMe();
   if (state.me && await loadKeys(state.me.guid)) {
-    try { await vault.load(api); } catch { await clearKeys(); }
+    try { await vault.load(api); await syncConnections(); } catch { await clearKeys(); }
   }
   render();
+  offerPendingInvite();
 }

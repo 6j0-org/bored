@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#16a34a">
+  <meta name="description" content="Bored? is an app to make life more fun. Find people to do things with, near you. Free, open source, ad-free, and it never asks who you are.">
+  <title>Bored? Make life more fun</title>
+  <link rel="preload" href="/fonts/bungee-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <script src="/landing.js"></script>
+  <style>
+    :root {
+      --bg: #f6f5f1; --surface: #ffffff; --text: #1c1917; --muted: #78716c; --line: #e7e5e4;
+      --accent: #16a34a; --accent-ink: #ffffff; --accent-soft: #dcfce7; --accent-text: #15803d;
+      --shadow: 0 10px 30px rgba(28, 25, 23, .12);
+      color-scheme: light dark;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #12110f; --surface: #1f1d1a; --text: #f5f5f4; --muted: #a8a29e; --line: #2f2c28;
+        --accent-soft: #14532d; --accent-text: #4ade80; --shadow: 0 10px 30px rgba(0, 0, 0, .5);
+      }
+    }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      font: 17px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg); color: var(--text);
+    }
+    a { color: var(--accent-text); }
+    h1, h2, h3 { line-height: 1.15; margin: 0; text-wrap: balance; }
+    h2 { font-size: clamp(1.5rem, 4vw, 2rem); margin-bottom: .6em; }
+    h3 { font-size: 1.05rem; margin-bottom: .3em; }
+    p { margin: 0 0 1em; }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 0 16px; }
+    section { padding: 56px 0; }
+    section + section { border-top: 1px solid var(--line); }
+    .muted { color: var(--muted); }
+    .lede { font-size: 1.15rem; }
+
+    /* Title on a cartoon wooden board, same as the app (public/style.css). */
+    @font-face {
+      font-family: 'Bungee'; font-style: normal; font-weight: 400; font-display: swap;
+      src: url(/fonts/bungee-latin.woff2) format('woff2');
+    }
+    .board {
+      --ink: #3b2110;
+      display: inline-block; padding: .32em 1em .26em;
+      font-family: 'Bungee', 'Arial Black', Impact, sans-serif; font-weight: 400; line-height: 1; letter-spacing: .03em;
+      color: #fff3d6; -webkit-text-stroke: .07em var(--ink); paint-order: stroke fill; text-shadow: 0 .07em 0 var(--ink);
+      background:
+        radial-gradient(ellipse .9em .28em at 74% 68%, #7a4419 0 30%, transparent 32% 48%, rgba(122, 68, 25, .45) 50% 58%, transparent 60%),
+        repeating-linear-gradient(177deg, transparent 0 .3em, rgba(110, 60, 20, .22) .3em .36em, transparent .36em .62em, rgba(110, 60, 20, .12) .62em .66em, transparent .66em .95em),
+        linear-gradient(180deg, #e0a05a, #c47d38 55%, #a8652a);
+      border: .09em solid var(--ink);
+      border-radius: .3em .45em .35em .5em / .5em .32em .52em .38em;
+      box-shadow: inset 0 .12em 0 rgba(255, 255, 255, .3), inset 0 -.14em 0 rgba(0, 0, 0, .22), .1em .14em 0 var(--ink);
+      transform: rotate(-2.5deg); user-select: none;
+    }
+
+    /* ---------- top bar ---------- */
+    .bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 0; }
+    .bar .board { font-size: 1.3rem; }
+    .btn {
+      display: inline-block; text-decoration: none; font-weight: 700; border-radius: 999px;
+      padding: 12px 22px; background: var(--accent); color: var(--accent-ink); border: 2px solid var(--accent);
+    }
+    .btn.ghost { background: transparent; color: var(--text); border-color: var(--line); }
+    .btn.small { padding: 7px 14px; font-size: .9rem; }
+    .btn:focus-visible { outline: 3px solid var(--accent-text); outline-offset: 3px; }
+
+    /* ---------- hero ---------- */
+    .hero { display: grid; grid-template-columns: 1.15fr 1fr; gap: 48px; align-items: center; padding: 40px 0 64px; }
+    .hero h1 { font-size: clamp(2.2rem, 6vw, 3.4rem); letter-spacing: -.02em; margin-bottom: .4em; }
+    .hero h1 em { font-style: normal; color: var(--accent-text); }
+    .cta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+
+    /* A little swipe deck, drawn in CSS */
+    .deck { position: relative; height: 360px; max-width: 340px; width: 100%; margin: 0 auto; }
+    .card {
+      position: absolute; inset: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 20px;
+      box-shadow: var(--shadow); padding: 22px; display: flex; flex-direction: column;
+    }
+    .card.back2 { transform: rotate(-7deg) translate(-14px, 10px); }
+    .card.back1 { transform: rotate(4deg) translate(10px, 4px); }
+    .card.front { transform: rotate(-1.5deg); }
+    .card .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+    .chip { font-size: .78rem; font-weight: 600; background: var(--accent-soft); color: var(--accent-text); padding: 3px 10px; border-radius: 999px; }
+    .card h3 { font-size: 1.35rem; margin-bottom: 8px; }
+    .card .meta { color: var(--muted); font-size: .92rem; margin: 0 0 4px; }
+    .card .swipe { margin-top: auto; display: flex; justify-content: space-between; gap: 10px; }
+    .card .swipe span { flex: 1; text-align: center; border-radius: 999px; padding: 10px; font-weight: 700; font-size: .95rem; }
+    .card .no { border: 2px solid var(--line); color: var(--muted); }
+    .card .yes { background: var(--accent); color: var(--accent-ink); }
+    .stamp {
+      position: absolute; top: 26px; right: 18px; transform: rotate(12deg);
+      border: 3px solid var(--accent); color: var(--accent-text); border-radius: 8px; padding: 2px 10px;
+      font-family: 'Bungee', 'Arial Black', sans-serif; font-size: 1.05rem; letter-spacing: .04em;
+    }
+
+    /* ---------- who it's for ---------- */
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+    .tile { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 20px; }
+    .tile .ico { font-size: 1.6rem; line-height: 1; margin-bottom: 10px; display: block; }
+    .tile p { margin: 0; color: var(--muted); font-size: .97rem; }
+
+    /* ---------- how it works ---------- */
+    ol.steps { list-style: none; padding: 0; margin: 0; counter-reset: step; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+    ol.steps li { counter-increment: step; position: relative; padding-top: 44px; }
+    ol.steps li::before {
+      content: counter(step); position: absolute; top: 0; left: 0; width: 34px; height: 34px; border-radius: 50%;
+      display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); font-weight: 800;
+    }
+    ol.steps p { color: var(--muted); font-size: .97rem; margin: 0; }
+
+    /* ---------- why not ---------- */
+    .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; align-items: start; }
+    .others { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
+    .others li { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 16px; }
+    .others b { display: block; }
+    .others span { color: var(--muted); font-size: .94rem; }
+
+    /* ---------- promises ---------- */
+    .promises { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+    .promises li { display: flex; gap: 12px; align-items: flex-start; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
+    .promises .check {
+      flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-text);
+      display: grid; place-items: center; font-weight: 800; font-size: .9rem;
+    }
+    .promises p { margin: 0; color: var(--muted); font-size: .95rem; }
+    .nope { display: flex; flex-wrap: wrap; gap: 8px; margin: 20px 0 0; padding: 0; list-style: none; }
+    .nope li { border: 1px dashed var(--muted); border-radius: 999px; padding: 4px 12px; font-size: .9rem; color: var(--muted); text-decoration: line-through; }
+
+    /* ---------- closer ---------- */
+    .closer { text-align: center; padding: 72px 0; }
+    .closer .board { font-size: clamp(1.4rem, 5vw, 2.4rem); margin-bottom: 28px; transform: rotate(-1.5deg); }
+    footer { border-top: 1px solid var(--line); padding: 24px 0 calc(24px + env(safe-area-inset-bottom)); font-size: .9rem; color: var(--muted); }
+    footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; }
+
+    @media (max-width: 760px) {
+      .hero, .compare { grid-template-columns: 1fr; gap: 32px; }
+      .hero { padding-top: 16px; }
+      .deck { height: 330px; max-width: 300px; }
+      section { padding: 44px 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="bar">
+      <span class="board" aria-label="Bored?">Bored?</span>
+      <a class="btn small" href="/?start">Open the app</a>
+    </header>
+
+    <div class="hero">
+      <div>
+        <h1>Bored is an app to make life <em>more fun.</em></h1>
+        <p class="lede">Want to do something? Post it. Neighbors who are in say so. Saw something you'd join? Swipe right. When both sides say yes, it's on.</p>
+        <p class="muted">Free. Open source. No ads. No email, phone number or photos, ever.</p>
+        <div class="cta">
+          <a class="btn" href="/?start">Find something to do</a>
+          <a class="btn ghost" href="#why-not">Why not just use Meetup?</a>
+        </div>
+      </div>
+      <div class="deck" aria-hidden="true">
+        <div class="card back2"></div>
+        <div class="card back1"></div>
+        <div class="card front">
+          <div class="tags"><span class="chip">outdoors</span><span class="chip">free</span><span class="chip">beginners</span></div>
+          <h3>Ultimate frisbee in the park</h3>
+          <p class="meta">📅 Saturday, 10:00</p>
+          <p class="meta">📍 Riverside Park, east lawn</p>
+          <p class="meta">👥 3 of 10 spots taken</p>
+          <div class="swipe"><span class="no">Nah</span><span class="yes">I'm in</span></div>
+          <span class="stamp">I'm in!</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section>
+    <div class="wrap">
+      <h2>Not enough people time?</h2>
+      <div class="grid">
+        <div class="tile"><span class="ico" aria-hidden="true">💻</span><h3>Remote workers</h3><p>Your coworkers are faces in little boxes. Go meet some people with legs.</p></div>
+        <div class="tile"><span class="ico" aria-hidden="true">📦</span><h3>New in town</h3><p>You don't know anyone yet. Everyone here was new once.</p></div>
+        <div class="tile"><span class="ico" aria-hidden="true">🧸</span><h3>Stay-at-home parents</h3><p>You love your kids. You'd also love a conversation with an adult.</p></div>
+        <div class="tile"><span class="ico" aria-hidden="true">🍜</span><h3>Don't want to go alone</h3><p>That new ramen place, trivia night, the local show. Support your local spots, with company.</p></div>
+      </div>
+      <p class="muted" style="margin-top:24px">Socializing doesn't have to mean excess calories, booze or cash. A walk, a board game, a pickup game in the park. Bored helps you find people to do whatever it is you want to do.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>How it works</h2>
+      <ol class="steps">
+        <li><h3>Post</h3><p>What, where, when, how much (or free), and how many people. Share it with everyone, or just with people you know.</p></li>
+        <li><h3>Discover</h3><p>Swipe through what's happening near you. Right means “I'm in.” Filter by tags, distance, date or free.</p></li>
+        <li><h3>Confirm</h3><p>Hosts swipe through who wants to come. Right means “Let's do it.”</p></li>
+        <li><h3>Plan</h3><p>It's a match. Chat to sort out the details, end-to-end encrypted. Then go do the thing.</p></li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="why-not">
+    <div class="wrap compare">
+      <div>
+        <h2>Why not use Meetup?</h2>
+        <p>Meetup is alright, but it's a business. Its goal is to make money.</p>
+        <p>It doesn't value your privacy: you are the product. Many features are behind a paywall. Starting a group costs money. Joining one often means waiting for permission.</p>
+        <h2 style="margin-top:40px">Or any of the others?</h2>
+        <p>The answer is roughly the same for all of them. They're businesses that make money from ads, subscriptions or fees, and they want to know who you are: your name, your face, your phone number, your address.</p>
+        <p>Bored doesn't, because Bored isn't a business.</p>
+      </div>
+      <ul class="others">
+        <li><b>Facebook Groups &amp; Events</b><span>Real-name profiles, paid for by ads built on what you do.</span></li>
+        <li><b>Bumble For Friends</b><span>Profile photos up front, with paid upgrades for more.</span></li>
+        <li><b>Nextdoor</b><span>Wants to verify your home address. Ad-supported.</span></li>
+        <li><b>Peanut</b><span>Photo profiles for parents, with a paid subscription tier.</span></li>
+        <li><b>Timeleft</b><span>Dinner with strangers, if you pay for a ticket or membership.</span></li>
+        <li><b>Eventbrite</b><span>Built for selling tickets, not for meeting people.</span></li>
+      </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap">
+      <h2>Bored's promises</h2>
+      <ul class="promises">
+        <li><span class="check" aria-hidden="true">✓</span><div><h3>Free forever</h3><p>No premium tier. No paywalled features. Starting things and joining things cost nothing.</p></div></li>
+        <li><span class="check" aria-hidden="true">✓</span><div><h3>Free and open source</h3><p>The code is public. Want to take it and change it? Go for it.</p></div></li>
+        <li><span class="check" aria-hidden="true">✓</span><div><h3>Ad-free, always</h3><p>Nobody is paying to put things in front of you, and nobody ever will.</p></div></li>
+        <li><span class="check" aria-hidden="true">✓</span><div><h3>No investors, ever</h3><p>No one to answer to who wants a return on your attention.</p></div></li>
+        <li><span class="check" aria-hidden="true">✓</span><div><h3>Private by design</h3><p>You can't leave personal info, because Bored doesn't collect it. Sign in with a passkey. Names you give contacts are encrypted in your browser, and chats are end-to-end encrypted.</p></div></li>
+      </ul>
+      <p class="muted" style="margin-top:24px">Things Bored never asks for, so you can't accidentally dox yourself:</p>
+      <ul class="nope">
+        <li>Photos</li><li>Email address</li><li>Phone number</li><li>Real name</li><li>Password</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="closer">
+    <div class="wrap">
+      <div class="board">Touch grass.</div>
+      <p class="lede">Get outside. Be social. Make life more fun.</p>
+      <div class="cta" style="justify-content:center">
+        <a class="btn" href="/?start">Open Bored</a>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      <span>Bored? Free, open source, ad-free.</span>
+      <span>Source: <a href="https://codeberg.org/6j0-org/bored">Codeberg</a> · <a href="https://gitlab.com/6j0-org/bored">GitLab</a> · <a href="https://github.com/6j0-org/bored">GitHub</a></span>
+    </div>
+  </footer>
+</body>
+</html>

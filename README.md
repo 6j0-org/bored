@@ -18,6 +18,12 @@ npm run seed   # optional: demo posts from demo accounts (they have no passkeys,
 npm start      # http://localhost:3000
 ```
 
+On a first visit, `/` shows the introduction page (`public/about.html`). Its links go to `/?start`, which sets a
+`seen=1` cookie (no ID, nothing about the person) and redirects to the app at `/`. Browsers with that cookie or a
+session always get the app. Links with a URL fragment (invitations, sign-in tokens from a 6j0.org identity server)
+are forwarded by `public/landing.js` the same way, since the server never sees fragments. The introduction stays at
+`/about` for everyone.
+
 To try matching and chat, create two accounts in two different browsers or browser profiles. Passkeys need a
 **secure context** (`http://localhost` counts) and a browser + passkey manager that supports the WebAuthn **PRF**
 extension: e.g. a security key (YubiKey 5 etc.), Google Password Manager (Chrome, Android) or iCloud Keychain
@@ -116,6 +122,7 @@ A post stays in the deck until it reaches its max attendees. Posts with no limit
 - `webauthn.js`: passkey registration/sign-in verification (no dependencies)
 - `idtoken.js`: verifies sign-in tokens from a 6j0.org identity server (`AUTH_MODE=6j0`)
 - `db.js`: SQLite schema, tag helpers
+- `public/about.html`, `public/landing.js`: the introduction page, shown at `/` on a first visit
 - `public/app.js`: single-page front-end (vanilla JS, swipe deck with pointer/touch/keyboard)
 - `public/secure.js`: passkeys + PRF, 6j0.org identity handoff, encrypted vault, key storage, E2E chat crypto
 - `public/location.js`: "lat,lon" locations, links to the viewer's maps app, and a small OpenStreetMap pin picker

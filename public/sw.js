@@ -21,7 +21,7 @@ self.addEventListener('notificationclick', (e) => {
   const open = e.notification.data?.open || '';
   e.waitUntil((async () => {
     const wins = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    const win = wins.find(w => new URL(w.url).origin === self.location.origin);
+    const win = wins.find(w => { const u = new URL(w.url); return u.origin === self.location.origin && u.pathname === '/'; });
     if (win) { await win.focus(); win.postMessage({ type: 'open', open }); return; }
     await self.clients.openWindow(open ? `/?open=${encodeURIComponent(open)}` : '/');
   })());

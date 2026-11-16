@@ -994,6 +994,7 @@ route('GET', '/api/ledger', async ({ user, res }) => {
 
 const STATIC = {
   '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/secure.js': 'secure.js', '/style.css': 'style.css', '/location.js': 'location.js', '/when.js': 'when.js', '/cost.js': 'cost.js', '/ics.js': 'ics.js',
+  '/about': 'about.html', '/about.html': 'about.html', '/landing.js': 'landing.js',
   '/sw.js': 'sw.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon.svg': 'icon.svg',
   '/fonts/bungee-latin.woff2': 'fonts/bungee-latin.woff2', // Bungee, SIL OFL 1.1 (see public/fonts/Bungee-OFL.txt)
 };
@@ -1013,10 +1014,26 @@ const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inl
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   try {
+    // First visit: "/" shows the introduction. Its links go to "/?start", which remembers that with a "seen=1"
+    // cookie (no ID, nothing about the person) and sends them on to the app at "/". Signed-in browsers always get
+    // the app. URL fragments (invites, sign-in tokens) never reach the server: public/landing.js forwards those.
+    if (req.method === 'GET' && url.pathname === '/') {
+      if (url.searchParams.has('start')) {
+        url.searchParams.delete('start');
+        const secure = String(process.env.ORIGIN || '').startsWith('https:') ? '; Secure' : '';
+        res.writeHead(302, {
+          Location: '/' + url.search, 'Cache-Control': 'no-store',
+          'Set-Cookie': `seen=1; HttpOnly; SameSite=Lax; Path=/; Max-Age=${60 * 60 * 24 * 365}${secure}`,
+        });
+        return res.end();
+      }
+      const { sid, seen } = parseCookies(req.headers.cookie);
+      if (!sid && !seen) url.pathname = '/about';
+    }
     if (req.method === 'GET' && (STATIC[url.pathname] || VENDOR[url.pathname])) {
       const file = STATIC[url.pathname] ? './public/' + STATIC[url.pathname] : './' + VENDOR[url.pathname];
       res.writeHead(200, {
-        'Content-Type': MIME[file.split('.').pop()], 'Cache-Control': 'no-cache',
+        'Content-Type': MIME[file.split('.').pop()], 'Cache-Control': 'no-cache', 'Vary': 'Cookie',
         'Content-Security-Policy': CSP, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer',
       });
       return res.end(await readFile(new URL(file, import.meta.url)));

@@ -8,6 +8,9 @@
 //   and your ECDH P-256 *chat private key*. Your chat public key is stored in the clear so matches can reach you.
 // - Chat: ECDH(my private, their public) → HKDF(salt = match id) → AES-256-GCM key per match.
 //   (Prototype: static keys, so no forward secrecy.)
+// - With a 6j0.org identity (server AUTH_MODE=6j0) there are no local passkeys: the identity server hands the
+//   page this app's 32-byte *app key* (see the handoff below), and HKDF turns that into the key-encryption key
+//   instead. Everything from the vault key down is the same.
 // - After sign-in the vault key and chat key are kept in IndexedDB as non-extractable CryptoKeys, so a page
 //   reload doesn't need the passkey again. Signing out deletes them.
 //
@@ -143,9 +146,9 @@ export async function clearKeys() {
   try { await idbDo('readwrite', s => s.delete('session')); } catch {}
 }
 
-// Unwrap the vault key with this passkey's PRF output, decrypt the chat private key, keep both non-extractable.
-async function installKeys(guid, prf, wrappedKey, chatPrivkey) {
-  const raw = await openBytes(await kekFromPrf(prf), wrappedKey);
+// Unwrap the vault key with a key-encryption key, decrypt the chat private key, keep both non-extractable.
+async function installKeys(guid, kek, wrappedKey, chatPrivkey) {
+  const raw = await openBytes(kek, wrappedKey);
   const vaultKey = await subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']);
   const jwk = JSON.parse(await openText(vaultKey, chatPrivkey));
   const chatKey = await subtle.importKey('jwk', jwk, { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
@@ -156,17 +159,15 @@ async function installKeys(guid, prf, wrappedKey, chatPrivkey) {
 // ---------- account flows ----------
 // Each takes the app's api(path, opts) helper. nextStep(message) is the app's "tap to continue" prompt.
 
-export async function createAccount(api, nextStep) {
-  const opts = await api('/api/passkey/register/options', { method: 'POST' });
-  const { prf, payload } = await createPasskey(opts, [], nextStep);
-
+// New account: make a vault key and chat key pair, wrap the vault key with kek, POST everything to path.
+async function registerAccount(api, path, kek, extra) {
   const raw = crypto.getRandomValues(new Uint8Array(32));
   const vaultKey = await subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']);
   const pair = await subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, true, ['deriveBits']);
   const { kty, crv, x, y } = await subtle.exportKey('jwk', pair.publicKey);
-  const res = await api('/api/passkey/register/verify', { method: 'POST', body: {
-    ...payload,
-    wrappedKey: await seal(await kekFromPrf(prf), raw),
+  const res = await api(path, { method: 'POST', body: {
+    ...extra,
+    wrappedKey: await seal(kek, raw),
     chatPubkey: { kty, crv, x, y },
     chatPrivkey: await seal(vaultKey, JSON.stringify(await subtle.exportKey('jwk', pair.privateKey))),
     vault: await seal(vaultKey, JSON.stringify(emptyVault())),
@@ -177,6 +178,12 @@ export async function createAccount(api, nextStep) {
   keys = { guid: res.user.guid, vaultKey, chatKey };
   try { await idbDo('readwrite', s => s.put(keys, 'session')); } catch {}
   return res;
+}
+
+export async function createAccount(api, nextStep) {
+  const opts = await api('/api/passkey/register/options', { method: 'POST' });
+  const { prf, payload } = await createPasskey(opts, [], nextStep);
+  return registerAccount(api, '/api/passkey/register/verify', await kekFromPrf(prf), payload);
 }
 
 export async function signIn(api) {
@@ -195,7 +202,51 @@ export async function signIn(api) {
     signature: b64u.enc(r.signature),
     userHandle: r.userHandle ? b64u.enc(r.userHandle) : undefined,
   } });
-  await installKeys(res.user.guid, prf, res.wrappedKey, res.chatPrivkey);
+  await installKeys(res.user.guid, await kekFromPrf(prf), res.wrappedKey, res.chatPrivkey);
+  vault.reset(res.vault);
+  return res;
+}
+
+// ---------- 6j0.org identity (server AUTH_MODE=6j0) ----------
+// 1. startIdSignIn: make an ephemeral ECDH P-256 key pair and a random nonce, keep them in IndexedDB, and go to
+//    <idOrigin>/authorize?app=<idApp>&nonce=<nonce>&epk=<x>.<y>.
+// 2. The identity server signs the browser in (one passkey for all 6j0.org apps), derives this app's key, encrypts it
+//    to our public key, and sends the browser back to this app's origin with
+//    #id_token=<signed token>&epk=<its public key>&key=<iv.ciphertext>&state=<nonce>.
+// 3. finishIdSignIn: check the nonce, decrypt the app key, have the server verify the token, then unlock the vault
+//    (or create the account on first visit). The fragment never reaches any server.
+const kekFromAppKey = (appKey) => hkdfKey(appKey, 'bored', 'vault-kek-6j0-v1');
+const PENDING_MAX_AGE_MS = 10 * 60 * 1000;
+
+export const hasIdCallback = () => new URLSearchParams(location.hash.slice(1)).has('id_token');
+
+export async function startIdSignIn(config) {
+  const pair = await subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
+  const { x, y } = await subtle.exportKey('jwk', pair.publicKey);
+  const nonce = b64u.enc(crypto.getRandomValues(new Uint8Array(24)));
+  await idbDo('readwrite', s => s.put({ nonce, privateKey: pair.privateKey, app: config.idApp, created: Date.now() }, 'pending'));
+  const params = new URLSearchParams({ app: config.idApp, nonce, epk: `${x}.${y}` });
+  location.assign(`${config.idOrigin}/authorize?${params}`);
+}
+
+export async function finishIdSignIn(api) {
+  const frag = new URLSearchParams(location.hash.slice(1));
+  history.replaceState(null, '', location.pathname + location.search); // drop the token and key from the address bar
+  let pending = null;
+  try { pending = await idbDo('readonly', s => s.get('pending')); await idbDo('readwrite', s => s.delete('pending')); } catch {}
+  if (!pending || pending.nonce !== frag.get('state') || Date.now() - pending.created > PENDING_MAX_AGE_MS)
+    throw new Error('That sign-in link expired or was started somewhere else. Please sign in again.');
+
+  const [x, y] = String(frag.get('epk') || '').split('.');
+  const peer = await subtle.importKey('jwk', { kty: 'EC', crv: 'P-256', x, y, ext: true }, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
+  const shared = await subtle.deriveBits({ name: 'ECDH', public: peer }, pending.privateKey, 256);
+  const appKey = await openBytes(await hkdfKey(shared, pending.nonce, `6j0/v1/handoff/${pending.app}`), frag.get('key'));
+  const kek = await kekFromAppKey(appKey);
+  appKey.fill(0);
+
+  const res = await api('/api/id/login', { method: 'POST', body: { token: frag.get('id_token'), nonce: pending.nonce } });
+  if (res.setup) return { ...(await registerAccount(api, '/api/id/register', kek, { setup: res.setup })), created: true };
+  await installKeys(res.user.guid, kek, res.wrappedKey, res.chatPrivkey);
   vault.reset(res.vault);
   return res;
 }

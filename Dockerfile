@@ -3,7 +3,7 @@
 FROM node:24-alpine
 
 WORKDIR /app
-COPY package.json server.js db.js webauthn.js ./
+COPY package.json server.js db.js webauthn.js idtoken.js ./
 COPY public ./public
 
 # The SQLite database (accounts, posts, encrypted vaults and chats) lives here; mount a volume to keep it.

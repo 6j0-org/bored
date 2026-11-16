@@ -31,7 +31,7 @@ export function newChallenge(kind, data = {}) {
   return challenge;
 }
 
-function takeChallenge(challenge, kind) {
+export function takeChallenge(challenge, kind) {
   const c = challenges.get(challenge);
   challenges.delete(challenge);
   if (!c || c.kind !== kind || c.expires < Date.now()) throw new WebAuthnError('This passkey request expired. Please try again.');

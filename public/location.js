@@ -1,7 +1,17 @@
 // Event locations are stored as "lat,lon", e.g. "32.719649,-117.220272".
 // This module parses them, links them to the viewer's maps app, and provides a small OpenStreetMap picker.
+// Posts can also carry a friendly name for the spot ("Ocean Beach Pier"), shown instead of the coordinates. The
+// picker suggests one from OpenStreetMap's Nominatim, asked through our own server (/api/places/reverse).
 // The picker uses no library. Its tiles come from tile.openstreetmap.org, and only while it is open: that is the
-// only third-party request the app makes, so the rest of the app never talks to OSM.
+// only third-party request the browser makes, so the rest of the app never talks to OSM directly.
+
+// A location pin (the teardrop map marker), drawn in the current text color. Used for the Where field's map button.
+export const PIN_SVG = '<svg class="pin-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" ' +
+  'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21.5s-7-6.1-7-11.6a7 7 0 0 1 14 0c0 5.5-7 11.6-7 11.6z"/>' +
+  '<circle cx="12" cy="9.8" r="2.6"/></svg>';
+// The same pin, filled, marking the spot on the picker's map. Its tip is at the bottom center.
+const MAP_PIN_SVG = '<svg viewBox="0 0 24 24" width="36" height="36" aria-hidden="true"><path fill="#e11d48" stroke="#fff" stroke-width="1.5" ' +
+  'd="M12 22.5s-7.5-6.4-7.5-12.3a7.5 7.5 0 0 1 15 0c0 5.9-7.5 12.3-7.5 12.3z"/><circle cx="12" cy="10" r="2.8" fill="#fff"/></svg>';
 
 const COORDS = /^\s*(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)\s*$/;
 
@@ -27,14 +37,24 @@ export function mapLink(lat, lon) {
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-// HTML for a location: a map link for coordinates (plain text for anything else). cls is the link/span's class.
-export function locationHtml(loc, cls = '') {
-  if (!loc) return '';
+// HTML for a location: its name (or, without one, the coordinates), linked to the map when there are coordinates.
+// cls is the link/span's class. icon: false leaves out the pin, e.g. where a "Where" label already says what it is.
+export function locationHtml(loc, cls = '', { icon = true, name = '' } = {}) {
+  if (!loc && !name) return '';
+  const pin = icon ? '📍 ' : '';
   const ll = parseLatLon(loc);
-  if (!ll) return `<span class="${cls}">📍 ${esc(loc)}</span>`;
+  if (!ll) return `<span class="${cls}">${pin}${esc(name || loc)}</span>`;
   const { href, external } = mapLink(...ll);
   return `<a class="${cls} map-link" href="${esc(href)}" ${external ? 'target="_blank" rel="noopener noreferrer"' : ''}
-    title="Open in your maps app">📍 ${esc(fmt(...ll))}</a>`;
+    title="Open in your maps app">${pin}${esc(name || fmt(...ll))}</a>`;
+}
+
+// A suggested name for a spot, or '' if none could be found.
+async function lookUpName([lat, lon]) {
+  try {
+    const r = await fetch(`/api/places/reverse?lat=${lat.toFixed(6)}&lon=${lon.toFixed(6)}`, { credentials: 'same-origin' });
+    return r.ok ? (await r.json()).name || '' : '';
+  } catch { return ''; }
 }
 
 // ---------- picker ----------
@@ -55,7 +75,7 @@ function unproject(x, y, z) {
 
 // Opens a full-screen map. Resolves to "lat,lon" for the chosen spot, '' if the person cleared the location,
 // or undefined if they cancelled.
-export function pickLocation(initial = '') {
+export function pickLocation(initial = '', initialName = '') {
   return new Promise((resolve) => {
     let pin = parseLatLon(initial);
     let z = pin ? 16 : 3;
@@ -68,7 +88,7 @@ export function pickLocation(initial = '') {
         <h2>Where?</h2>
         <div class="map" tabindex="0" aria-label="Map. Drag to move, tap to place the pin, plus and minus keys to zoom.">
           <div class="tiles"></div>
-          <div class="pin" hidden>📍</div>
+          <div class="pin" hidden>${MAP_PIN_SVG}</div>
           <div class="map-zoom">
             <button type="button" class="btn ghost small" data-zoom="1" aria-label="Zoom in">+</button>
             <button type="button" class="btn ghost small" data-zoom="-1" aria-label="Zoom out">−</button>
@@ -77,6 +97,8 @@ export function pickLocation(initial = '') {
         </div>
         <div class="map-status"><span class="coords"></span>
           <button type="button" class="btn ghost small" data-here>Use my location</button></div>
+        <label>Place name
+          <input class="place-name" maxlength="100" placeholder="e.g. Ocean Beach Pier" value="${esc(initialName)}"></label>
         <p class="note">Tap the map to drop the pin. Anyone who can see your post can see this spot, so a nearby
           landmark may be better than your front door.</p>
         <div class="two">
@@ -88,6 +110,19 @@ export function pickLocation(initial = '') {
     document.body.appendChild(sheet);
     const map = sheet.querySelector('.map'), tiles = sheet.querySelector('.tiles'), pinEl = sheet.querySelector('.pin');
     const coordsEl = sheet.querySelector('.coords'), doneBtn = sheet.querySelector('[data-done]');
+    const nameEl = sheet.querySelector('.place-name');
+    // Each time the pin moves, suggest a name, unless the host has typed their own since the last suggestion.
+    let typed = Boolean(initialName), lookup = 0;
+    nameEl.addEventListener('input', () => { typed = Boolean(nameEl.value.trim()); });
+    const pinMoved = async () => {
+      if (typed) return;
+      const n = ++lookup;
+      nameEl.placeholder = 'Looking up a name…';
+      const name = await lookUpName(pin);
+      if (n !== lookup || typed) return;
+      nameEl.value = name;
+      nameEl.placeholder = name ? 'e.g. Ocean Beach Pier' : 'No name found. Type one, e.g. Ocean Beach Pier';
+    };
     const imgs = new Map(); // "z/x/y" → <img>
 
     function draw() {
@@ -117,7 +152,7 @@ export function pickLocation(initial = '') {
         const [px, py] = project(...pin, z);
         pinEl.style.transform = `translate(${px - left}px, ${py - top}px)`;
       }
-      coordsEl.textContent = pin ? fmt(...pin) : 'No spot picked yet';
+      coordsEl.textContent = pin ? 'Pin dropped' : 'No spot picked yet';
       doneBtn.disabled = !pin;
     }
 
@@ -164,7 +199,7 @@ export function pickLocation(initial = '') {
       if (tap) {
         const [mx, my] = viewPoint(e);
         pin = unproject(cx - map.clientWidth / 2 + mx, cy - map.clientHeight / 2 + my, z);
-        draw();
+        draw(); pinMoved();
       }
       if (pointers.size) moved = Infinity; // lifting one finger of a pinch is not a tap
     };
@@ -182,7 +217,7 @@ export function pickLocation(initial = '') {
       if (keys[e.key]) { cx += keys[e.key][0]; cy += keys[e.key][1]; draw(); }
       else if (e.key === '+' || e.key === '=') zoom(1);
       else if (e.key === '-') zoom(-1);
-      else if (e.key === 'Enter' || e.key === ' ') { pin = unproject(cx, cy, z); draw(); } // pin the center
+      else if (e.key === 'Enter' || e.key === ' ') { pin = unproject(cx, cy, z); draw(); pinMoved(); } // pin the center
       else return;
       e.preventDefault();
     });
@@ -196,7 +231,7 @@ export function pickLocation(initial = '') {
         pin = [coords.latitude, coords.longitude];
         z = Math.max(z, 16);
         [cx, cy] = project(...pin, z);
-        draw();
+        draw(); pinMoved();
       }, () => { e.target.disabled = false; coordsEl.textContent = "Couldn't get your location"; }, { enableHighAccuracy: true, timeout: 15000 });
     };
 
@@ -209,20 +244,27 @@ export function pickLocation(initial = '') {
     addEventListener('resize', draw);
     sheet.querySelector('[data-cancel]').onclick = () => finish(undefined);
     sheet.querySelector('[data-clear]').onclick = () => finish('');
-    doneBtn.onclick = () => finish(fmt(...pin));
+    doneBtn.onclick = () => finish({ location: fmt(...pin), name: nameEl.value.trim() });
     sheet.onclick = (e) => { if (e.target === sheet) finish(undefined); };
     draw();
     map.focus();
   });
 }
 
-// Wires up the Map button next to a form's location input.
+// Wires up the Where field: a visible place name, the hidden coordinates, and the map button that sets both.
+// The name can also be typed without picking a spot.
 export function mountLocationField(form) {
-  const input = form.querySelector('input[name=location]'), btn = form.querySelector('.loc-pick');
-  if (!input || !btn) return;
+  const name = form.querySelector('input[name=location_name]'), coords = form.querySelector('input[name=location]');
+  const btn = form.querySelector('.loc-pick');
+  if (!name || !coords || !btn) return;
+  // Clearing the name clears the spot too, so an empty box means no location.
+  name.addEventListener('input', () => { if (!name.value.trim()) coords.value = ''; });
   btn.onclick = async () => {
-    const v = await pickLocation(input.value);
-    if (v !== undefined) { input.value = v; input.dispatchEvent(new Event('input', { bubbles: true })); }
-    input.focus();
+    const v = await pickLocation(coords.value, name.value);
+    if (v !== undefined) {
+      coords.value = v ? v.location : '';
+      name.value = v ? v.name : '';
+    }
+    name.focus();
   };
 }

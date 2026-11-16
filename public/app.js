@@ -3,7 +3,7 @@ import {
   prfSupport, createAccount, signIn, addPasskey, loadKeys, clearKeys, hasKeys, vault,
   encryptMessage, decryptMessage, PrfUnsupportedError, startIdSignIn, finishIdSignIn, hasIdCallback,
 } from './secure.js';
-import { locationHtml, mountLocationField } from './location.js';
+import { locationHtml, mountLocationField, PIN_SVG } from './location.js';
 import { parseWhen, repeatOptions, whenLabel as fmtWhen, localToday } from './when.js';
 import { CURRENCIES, DEFAULT_CURRENCY, costLabel } from './cost.js';
 import { toSvg as identicon } from './vendor/jdenticon-3.3.0.js';
@@ -47,7 +47,6 @@ function nextAt(hour, dow) {
   if (dow !== undefined) while (d.getDay() !== dow) d.setDate(d.getDate() + 1);
   return `${localToday(d)}T${String(hour).padStart(2, '0')}:00`;
 }
-const tagChips = (tags = []) => tags.map(t => `<span class="chip tag">#${esc(t)}</span>`).join('');
 // Mirror of the server's normalizeTag (db.js) so chips show what will be saved.
 const normalizeTag = (raw) => String(raw ?? '').toLowerCase().trim().replace(/^#+/, '')
   .replace(/[\s_]+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, 24);
@@ -463,23 +462,24 @@ async function signOut() {
   render();
 }
 
+// A Discover card: each detail has a label, and no emoji.
 function eventCard(t) {
+  const fact = (label, value) => `<dt>${label}</dt><dd>${value}</dd>`;
   return `
-    ${tagLook(t.tags).ico ? `<div class="hero ${tagLook(t.tags).cls}">${tagLook(t.tags).ico}</div>` : ''}
     <div class="body">
       <h2>${esc(t.title)}</h2>
-      ${t.tags.length ? `<div class="meta">${tagChips(t.tags)}</div>` : ''}
-      <div class="meta">
-        ${locationHtml(t.location, 'chip')}
-        ${t.when_text ? `<button type="button" class="chip" data-ics="${t.id}" title="Add to your calendar">🗓 ${esc(whenLabel(t.when_text))}</button>` : ''}
-        <span class="chip">💵 ${esc(costLabel(t.cost_amount, t.cost_currency))}</span>
-        <span class="chip">👥 ${attendeesLabel(t.max_attendees)}</span>
-        ${t.visibility === 'private' ? `<span class="chip" title="The host shared this with you">🔒 Private</span>` : ''}
-        ${t.status === 'full' ? `<span class="chip warn" title="Say yes to join the waitlist">Full: join the waitlist</span>` : ''}
-      </div>
+      ${t.status === 'full' ? `<div class="meta"><span class="chip warn" title="Say yes to join the waitlist">Full: join the waitlist</span></div>` : ''}
+      <dl class="facts">
+        ${t.when_text ? fact('When', `<button type="button" class="link" data-ics="${t.id}" title="Add to your calendar">${esc(whenLabel(t.when_text))}</button>`) : ''}
+        ${t.location || t.location_name ? fact('Where', locationHtml(t.location, '', { icon: false, name: t.location_name })) : ''}
+        ${fact('Cost', esc(costLabel(t.cost_amount, t.cost_currency)))}
+        ${fact('Max attendees', attendeesLabel(t.max_attendees))}
+        ${fact('Who can see it', t.visibility === 'private' ? 'Private: the host shared it with you' : 'Public')}
+        ${t.tags.length ? fact('Tags', t.tags.map(x => '#' + esc(x)).join(' ')) : ''}
+      </dl>
       ${t.details ? `<div class="details">${esc(t.details)}</div>` : ''}
       <div class="who">${avatar(t.host.guid || t.host.icon)}
-        <div>${contactName(t.host.guid) ? `<b>${esc(contactName(t.host.guid))}</b>` : ''}
+        <div>${contactName(t.host.guid) ? `<b>${esc(contactName(t.host.guid))}</b>` : '<b>Host</b>'}
           <small>Hosted ${t.host.hosted} · Attended ${t.host.attended}</small></div>
       </div>
     </div>`;
@@ -715,7 +715,7 @@ async function viewChat(v, id) {
         ${avatar(m.other)}
         <div class="grow" style="flex:1;min-width:0">
           <button type="button" class="link" id="rename" title="Change the nickname only you see">${esc(name)} ✎</button>
-          <div class="sub" style="color:var(--muted);font-size:.85rem">${tagLook(m.tags).ico ? tagLook(m.tags).ico + ' ' : ''}${esc(m.title)}${m.when_text ? ` · <button type="button" class="link cal-link" id="addCal" title="Add to your calendar">${esc(whenLabel(m.when_text))}</button>` : ''}${m.location ? ' · ' + locationHtml(m.location) : ''}</div>
+          <div class="sub" style="color:var(--muted);font-size:.85rem">${tagLook(m.tags).ico ? tagLook(m.tags).ico + ' ' : ''}${esc(m.title)}${m.when_text ? ` · <button type="button" class="link cal-link" id="addCal" title="Add to your calendar">${esc(whenLabel(m.when_text))}</button>` : ''}${m.location || m.location_name ? ' · ' + locationHtml(m.location, '', { name: m.location_name }) : ''}</div>
         </div>
         ${m.role === 'host' && m.status === 'accepted' ? `<button class="btn small" id="happened">It happened</button>` : ''}
         ${m.role === 'attendee' && m.status === 'accepted' && !m.reconfirm ? `<button class="btn ghost small" id="leave">Can't make it</button>` : ''}
@@ -738,7 +738,7 @@ async function viewChat(v, id) {
     </div>`;
   v.querySelector('.back').onclick = () => { state.chat = null; render(); };
   v.querySelector('#rename').onclick = () => openContactSheet(m.other, () => render());
-  v.querySelector('#addCal')?.addEventListener('click', () => addToCalendar({ id: m.event_id, title: m.title, location: m.location, when_text: m.when_text }));
+  v.querySelector('#addCal')?.addEventListener('click', () => addToCalendar({ id: m.event_id, title: m.title, location: m.location, location_name: m.location_name, when_text: m.when_text }));
 
   const msgsEl = v.querySelector('#msgs');
   async function loadMsgs() {
@@ -806,7 +806,7 @@ function eventFormFields(t = {}) {
       <label>Title
         <input name="title" placeholder="e.g. Pick up compost & spread it on my garden" required maxlength="100" value="${val('title')}"></label>
       <label>Details
-        <textarea name="details" placeholder="What's involved, what you'll provide (tools, snacks, beer…)" maxlength="1000">${val('details')}</textarea></label>
+        <textarea name="details" class="details-input" placeholder="e.g. Bring gloves if you have them. I'll provide tools, snacks and beer." maxlength="1000">${val('details')}</textarea></label>
       <div class="tag-editor" data-tags="${esc(JSON.stringify(t.tags || []))}">
         <label for="${tagsId}">Tags</label>
         <input type="hidden" name="tags">
@@ -816,17 +816,18 @@ function eventFormFields(t = {}) {
       <div class="field">
         <label for="${locId}">Where</label>
         <div class="loc-field">
-          <input id="${locId}" name="location" placeholder="lat,lon" maxlength="100" value="${val('location')}"
-            title="Latitude,longitude, e.g. 32.719649,-117.220272" autocomplete="off" spellcheck="false">
-          <button type="button" class="loc-pick" aria-label="Pick on a map" title="Pick on a map">&#x1F5FA;&#xFE0E;</button>
+          <input id="${locId}" name="location_name" maxlength="100" value="${val('location_name')}" autocomplete="off"
+            placeholder="${t.location && !t.location_name ? 'Spot picked on the map (no name yet)' : 'e.g. Ocean Beach Pier'}">
+          <input type="hidden" name="location" value="${val('location')}">
+          <button type="button" class="loc-pick" aria-label="Pick on a map" title="Pick on a map">${PIN_SVG}</button>
         </div>
       </div>
       ${whenInputs(t.when_text)}
       ${costInputs(t)}
       ${audienceInputs(t)}
-      <label class="inline max-attendees">Max attendees
+      <label>Max attendees
         <input name="max_attendees" type="number" inputmode="numeric" step="1" min="${Math.max(1, t.matched || 0)}" max="${MAX_ATTENDEES_LIMIT}"
-          placeholder="No limit" value="${t.max_attendees ?? ''}"></label>`;
+          placeholder="e.g. 4, or blank for no limit" value="${t.max_attendees ?? ''}"></label>`;
 }
 
 // "When": the browser's date and time picker for the first (or only) time, plus a Repeats menu whose choices
@@ -836,9 +837,9 @@ const repeatOptionsHtml = (start, selected) => repeatOptions(start)
 function whenInputs(v = '') {
   const w = parseWhen(v);
   return `
-      <label class="inline when-field">When
+      <label>When
         <input name="when_text" type="datetime-local" value="${esc(w?.start ?? '')}"></label>
-      <label class="inline when-field">Repeats
+      <label>Repeats
         <select name="when_repeat" ${w ? '' : 'disabled'}>${repeatOptionsHtml(w?.start, w?.repeat.kind)}</select></label>`;
 }
 // New date → new repeat choices, keeping the same kind of repeat where it still exists. "The Nth weekday" and
@@ -860,12 +861,13 @@ function costInputs(t = {}) {
   const cur = t.cost_currency || lastCurrency(), costId = fieldId('cost');
   return `
       <div class="cost-field">
-        <label for="${costId}">Cost</label>
-        <input id="${costId}" name="cost_amount" type="number" inputmode="decimal" min="0" step="any" placeholder="Free"
-          value="${t.cost_amount ? esc(t.cost_amount) : ''}">
-        <select name="cost_currency" aria-label="Currency" title="${esc(currencyName(cur))}">
-          ${CURRENCIES.map(c => `<option value="${c}" ${c === cur ? 'selected' : ''}>${c} · ${esc(currencyName(c))}</option>`).join('')}
-        </select>
+        <label for="${costId}">Cost
+          <input id="${costId}" name="cost_amount" type="number" inputmode="decimal" min="0" step="any" placeholder="e.g. 10, or blank for free"
+            value="${t.cost_amount ? esc(t.cost_amount) : ''}"></label>
+        <label>Currency
+          <select name="cost_currency" title="${esc(currencyName(cur))}">
+            ${CURRENCIES.map(c => `<option value="${c}" ${c === cur ? 'selected' : ''}>${c} · ${esc(currencyName(c))}</option>`).join('')}
+          </select></label>
       </div>`;
 }
 function mountCostFields(form) {
@@ -920,9 +922,9 @@ function mountAudience(form) {
     box.innerHTML = !contacts.length
       ? `<p class="note">You don't have any contacts yet; people are added when you match with them. Until then only you
           can see a private post. Make it public to find people.</p>`
-      : `${groups.length ? `<div class="filter-row" role="group" aria-label="Groups"><span class="label">Groups</span>
+      : `${groups.length ? `<div class="filter-row stacked" role="group" aria-label="Groups"><span class="label">Groups</span>
           ${groups.map(([g, count]) => chip('group', g, `${CONTACT_TAGS[g] || '#'} ${esc(g)} <span class="n">${count}</span>`, pick.groups.includes(g))).join('')}</div>` : ''}
-        <div class="filter-row" role="group" aria-label="Contacts"><span class="label">People</span>
+        <div class="filter-row stacked" role="group" aria-label="Contacts"><span class="label">People</span>
           ${contacts.map(g => chip('contact', g, esc(displayName(g)), pick.contacts.includes(g))).join('')}</div>
         <p class="note">${n ? `Only you and ${n === 1 ? '1 person' : `${n} people`} can see this.` : 'Only you can see this until you pick someone.'}
           ${pick.groups.length ? 'People you add to these groups later will see it too.' : ''}</p>`;

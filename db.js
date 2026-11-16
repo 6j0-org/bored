@@ -111,7 +111,30 @@ CREATE INDEX IF NOT EXISTS idx_swipes_attendee ON swipes(attendee_id);
 CREATE INDEX IF NOT EXISTS idx_messages_swipe ON messages(swipe_id);
 `);
 
-// Prototype: no migrations. After a schema change, delete data.sqlite* and run `npm run seed`.
+// ---------- migrations ----------
+// The CREATE TABLEs above are the schema as it was at public launch, and never change. Every change since is a
+// migration below: append one, never edit or reorder old ones. The database's PRAGMA user_version counts how many
+// have run; on startup the rest run in order, each in its own transaction with the version bump, so a failure
+// leaves the database on the last good version.
+const MIGRATIONS = [
+  // 1: a friendly name for a post's location, shown instead of the coordinates, e.g. "Ocean Beach Pier"; '' = none.
+  `ALTER TABLE events ADD COLUMN location_name TEXT NOT NULL DEFAULT ''`,
+];
+
+export function migrate() {
+  const from = db.prepare('PRAGMA user_version').get().user_version;
+  if (from > MIGRATIONS.length) throw new Error(`Database is at version ${from}, newer than this code (${MIGRATIONS.length})`);
+  for (let v = from; v < MIGRATIONS.length; v++) {
+    db.exec('BEGIN');
+    try {
+      db.exec(MIGRATIONS[v]);
+      db.exec(`PRAGMA user_version = ${v + 1}`);
+      db.exec('COMMIT');
+      console.log(`Database migrated to version ${v + 1}`);
+    } catch (e) { db.exec('ROLLBACK'); throw e; }
+  }
+}
+migrate();
 
 // ---------- tags ----------
 export const MAX_ATTENDEES_LIMIT = 500;

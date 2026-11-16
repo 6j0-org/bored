@@ -122,6 +122,39 @@ function maxAttendeesField(v) {
   return n;
 }
 
+// Reverse geocoding for the map picker: coordinates → a friendly place name, from OpenStreetMap's Nominatim.
+// The browser asks us rather than OSM, so it doesn't talk to another server. Nominatim's usage policy allows at most
+// one request a second with an identifying User-Agent, so requests are spaced out and answers are cached.
+const NOMINATIM = 'https://nominatim.openstreetmap.org/reverse';
+const placeCache = new Map(); // "lat,lon" (5 decimals, about a metre) → name
+let nextNominatim = 0;
+function placeName(a = {}, name = '') {
+  const street = [a.house_number, a.road].filter(Boolean).join(' ');
+  const area = a.neighbourhood || a.suburb || a.quarter || a.hamlet;
+  const town = a.city || a.town || a.village || a.municipality || a.county;
+  const parts = [name || street, name && street ? '' : area, town].filter(Boolean);
+  return [...new Set(parts)].join(', ').slice(0, 100);
+}
+async function reverseGeocode(lat, lon, lang) {
+  const key = `${lat.toFixed(5)},${lon.toFixed(5)}|${lang}`;
+  if (placeCache.has(key)) return placeCache.get(key);
+  const wait = nextNominatim - Date.now();
+  nextNominatim = Math.max(Date.now(), nextNominatim) + 1100;
+  if (wait > 5000) throw new HttpError(503, 'Too many place lookups right now. Type a name instead, or try again shortly.');
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  const url = `${NOMINATIM}?format=jsonv2&addressdetails=1&zoom=18&lat=${lat}&lon=${lon}`;
+  const r = await fetch(url, {
+    headers: { 'User-Agent': 'Bored-event-app/0.1 (self-hosted)', ...(lang ? { 'Accept-Language': lang } : {}) },
+    signal: AbortSignal.timeout(8000),
+  }).catch(() => null);
+  if (!r?.ok) throw new HttpError(502, "Couldn't look up a name for that spot. You can type one.");
+  const j = await r.json();
+  const name = placeName(j.address, j.name) || String(j.display_name || '').split(',').slice(0, 3).join(',').trim().slice(0, 100);
+  if (placeCache.size > 1000) placeCache.delete(placeCache.keys().next().value);
+  placeCache.set(key, name);
+  return name;
+}
+
 // Location: "lat,lon" with 6 decimals, e.g. "32.719649,-117.220272", or blank.
 function locationField(v) {
   const s = str(v, 100, { field: 'Location' });
@@ -159,6 +192,7 @@ function eventFields(body) {
     cost_amount: cost.amount,
     cost_currency: cost.currency,
     location: locationField(body.location),
+    location_name: str(body.location_name, 100, { field: 'Where' }),
     when_text: whenField(body.when_text, body.when_repeat),
     max_attendees: maxAttendeesField(body.max_attendees),
   };
@@ -423,6 +457,15 @@ function dateRange(from, to) {
 // The Discover deck (also shown to signed-out guests). ?tags=a,b keeps events with ANY of those tags;
 // ?cost=free or ?cost=paid keeps only free or paid events (both, or neither, = all); ?from=&to= keeps events that
 // happen (or repeat) on one of those days. Every filter given must match.
+// Map picker: a friendly name for a spot (signed-in hosts only). ?lat=&lon=
+route('GET', '/api/places/reverse', async ({ req, query, res }) => {
+  const lat = Number(query.get('lat')), lon = Number(query.get('lon'));
+  if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180)
+    throw new HttpError(400, 'Bad coordinates');
+  const lang = String(req.headers['accept-language'] || '').split(',')[0].trim().slice(0, 20).replace(/[^\w-]/g, '');
+  send(res, 200, { name: await reverseGeocode(lat, lon, lang) });
+});
+
 route('GET', '/api/discover', async ({ user, query, res }) => {
   const tags = parseTags(query.get('tags'));
   const costs = String(query.get('cost') || '').split(',').filter(c => COST_FILTERS.includes(c));
@@ -536,7 +579,7 @@ route('POST', '/api/confirm/:id/undo', async ({ user, params, res }) => {
 
 route('GET', '/api/matches', async ({ user, res }) => {
   const rows = q(`
-    SELECT s.id, s.status, s.note, s.reconfirm, t.id AS event_id, t.title, ${TAGS_COL}, t.location, t.when_text, t.status AS event_status,
+    SELECT s.id, s.status, s.note, s.reconfirm, t.id AS event_id, t.title, ${TAGS_COL}, t.location, t.location_name, t.when_text, t.status AS event_status,
            t.host_id, s.attendee_id, cu.guid AS host_guid, hu.guid AS attendee_guid,
            cu.chat_pubkey AS host_pubkey, hu.chat_pubkey AS attendee_pubkey,
            (SELECT body FROM messages m WHERE m.swipe_id = s.id ORDER BY m.id DESC LIMIT 1) AS last_message,
@@ -639,8 +682,8 @@ route('POST', '/api/events', async ({ user, body, res }) => {
   const f = eventFields(body);
   const id = tx(() => {
     const { lastInsertRowid } = q(`
-      INSERT INTO events (host_id, title, details, location, when_text, cost_amount, cost_currency, visibility, max_attendees)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(user.id, f.title, f.details, f.location, f.when_text, f.cost_amount, f.cost_currency, f.visibility, f.max_attendees);
+      INSERT INTO events (host_id, title, details, location, location_name, when_text, cost_amount, cost_currency, visibility, max_attendees)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(user.id, f.title, f.details, f.location, f.location_name, f.when_text, f.cost_amount, f.cost_currency, f.visibility, f.max_attendees);
     setEventTags(lastInsertRowid, f.tags);
     setViewers(lastInsertRowid, viewerIds(body.viewers ?? [], user.id));
     return lastInsertRowid;
@@ -659,7 +702,8 @@ route('PATCH', '/api/events/:id', async ({ user, params, body, res }) => {
     throw new HttpError(400, `${filled} ${filled > 1 ? 'people are' : 'person is'} already matched, so max attendees must be at least ${filled} (or blank for no limit)`);
 
   const cost = (e) => costLabel(e.cost_amount, e.cost_currency, 'en-US');
-  const value = (e, k) => (k === 'cost' ? cost(e) : e[k]);
+  const where = (e) => e.location_name || e.location;
+  const value = (e, k) => (k === 'cost' ? cost(e) : k === 'location' ? `${e.location_name}|${e.location}` : e[k]);
   const changed = Object.keys(FIELD_LABELS).filter(k => JSON.stringify(value(f, k)) !== JSON.stringify(value(event, k)));
   // Who can see it isn't something attendees are told about or asked to re-confirm.
   const viewers = viewerIds(body.viewers, user.id);
@@ -669,13 +713,14 @@ route('PATCH', '/api/events/:id', async ({ user, params, body, res }) => {
     changed.map(k => k === 'details' ? '• Details were changed'
       : k === 'cost' ? `• Cost: ${cost(event)} → ${cost(f)}`
       : k === 'visibility' ? (f.visibility === 'public' ? '• Now public' : '• Now private')
+      : k === 'location' ? `• Where: ${show(where(event))} → ${show(where(f))}`
       : k === 'when_text' ? `• When: ${show(whenLabel(event.when_text, { locale: 'en-US' }))} → ${show(whenLabel(f.when_text, { locale: 'en-US' }))}`
       : `• ${FIELD_LABELS[k]}: ${show(event[k])} → ${show(f[k])}`).join('\n') +
     '\nPlease re-confirm you can still make it.';
 
   const notified = tx(() => {
-    q(`UPDATE events SET title = ?, details = ?, location = ?, when_text = ?, cost_amount = ?, cost_currency = ?, visibility = ?, max_attendees = ? WHERE id = ?`)
-      .run(f.title, f.details, f.location, f.when_text, f.cost_amount, f.cost_currency, f.visibility, f.max_attendees, event.id);
+    q(`UPDATE events SET title = ?, details = ?, location = ?, location_name = ?, when_text = ?, cost_amount = ?, cost_currency = ?, visibility = ?, max_attendees = ? WHERE id = ?`)
+      .run(f.title, f.details, f.location, f.location_name, f.when_text, f.cost_amount, f.cost_currency, f.visibility, f.max_attendees, event.id);
     setEventTags(event.id, f.tags);
     setViewers(event.id, viewers);
     const attendees = q(`SELECT id FROM swipes WHERE event_id = ? AND status = 'accepted'`).all(event.id);

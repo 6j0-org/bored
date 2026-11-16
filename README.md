@@ -48,7 +48,9 @@ APPS=bored=http://127.0.0.1:3000 ORIGIN=http://localhost:4000 npm start
 AUTH_MODE=6j0 ID_ORIGIN=http://localhost:4000 ORIGIN=http://127.0.0.1:3000 npm start   # open http://127.0.0.1:3000
 ```
 
-This is a prototype, so there are no database migrations. After a schema change, stop the server, delete `data.sqlite*`, and run `npm run seed` again.
+**Database migrations** run automatically on startup (`MIGRATIONS` in `db.js`). The `CREATE TABLE`s are the schema
+as it was at launch; every change since is a numbered migration, tracked in SQLite's `PRAGMA user_version`. To change
+the schema, append a migration (never edit or reorder old ones). Back up `data.sqlite*` before deploying one.
 
 ## How it works
 
@@ -100,6 +102,6 @@ A post stays in the deck until it reaches its max attendees. Posts with no limit
 - `public/secure.js`: passkeys + PRF, 6j0.org identity handoff, encrypted vault, key storage, E2E chat crypto
 - `public/location.js`: "lat,lon" locations, links to the viewer's maps app, and a small OpenStreetMap pin picker
 - `public/when.js`, `public/cost.js`: event time (with repeat rules) and cost formats, shared by server and browser
-- `public/fonts/`: bundled Bungee title font (SIL OFL 1.1, license alongside). The app loads nothing from outside its own server, except OpenStreetMap tiles while the location picker is open.
+- `public/fonts/`: bundled Bungee title font (SIL OFL 1.1, license alongside). The app loads nothing from outside its own server, except OpenStreetMap tiles while the location picker is open. Suggested place names come from OpenStreetMap's Nominatim, asked by the server (`/api/places/reverse`).
 - `seed.js`: demo data
 - `TODO.md`: open security and privacy issues, by priority

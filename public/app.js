@@ -1249,13 +1249,19 @@ const contactGroups = () => {
   return Object.entries(counts).sort(([a], [b]) => a.localeCompare(b));
 };
 
+// Private posts need contacts to share with (the server checks this too). Without any, new posts are public; a post
+// that's already private can stay that way.
 function audienceInputs(t = {}) {
-  const vis = t.visibility || 'private';
+  const noContacts = !Object.keys(vault.data.contacts).length;
+  const vis = t.visibility || (noContacts ? 'public' : 'private');
+  const lockPrivate = noContacts && vis !== 'private';
   return `
       <fieldset class="seg-pick"><legend>Who can see it?</legend><div class="seg">
-        <label><input type="radio" name="visibility" value="private" ${vis === 'private' ? 'checked' : ''}><span>Private</span></label>
+        <label><input type="radio" name="visibility" value="private" ${vis === 'private' ? 'checked' : ''} ${lockPrivate ? 'disabled' : ''}><span>Private</span></label>
         <label><input type="radio" name="visibility" value="public" ${vis === 'public' ? 'checked' : ''}><span>Public</span></label>
       </div></fieldset>
+      ${lockPrivate ? `<p class="note">Private posts are shared with your contacts. You'll have some once you match with
+        someone on a post, or connect through an invitation from Profile.</p>` : ''}
       <div class="audience" ${vis === 'public' ? 'hidden' : ''} data-audience="${esc(JSON.stringify(t.id ? audienceOf(t.id) : emptyAudience()))}"></div>`;
 }
 

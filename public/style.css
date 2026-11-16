@@ -350,6 +350,7 @@ button.chip { font: inherit; font-size: .82rem; cursor: pointer; }
 .seg-pick label + label span { border-left: 1px solid var(--line); }
 .seg-pick input:checked + span { background: var(--accent); color: #fff; font-weight: 700; }
 .seg-pick input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: -2px; }
+.seg-pick input:disabled + span { color: var(--muted); opacity: .5; cursor: not-allowed; }
 .audience { display: flex; flex-direction: column; gap: 8px; }
 .audience .filter-row { flex-wrap: wrap; overflow: visible; }
 .filter-row.stacked .label { flex-basis: 100%; text-transform: none; letter-spacing: 0; font-size: .85rem; }

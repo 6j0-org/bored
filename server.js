@@ -252,6 +252,16 @@ function viewerIds(guids, hostId) {
   const find = q(`SELECT id FROM users u WHERE u.guid = :guid AND u.id != :host AND ${MATCHED(':host', 'u.id')}`);
   return [...new Set(guids.map(guid => find.get({ guid, host: hostId })?.id).filter(Boolean))];
 }
+// Private posts are for sharing with contacts, so they need at least one: someone matched (on either side) or
+// connected through an invitation. Same relationships as MATCHED.
+const hasContacts = (userId) => Boolean(q(`
+  SELECT 1 FROM swipes s JOIN events t ON t.id = s.event_id
+    WHERE s.status IN ('accepted', 'attended', 'withdrawn') AND (s.attendee_id = :me OR t.host_id = :me)
+  UNION ALL SELECT 1 FROM connections WHERE a = :me OR b = :me
+  LIMIT 1`).get({ me: userId }));
+const NO_CONTACTS = "Private posts are shared with your contacts, and you don't have any yet. Make this one public, " +
+  'or connect with someone first (match on a post, or send an invitation from Profile).';
+
 function setViewers(eventId, ids) {
   if (ids === undefined) return;
   q('DELETE FROM event_viewers WHERE event_id = ?').run(eventId);
@@ -761,6 +771,7 @@ route('GET', '/api/events', async ({ user, res }) => {
 
 route('POST', '/api/events', async ({ user, body, res }) => {
   const f = eventFields(body);
+  if (f.visibility === 'private' && !hasContacts(user.id)) throw new HttpError(400, NO_CONTACTS);
   const id = tx(() => {
     const { lastInsertRowid } = q(`
       INSERT INTO events (host_id, title, details, location, location_name, online, when_text, cost_amount, cost_currency, visibility, max_attendees)
@@ -778,6 +789,8 @@ route('PATCH', '/api/events/:id', async ({ user, params, body, res }) => {
   if (!event || event.host_id !== user.id) throw new HttpError(404, 'Event not found');
   if (!['open', 'full'].includes(event.status)) throw new HttpError(409, 'Finished posts can no longer be edited');
   const f = eventFields(body);
+  // A post that's already private can stay private; turning a public one private needs contacts.
+  if (f.visibility === 'private' && event.visibility !== 'private' && !hasContacts(user.id)) throw new HttpError(400, NO_CONTACTS);
   const filled = filledSpots(event.id);
   if (f.max_attendees !== null && f.max_attendees < filled)
     throw new HttpError(400, `${filled} ${filled > 1 ? 'people are' : 'person is'} already matched, so max attendees must be at least ${filled} (or blank for no limit)`);

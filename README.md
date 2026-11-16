@@ -78,7 +78,7 @@ the schema, append a migration (never edit or reorder old ones). Back up `data.s
 | Match → chat to sort out details | Both | **Plans** |
 | "It happened" to close it out | Host | Plan chat |
 
-A post stays in the deck until it reaches its max attendees. Posts with no limit stay open until the host removes them. Posts are **private** by default: only the contacts and groups (contact tags) the host picks can see them. **Public** posts show for everyone, including signed-out guests.
+A post stays in the deck until it reaches its max attendees. Posts with no limit stay open until the host removes them. Posts are **private** by default: only the contacts and groups (contact tags) the host picks can see them. Private posts need contacts, so until someone has matched or connected with at least one person, their posts are public (the server enforces this). **Public** posts show for everyone, including signed-out guests.
 
 ## Privacy model
 

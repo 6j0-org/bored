@@ -2,6 +2,7 @@
   "name": "bored",
   "version": "0.1.0",
   "private": true,
+  "license": "AGPL-3.0-or-later",
   "description": "Swipe through local events. When you and the host both say yes, it's on.",
   "type": "module",
   "engines": {

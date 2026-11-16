@@ -130,3 +130,17 @@ A post stays in the deck until it reaches its max attendees. Posts with no limit
 - `public/fonts/`: bundled Bungee title font (SIL OFL 1.1, license alongside). The app loads nothing from outside its own server, except OpenStreetMap tiles while the location picker is open. Suggested place names come from OpenStreetMap's Nominatim, asked by the server (`/api/places/reverse`).
 - `seed.js`: demo data
 - `TODO.md`: open security and privacy issues, by priority
+
+## License
+
+Copyright © 2026 the Bored? contributors.
+
+Bored? is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public
+License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later
+version. See [`LICENSE`](LICENSE).
+
+The AGPL also covers running Bored? as a service: if you run a modified version for other people, you must offer them
+its source. The app links to the source from the sign-in and Profile screens (`SOURCE_URL` in `public/app.js`); point
+it at your own repository if you change the code.
+
+The bundled Bungee font is under the SIL Open Font License 1.1 (`public/fonts/Bungee-OFL.txt`), and Jdenticon is MIT.

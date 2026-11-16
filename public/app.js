@@ -69,6 +69,11 @@ const normalizeTag = (raw) => String(raw ?? '').toLowerCase().trim().replace(/^#
 const CONTACT_TAGS = { family: '👪', friends: '🫶', neighbors: '🏡', work: '💼' };
 
 // Signed-out guests can browse Discover; everything else needs an account.
+// AGPL-3.0 section 13: people using the app over the network must be offered its source.
+const SOURCE_URL = 'https://codeberg.org/6j0-org/bored';
+const ABOUT_LINKS = `<p class="note" style="margin-top:20px;text-align:center"><a href="/about">About Bored?</a> · 
+  <a href="${SOURCE_URL}">Source code</a> (free software, AGPL-3.0)</p>`;
+
 const GUEST_TABS = [
   { id: 'discover', ico: '🤝', label: 'Discover' },
   { id: 'account', ico: '🔑', label: 'Sign in' },
@@ -636,6 +641,7 @@ function viewAccountId(v) {
         Nobody sees a name for you unless they've connected with you, and then only the nickname <em>they</em> chose.
         Your contacts and chats are encrypted with a key only you can unlock.</div>
       ${unlocking ? `<button class="btn danger" id="logout">Sign out</button>` : ''}
+      ${ABOUT_LINKS}
     </div>`;
   v.querySelector('#idSignIn').onclick = async () => {
     try { await startIdSignIn(state.config); } catch (e) { v.querySelector('#authErr').textContent = e.message; }
@@ -662,6 +668,7 @@ async function viewAccount(v) {
         Nobody sees a name for you unless they've connected with you, and then only the nickname <em>they</em> chose.
         <br><br>${PASSKEY_ADVICE}`}</div>
       ${unlocking ? `<button class="btn danger" id="logout">Sign out</button>` : ''}
+      ${ABOUT_LINKS}
     </div>`;
   const err = v.querySelector('#authErr'), note = v.querySelector('#authNote');
   const fail = (e) => {
@@ -1604,7 +1611,8 @@ async function viewProfile(v) {
     </div>
     <button class="btn ghost" id="addKey">➕ Add another passkey</button>`}
 
-    <button class="btn danger" id="logout" style="margin-top:24px">Sign out</button>`;
+    <button class="btn danger" id="logout" style="margin-top:24px">Sign out</button>
+    ${ABOUT_LINKS}`;
 
   v.querySelector('#newInvite').addEventListener('click', createInvite);
   v.querySelectorAll('[data-share-invite]').forEach(b => b.onclick = () => {

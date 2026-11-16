@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { newChallenge, takeChallenge, verifyRegistration, verifyAssertion, WebAuthnError } from './webauthn.js';
 import { verifyIdToken, IdTokenError } from './idtoken.js';
-import { composeWhen, whenLabel } from './public/when.js';
+import { composeWhen, whenLabel, occursBetween } from './public/when.js';
 import { parseCost, costLabel } from './public/cost.js';
 import { db, parseTags, setEventTags, MAX_TAGS, MAX_ATTENDEES_LIMIT, MAX_VIEWERS } from './db.js';
 
@@ -413,26 +413,43 @@ const VISIBLE = `(t.visibility = 'public' OR t.host_id = :me
 const DISCOVERABLE = `t.status IN ('open', 'full') AND t.host_id != :me AND ${VISIBLE}
   AND NOT EXISTS (SELECT 1 FROM swipes s WHERE s.event_id = t.id AND s.attendee_id = :me)`;
 
+// A date range from the query, "YYYY-MM-DD" days in the viewer's own calendar (only they know what "today" is):
+// ?from=…&to=… → { from, to }, or null if not given or malformed.
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+function dateRange(from, to) {
+  return DAY_RE.test(from || '') && DAY_RE.test(to || '') && from <= to ? { from, to } : null;
+}
+
 // The Discover deck (also shown to signed-out guests). ?tags=a,b keeps events with ANY of those tags;
-// ?cost=free or ?cost=paid keeps only free or paid events (both, or neither, = all). When both are given, an event must match both.
+// ?cost=free or ?cost=paid keeps only free or paid events (both, or neither, = all); ?from=&to= keeps events that
+// happen (or repeat) on one of those days. Every filter given must match.
 route('GET', '/api/discover', async ({ user, query, res }) => {
   const tags = parseTags(query.get('tags'));
   const costs = String(query.get('cost') || '').split(',').filter(c => COST_FILTERS.includes(c));
+  const range = dateRange(query.get('from'), query.get('to'));
   const rows = q(`
     SELECT t.*, u.guid AS host_raw, CASE WHEN ${MATCHED(':me', 't.host_id')} THEN u.guid END AS host_guid, ${TAGS_COL}
     FROM events t JOIN users u ON u.id = t.host_id
     WHERE ${DISCOVERABLE}
       AND (:tags = '[]' OR EXISTS (SELECT 1 FROM event_tags tt WHERE tt.event_id = t.id AND tt.tag IN (SELECT value FROM json_each(:tags))))
       AND (:costs = '[]' OR (CASE WHEN t.cost_amount > 0 THEN 'paid' ELSE 'free' END) IN (SELECT value FROM json_each(:costs)))
+      AND (:dated = 0 OR t.when_text != '')
     ORDER BY t.created_at DESC, t.id DESC
-    LIMIT 30`).all({ me: user?.id ?? -1, tags: JSON.stringify(tags), costs: JSON.stringify(costs) });
+    LIMIT :limit`).all({ me: user?.id ?? -1, tags: JSON.stringify(tags), costs: JSON.stringify(costs),
+      dated: range ? 1 : 0, limit: range ? -1 : 30 }) // repeats are matched in JS, so the date filter reads all, then cuts
+    .filter(t => !range || occursBetween(t.when_text, range.from, range.to)).slice(0, 30);
   send(res, 200, rows.map(({ host_id, host_raw, host_guid, ...t }) =>
     withTags({ ...t, host: { ...(host_guid ? { guid: host_guid } : {}), icon: iconHash(host_raw), ...stats(host_id) } })));
 }, { auth: 'optional' });
 
-// Filter options for Discover: tags and costs, each with how many discoverable events match.
-route('GET', '/api/discover/filters', async ({ user, res }) => {
+// Filter options for Discover: tags and costs, each with how many discoverable events match. ?dates=key:from:to,…
+// (the browser's own day ranges, e.g. today:2026-11-15:2026-11-15) adds a count for each of those ranges.
+route('GET', '/api/discover/filters', async ({ user, query, res }) => {
   const me = user?.id ?? -1;
+  const ranges = String(query.get('dates') || '').split(',').slice(0, 10).map(x => x.split(':'))
+    .map(([key, from, to]) => ({ key, range: dateRange(from, to) })).filter(x => /^[a-z]{1,20}$/.test(x.key || '') && x.range);
+  const dated = ranges.length ? q(`SELECT t.when_text FROM events t WHERE ${DISCOVERABLE} AND t.when_text != ''`).all({ me }) : [];
+  const dates = ranges.map(({ key, range }) => ({ key, count: dated.filter(t => occursBetween(t.when_text, range.from, range.to)).length }));
   const tags = q(`
     SELECT tt.tag, COUNT(*) AS count FROM event_tags tt JOIN events t ON t.id = tt.event_id
     WHERE ${DISCOVERABLE}
@@ -440,7 +457,7 @@ route('GET', '/api/discover/filters', async ({ user, res }) => {
   const byCost = Object.fromEntries(q(`
     SELECT CASE WHEN t.cost_amount > 0 THEN 'paid' ELSE 'free' END AS cost, COUNT(*) AS count
     FROM events t WHERE ${DISCOVERABLE} GROUP BY 1`).all({ me }).map(r => [r.cost, r.count]));
-  send(res, 200, { tags, costs: COST_FILTERS.map(cost => ({ cost, count: byCost[cost] || 0 })) });
+  send(res, 200, { tags, costs: COST_FILTERS.map(cost => ({ cost, count: byCost[cost] || 0 })), dates });
 }, { auth: 'optional' });
 
 route('POST', '/api/events/:id/swipe', async ({ user, params, body, res }) => {
@@ -702,7 +719,7 @@ route('GET', '/api/ledger', async ({ user, res }) => {
 // ---------- server ----------
 
 const STATIC = {
-  '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/secure.js': 'secure.js', '/style.css': 'style.css', '/location.js': 'location.js', '/when.js': 'when.js', '/cost.js': 'cost.js',
+  '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/secure.js': 'secure.js', '/style.css': 'style.css', '/location.js': 'location.js', '/when.js': 'when.js', '/cost.js': 'cost.js', '/ics.js': 'ics.js',
   '/vendor/jdenticon-3.3.0.js': 'vendor/jdenticon-3.3.0.js', // Jdenticon 3.3.0 browser ES module, MIT (license in the file)
   '/fonts/bungee-latin.woff2': 'fonts/bungee-latin.woff2', // Bungee, SIL OFL 1.1 (see public/fonts/Bungee-OFL.txt)
 };

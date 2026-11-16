@@ -79,3 +79,31 @@ export function whenLabel(s, { locale, today } = {}) {
 // Local "YYYY-MM-DD" for whenLabel's `today`.
 export const localToday = (d = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+// Does the event happen on any day from `from` to `to` ("YYYY-MM-DD", inclusive)? Repeats count on each day they
+// recur. Invalid values and invalid ranges are false.
+export function occursBetween(s, from, to) {
+  const w = parseWhen(s);
+  const a = wallDate(`${from}T00:00`), b = wallDate(`${to}T00:00`);
+  if (!w || !a || !b || b < a) return false;
+  const first = new Date(Date.UTC(w.date.getUTCFullYear(), w.date.getUTCMonth(), w.date.getUTCDate()));
+  const DAY = 86400000, dow = first.getUTCDay(), dom = first.getUTCDate(), nth = Math.ceil(dom / 7);
+  const on = (d) => {
+    if (d < first) return false;
+    const sameDow = d.getUTCDay() === dow, dDom = d.getUTCDate();
+    switch (w.repeat.kind) {
+      case 'once': return d.getTime() === first.getTime();
+      case 'daily': return true;
+      case 'weekly': return sameDow;
+      case 'biweekly': return sameDow && Math.round((d - first) / DAY / 7) % 2 === 0;
+      case 'monthday': return dDom === dom;
+      case 'nthday': return sameDow && Math.ceil(dDom / 7) === nth;
+      case 'lastday': return sameDow && dDom + 7 > new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+      default: return false;
+    }
+  };
+  // Walk the days of the range (capped at a year), from the first occurrence on.
+  const start = Math.max(a.getTime(), first.getTime()), end = Math.min(b.getTime(), start + 366 * DAY);
+  for (let t = start; t <= end; t += DAY) if (on(new Date(t))) return true;
+  return false;
+}

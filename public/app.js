@@ -7,6 +7,7 @@ import { locationHtml, mountLocationField } from './location.js';
 import { parseWhen, repeatOptions, whenLabel as fmtWhen, localToday } from './when.js';
 import { CURRENCIES, DEFAULT_CURRENCY, costLabel } from './cost.js';
 import { toSvg as identicon } from './vendor/jdenticon-3.3.0.js';
+import { addToCalendar } from './ics.js';
 
 // Well-known tags: offered as one-tap suggestions, and the first one on a post picks its icon and color (.tag-<name>).
 // Posts can also use any other tag; those show with no icon.
@@ -24,6 +25,18 @@ const tagLook = (tags = []) => {
 const whenLabel = (s) => fmtWhen(s, { today: localToday() });
 // Discover's cost filter: prices in different currencies can't be compared, so it's just free vs. paid.
 const COST_FILTERS = { free: 'Free', paid: 'Paid' };
+// Discover's date filter (pick one): day ranges in your own calendar, worked out each time they're used.
+const DATE_FILTERS = { today: 'Today', tomorrow: 'Tomorrow', weekend: 'This weekend', week: 'Next 7 days' };
+function dateFilterRange(key, now = new Date()) {
+  const day = (n) => { const d = new Date(now); d.setDate(d.getDate() + n); return localToday(d); };
+  const dow = now.getDay(); // 0 = Sunday
+  return {
+    today: [day(0), day(0)],
+    tomorrow: [day(1), day(1)],
+    weekend: dow === 0 ? [day(0), day(0)] : [day(6 - dow), day(7 - dow)], // the coming (or current) Saturday and Sunday
+    week: [day(0), day(6)],
+  }[key];
+}
 // The currency last picked in the post form, so it's the default next time.
 const lastCurrency = () => { try { return localStorage.getItem('currency') || DEFAULT_CURRENCY; } catch { return DEFAULT_CURRENCY; } };
 const currencyName = (() => { try { const n = new Intl.DisplayNames(undefined, { type: 'currency' }); return (c) => n.of(c); } catch { return (c) => c; } })();
@@ -117,7 +130,9 @@ const POST_IDEAS = [
 const POST_IDEA_MS = 5000;
 
 // config.authMode: 'local' (Bored? passkeys) | '6j0' (sign in with a 6j0.org identity at config.idOrigin).
-const state = { config: { authMode: 'local' }, me: null, tab: 'discover', chat: null, discoverTags: loadSet('discoverTags'), discoverCosts: new Set([...loadSet('discoverCosts')].filter(c => c in COST_FILTERS)) };
+const state = { config: { authMode: 'local' }, me: null, tab: 'discover', chat: null, discoverTags: loadSet('discoverTags'), discoverCosts: new Set([...loadSet('discoverCosts')].filter(c => c in COST_FILTERS)),
+  discoverDate: (() => { try { const d = localStorage.getItem('discoverDate'); return d in DATE_FILTERS ? d : ''; } catch { return ''; } })(),
+  filtersOpen: false };
 const app = document.getElementById('app');
 
 // ---------- utils ----------
@@ -130,6 +145,7 @@ function saveDiscoverFilters() {
   try {
     localStorage.setItem('discoverTags', JSON.stringify([...state.discoverTags]));
     localStorage.setItem('discoverCosts', JSON.stringify([...state.discoverCosts]));
+    localStorage.setItem('discoverDate', state.discoverDate);
   } catch {}
 }
 
@@ -455,7 +471,7 @@ function eventCard(t) {
       ${t.tags.length ? `<div class="meta">${tagChips(t.tags)}</div>` : ''}
       <div class="meta">
         ${locationHtml(t.location, 'chip')}
-        ${t.when_text ? `<span class="chip">🗓 ${esc(whenLabel(t.when_text))}</span>` : ''}
+        ${t.when_text ? `<button type="button" class="chip" data-ics="${t.id}" title="Add to your calendar">🗓 ${esc(whenLabel(t.when_text))}</button>` : ''}
         <span class="chip">💵 ${esc(costLabel(t.cost_amount, t.cost_currency))}</span>
         <span class="chip">👥 ${attendeesLabel(t.max_attendees)}</span>
         ${t.visibility === 'private' ? `<span class="chip" title="The host shared this with you">🔒 Private</span>` : ''}
@@ -472,34 +488,48 @@ function eventCard(t) {
 async function viewDiscover(v) {
   v.innerHTML = `<div class="filters" id="filters"></div><div class="deck-host" id="deckHost"></div>`;
   const filtersEl = v.querySelector('#filters'), host = v.querySelector('#deckHost');
-  let options = { tags: [], costs: [] };
+  let options = { tags: [], costs: [], dates: [] }, events = [];
 
+  // All the filters sit in one panel that opens and closes; its heading says how many are on.
   function drawFilters() {
-    const selTags = state.discoverTags, selCosts = state.discoverCosts;
+    const selTags = state.discoverTags, selCosts = state.discoverCosts, selDate = state.discoverDate;
+    const on = selTags.size + selCosts.size + (selDate ? 1 : 0);
+    const dateCount = Object.fromEntries((options.dates || []).map(d => [d.key, d.count]));
     // Keep selected tags visible even when no open posts carry them right now.
     const tags = [...options.tags, ...[...selTags].filter(t => !options.tags.some(a => a.tag === t)).map(tag => ({ tag, count: 0 }))];
     const chip = (kind, value, label, count, on, title = '') => `
       <button type="button" class="chip filter ${on ? 'on' : ''}" data-${kind}="${esc(value)}" aria-pressed="${on}" ${title ? `title="${esc(title)}"` : ''}>
         ${label} <span class="n">${count}</span></button>`;
     filtersEl.innerHTML = `
-      ${tags.length ? `<div class="filter-row" role="group" aria-label="Filter by tag"><span class="label">Tags</span>
-        ${tags.map(({ tag, count }) => chip('tag', tag, `${TAG_ICONS[tag] || '#'} ${esc(tag)}`, count, selTags.has(tag))).join('')}</div>` : ''}
-      <div class="filter-row" role="group" aria-label="Filter by cost"><span class="label">Cost</span>
-        ${options.costs.map(({ cost, count }) => chip('cost', cost, esc(COST_FILTERS[cost]), count, selCosts.has(cost))).join('')}
-        ${selTags.size || selCosts.size ? `<button type="button" class="chip filter clear" data-clear>Clear all</button>` : ''}
-      </div>`;
+      <details class="filter-box" ${state.filtersOpen ? 'open' : ''}>
+        <summary>Filters${on ? ` <span class="badge">${on}</span>` : ''}</summary>
+        <div class="filter-body">
+          <div class="filter-row" role="group" aria-label="Filter by date"><span class="label">When</span>
+            ${Object.entries(DATE_FILTERS).map(([key, label]) => chip('date', key, label, dateCount[key] ?? 0, selDate === key)).join('')}</div>
+          ${tags.length ? `<div class="filter-row" role="group" aria-label="Filter by tag"><span class="label">Tags</span>
+            ${tags.map(({ tag, count }) => chip('tag', tag, `${TAG_ICONS[tag] || '#'} ${esc(tag)}`, count, selTags.has(tag))).join('')}</div>` : ''}
+          <div class="filter-row" role="group" aria-label="Filter by cost"><span class="label">Cost</span>
+            ${options.costs.map(({ cost, count }) => chip('cost', cost, esc(COST_FILTERS[cost]), count, selCosts.has(cost))).join('')}
+            ${on ? `<button type="button" class="chip filter clear" data-clear>Clear all</button>` : ''}
+          </div>
+        </div>
+      </details>`;
+    filtersEl.querySelector('details').addEventListener('toggle', (e) => { state.filtersOpen = e.target.open; });
   }
 
   async function load() {
     const params = new URLSearchParams();
     if (state.discoverTags.size) params.set('tags', [...state.discoverTags].join(','));
     if (state.discoverCosts.size) params.set('cost', [...state.discoverCosts].join(','));
-    const [events, opts] = await Promise.all([api('/api/discover' + (params.size ? `?${params}` : '')), api('/api/discover/filters')]);
+    if (state.discoverDate) { const [from, to] = dateFilterRange(state.discoverDate); params.set('from', from); params.set('to', to); }
+    const dates = Object.keys(DATE_FILTERS).map(k => [k, ...dateFilterRange(k)].join(':')).join(',');
+    let opts;
+    [events, opts] = await Promise.all([api('/api/discover' + (params.size ? `?${params}` : '')), api(`/api/discover/filters?dates=${dates}`)]);
     options = opts;
     drawFilters();
-    mountDeck(host, deckOptions(events, { tags: [...state.discoverTags], costs: [...state.discoverCosts] }));
+    mountDeck(host, deckOptions(events, { tags: [...state.discoverTags], costs: [...state.discoverCosts], date: state.discoverDate }));
   }
-  const clearAll = () => { state.discoverTags.clear(); state.discoverCosts.clear(); };
+  const clearAll = () => { state.discoverTags.clear(); state.discoverCosts.clear(); state.discoverDate = ''; };
   const toggle = (set, value) => (set.has(value) ? set.delete(value) : set.add(value));
 
   filtersEl.addEventListener('click', (e) => {
@@ -508,10 +538,13 @@ async function viewDiscover(v) {
     if (b.hasAttribute('data-clear')) clearAll();
     else if (b.dataset.tag) toggle(state.discoverTags, b.dataset.tag);
     else if (b.dataset.cost) toggle(state.discoverCosts, b.dataset.cost);
+    else if (b.dataset.date) state.discoverDate = state.discoverDate === b.dataset.date ? '' : b.dataset.date;
     saveDiscoverFilters();
     load().catch(err => toast(err.message));
   });
   v.addEventListener('click', (e) => {
+    const cal = e.target.closest('[data-ics]');
+    if (cal) addToCalendar(events.find(t => t.id === Number(cal.dataset.ics)));
     if (e.target.id === 'goPost') go('post');
     if (e.target.id === 'clearFilters') { clearAll(); saveDiscoverFilters(); load().catch(err => toast(err.message)); }
   });
@@ -538,9 +571,9 @@ function deckOptions(events, filters) {
       if (state.me) await api(`/api/events/${t.id}/swipe`, { method: 'DELETE' });
       toast(yes ? `Took back your request to join “${t.title}”` : 'Undone');
     },
-    empty: filters.tags.length || filters.costs.length
+    empty: filters.tags.length || filters.costs.length || filters.date
       ? `<div class="empty"><div class="big">🔎</div><h3>No matches for these filters</h3>
-          <p>${[filters.tags.length && filters.tags.map(t => '#' + esc(t)).join(' or '), filters.costs.length && filters.costs.map(c => esc(COST_FILTERS[c])).join(' or ')].filter(Boolean).join(' · ')}</p>
+          <p>${[filters.date && esc(DATE_FILTERS[filters.date]), filters.tags.length && filters.tags.map(t => '#' + esc(t)).join(' or '), filters.costs.length && filters.costs.map(c => esc(COST_FILTERS[c])).join(' or ')].filter(Boolean).join(' · ')}</p>
           <p>Nothing open matches right now. Try other filters, or see everything.</p>
           <button class="btn" id="clearFilters">Show all posts</button></div>`
       : `<div class="empty"><div class="big">🌤</div><h3>Still bored?</h3>
@@ -682,7 +715,7 @@ async function viewChat(v, id) {
         ${avatar(m.other)}
         <div class="grow" style="flex:1;min-width:0">
           <button type="button" class="link" id="rename" title="Change the nickname only you see">${esc(name)} ✎</button>
-          <div class="sub" style="color:var(--muted);font-size:.85rem">${tagLook(m.tags).ico ? tagLook(m.tags).ico + ' ' : ''}${esc(m.title)}${m.when_text ? ' · ' + esc(whenLabel(m.when_text)) : ''}${m.location ? ' · ' + locationHtml(m.location) : ''}</div>
+          <div class="sub" style="color:var(--muted);font-size:.85rem">${tagLook(m.tags).ico ? tagLook(m.tags).ico + ' ' : ''}${esc(m.title)}${m.when_text ? ` · <button type="button" class="link cal-link" id="addCal" title="Add to your calendar">${esc(whenLabel(m.when_text))}</button>` : ''}${m.location ? ' · ' + locationHtml(m.location) : ''}</div>
         </div>
         ${m.role === 'host' && m.status === 'accepted' ? `<button class="btn small" id="happened">It happened</button>` : ''}
         ${m.role === 'attendee' && m.status === 'accepted' && !m.reconfirm ? `<button class="btn ghost small" id="leave">Can't make it</button>` : ''}
@@ -705,6 +738,7 @@ async function viewChat(v, id) {
     </div>`;
   v.querySelector('.back').onclick = () => { state.chat = null; render(); };
   v.querySelector('#rename').onclick = () => openContactSheet(m.other, () => render());
+  v.querySelector('#addCal')?.addEventListener('click', () => addToCalendar({ id: m.event_id, title: m.title, location: m.location, when_text: m.when_text }));
 
   const msgsEl = v.querySelector('#msgs');
   async function loadMsgs() {

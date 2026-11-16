@@ -324,7 +324,19 @@ label.inline { flex-direction: row; align-items: center; gap: 10px; }
 label.inline input { width: 6em; }
 
 /* ---------- Discover filters ---------- */
-.filters { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.filters { margin-bottom: 8px; }
+.filter-box summary {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer; padding: 4px 2px;
+  font-size: .85rem; font-weight: 700; color: var(--muted); list-style: none;
+}
+.filter-box summary::-webkit-details-marker { display: none; }
+.filter-box summary::before { content: '\25B8'; transition: transform .15s; } /* ▸, turned down when open */
+.filter-box[open] summary::before { transform: rotate(90deg); }
+.filter-box summary .badge { position: static; }
+.filter-body { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
+button.chip { font: inherit; font-size: .82rem; cursor: pointer; }
+button.chip[data-ics]:hover, .cal-link:hover { text-decoration: underline; }
+.chat-head button.link.cal-link { color: inherit; font-size: inherit; font-weight: inherit; }
 .filter-row { display: flex; gap: 6px; overflow-x: auto; padding: 2px 0; scrollbar-width: none; }
 .filter-row::-webkit-scrollbar { display: none; }
 .filter-row .label { flex: none; align-self: center; font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; min-width: 3.2em; }

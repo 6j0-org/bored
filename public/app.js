@@ -11,8 +11,8 @@ import { toSvg as identicon } from './vendor/jdenticon.js';
 import { addToCalendar } from './ics.js';
 
 // Well-known tags, offered as one-tap suggestions. Posts can also use any other tag.
-const TAGS = ['outdoors', 'events', 'food', 'garden', 'hauling', 'moving',
-  'repair', 'pets', 'tech', 'cooking', 'errands', 'fitness', 'games', 'movies'];
+const TAGS = ['hiking', 'food', 'gardening', 'hauling', 'moving', 'fixing', 'pets', 'tech', 'cooking',
+  'errands', 'fitness', 'board-games', 'video-games', 'movies'];
 const MAX_TAGS = 5;
 const MAX_ATTENDEES_LIMIT = 500; // must match db.js
 const attendeesLabel = (max) => (max == null ? 'No limit' : max === 1 ? '1 person' : `Up to ${max} people`);
@@ -95,7 +95,7 @@ const POST_IDEAS = [
     template: {
       title: 'Walk around the neighborhood',
       details: 'Looking for some company on a walk. Easy pace, about an hour. Dogs welcome!',
-      tags: ['outdoors'], max_attendees: 1, when: [18],
+      tags: ['fitness'], max_attendees: 1, when: [18],
     },
   },
   {
@@ -103,7 +103,7 @@ const POST_IDEAS = [
     template: {
       title: 'Help tending the garden',
       details: "Weeding, watering, and some general tidying. I'll provide gloves, tools, and something cold to drink.",
-      tags: ['garden', 'outdoors'], max_attendees: 1, when: [10, 6],
+      tags: ['gardening'], max_attendees: 1, when: [10, 6],
     },
   },
   {
@@ -119,7 +119,7 @@ const POST_IDEAS = [
     template: {
       title: 'Help assembling some furniture',
       details: "Got a flat-pack piece that's a two-person job. I have the instructions and an Allen key; a drill would be a bonus. Should take an hour or two.",
-      tags: ['repair'], max_attendees: 1, when: [14, 0],
+      tags: ['fixing'], max_attendees: 1, when: [14, 0],
     },
   },
   {
@@ -127,7 +127,7 @@ const POST_IDEAS = [
     template: {
       title: 'Go for a hike',
       details: "Thinking of hitting a trail nearby. Moderate pace, a few hours. Bring water and good shoes, and we can carpool to the trailhead.",
-      tags: ['outdoors'], max_attendees: 2, when: [9, 0],
+      tags: ['hiking'], max_attendees: 2, when: [9, 0],
     },
   },
   {
@@ -135,7 +135,7 @@ const POST_IDEAS = [
     template: {
       title: 'Check out an event around town',
       details: "There's something happening around town that looks fun. Say what it is and where to find details, and anyone who's interested can come along.",
-      tags: ['events'], visibility: 'public',
+      tags: [], visibility: 'public',
     },
   },
   {
@@ -151,7 +151,15 @@ const POST_IDEAS = [
     template: {
       title: 'Play a video game together',
       details: "Couch co-op or online, I'm up for most things. Say what you like to play and what you play on.",
-      tags: ['games'], max_attendees: 1, when: [20],
+      tags: ['video-games'], max_attendees: 1, when: [20],
+    },
+  },
+  {
+    prompt: 'Up for a board game night?',
+    template: {
+      title: 'Board game night',
+      details: "I have a few games, or bring your favorite. Anything from quick card games to a long strategy night.",
+      tags: ['board-games'], max_attendees: 3, when: [19, 5],
     },
   },
   {
@@ -1149,7 +1157,7 @@ function eventFormFields(t = {}) {
       <div class="tag-editor" data-tags="${esc(JSON.stringify(t.tags || []))}">
         <label for="${tagsId}">Tags</label>
         <input type="hidden" name="tags">
-        <div class="tag-box"><input id="${tagsId}" class="tag-input" placeholder="e.g. garden, outdoors" maxlength="30" enterkeyhint="done"></div>
+        <div class="tag-box"><input id="${tagsId}" class="tag-input" placeholder="e.g. gardening, hauling" maxlength="30" enterkeyhint="done"></div>
         <div class="tag-suggest"></div>
       </div>
       <fieldset class="seg-pick"><legend>Where</legend><div class="seg">

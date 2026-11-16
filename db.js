@@ -167,6 +167,13 @@ const MIGRATIONS = [
    );
    CREATE INDEX idx_push_user ON push_subscriptions(user_id);
    CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);`,
+  // 6: rename well-known tags (outdoors → hiking, garden → gardening, repair → fixing) and drop "events", which
+  //    every post is. "games" was split into board-games and video-games; existing "games" tags can't be sorted
+  //    into one, so they stay as a free-form tag. OR IGNORE + DELETE handles a post that already had the new tag.
+  `UPDATE OR IGNORE event_tags SET tag = 'hiking' WHERE tag = 'outdoors';
+   UPDATE OR IGNORE event_tags SET tag = 'gardening' WHERE tag = 'garden';
+   UPDATE OR IGNORE event_tags SET tag = 'fixing' WHERE tag = 'repair';
+   DELETE FROM event_tags WHERE tag IN ('outdoors', 'garden', 'repair', 'events');`,
 ];
 
 export function migrate() {

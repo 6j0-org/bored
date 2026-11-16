@@ -8,7 +8,7 @@ import { parseWhen, repeatOptions, whenLabel as fmtWhen, localToday } from './wh
 import { CURRENCIES, DEFAULT_CURRENCY, costLabel } from './cost.js';
 
 // Well-known tags: offered as one-tap suggestions, and the first one on a post picks its icon and color (.tag-<name>).
-// Posts can also use any other tag; those show with ✨ and a neutral color.
+// Posts can also use any other tag; those show with no icon.
 const TAG_ICONS = {
   social: '🎉', outdoors: '🥾', events: '🎟️', food: '🍽️', garden: '🌱', hauling: '🚚', moving: '📦',
   repair: '🔧', pets: '🐕', tech: '💻', cooking: '🍲', errands: '🛒',
@@ -18,7 +18,7 @@ const MAX_ATTENDEES_LIMIT = 500; // must match db.js
 const attendeesLabel = (max) => (max == null ? 'No limit' : max === 1 ? '1 person' : `Up to ${max} people`);
 const tagLook = (tags = []) => {
   const known = tags.find(t => TAG_ICONS[t]);
-  return known ? { ico: TAG_ICONS[known], cls: `tag-${known}` } : { ico: '✨', cls: 'tag-none' };
+  return known ? { ico: TAG_ICONS[known], cls: `tag-${known}` } : { ico: '', cls: 'tag-none' };
 };
 const whenLabel = (s) => fmtWhen(s, { today: localToday() });
 // Discover's cost filter: prices in different currencies can't be compared, so it's just free vs. paid.
@@ -447,7 +447,7 @@ async function signOut() {
 
 function eventCard(t) {
   return `
-    <div class="hero ${tagLook(t.tags).cls}">${tagLook(t.tags).ico}</div>
+    ${tagLook(t.tags).ico ? `<div class="hero ${tagLook(t.tags).cls}">${tagLook(t.tags).ico}</div>` : ''}
     <div class="body">
       <h2>${esc(t.title)}</h2>
       ${t.tags.length ? `<div class="meta">${tagChips(t.tags)}</div>` : ''}
@@ -555,7 +555,7 @@ async function viewConfirm(v) {
         ${avatar(o.attendee.guid, 'big')}
       </div>
       <div class="body">
-        <div class="meta"><span class="chip">${tagLook(o.tags).ico} wants to join: <b>${esc(o.title)}</b></span></div>
+        <div class="meta"><span class="chip">${tagLook(o.tags).ico ? tagLook(o.tags).ico + ' ' : ''}wants to join: <b>${esc(o.title)}</b></span></div>
         <h2>${esc(displayName(o.attendee.guid))}</h2>
         ${o.note ? `<div class="details">“${esc(o.note)}”</div>` : ''}
         <div class="who" style="justify-content:space-around;text-align:center">
@@ -630,7 +630,7 @@ async function viewPlans(v) {
     : `<span class="pill go">It's on</span>`;
   const row = (m) => `
     <button class="row" data-id="${m.id}">
-      <div class="dot ${tagLook(m.tags).cls}">${tagLook(m.tags).ico}</div>
+      ${tagLook(m.tags).ico ? `<div class="dot ${tagLook(m.tags).cls}">${tagLook(m.tags).ico}</div>` : ''}
       <div class="grow">
         <div class="title">${esc(m.title)}</div>
         <div class="sub">${m.role === 'attendee' ? `Hosted by ${esc(displayName(m.other))}` : `${esc(displayName(m.other))} is going`}${m.last_message ? ' · ' + esc(m.last_message) : ''}</div>
@@ -656,7 +656,7 @@ async function viewChat(v, id) {
         ${avatar(m.other)}
         <div class="grow" style="flex:1;min-width:0">
           <button type="button" class="link" id="rename" title="Change the nickname only you see">${esc(name)} ✎</button>
-          <div class="sub" style="color:var(--muted);font-size:.85rem">${tagLook(m.tags).ico} ${esc(m.title)}${m.when_text ? ' · ' + esc(whenLabel(m.when_text)) : ''}${m.location ? ' · ' + locationHtml(m.location) : ''}</div>
+          <div class="sub" style="color:var(--muted);font-size:.85rem">${tagLook(m.tags).ico ? tagLook(m.tags).ico + ' ' : ''}${esc(m.title)}${m.when_text ? ' · ' + esc(whenLabel(m.when_text)) : ''}${m.location ? ' · ' + locationHtml(m.location) : ''}</div>
         </div>
         ${m.role === 'host' && m.status === 'accepted' ? `<button class="btn small" id="happened">It happened</button>` : ''}
       </div>
@@ -671,7 +671,8 @@ async function viewChat(v, id) {
         </div>` : ''}
       ${m.status === 'accepted' ? `
         <form class="composer" id="composer">
-          <input name="body" placeholder="Say hi, sort out the details…" autocomplete="off" maxlength="2000" required>
+          <label class="sr-only" for="chatBody">Message</label>
+          <input id="chatBody" name="body" placeholder="Say hi, sort out the details…" autocomplete="off" maxlength="2000" required>
           <button class="btn">Send</button>
         </form>` : ''}
     </div>`;
@@ -728,28 +729,38 @@ async function viewChat(v, id) {
   });
 }
 
+// Unique ids for <label for=…>, since a post form and an edit sheet can be open at once.
+let fieldSeq = 0;
+const fieldId = (name) => `f-${name}-${++fieldSeq}`;
+
 function eventFormFields(t = {}) {
   const val = (k) => esc(t[k] ?? '');
+  const tagsId = fieldId('tags'), locId = fieldId('location');
   return `
-      <input name="title" placeholder="e.g. Pick up compost & spread it on my garden" required maxlength="100" value="${val('title')}">
-      <textarea name="details" placeholder="Details: what's involved, what you'll provide (tools, snacks, beer…)" maxlength="1000">${val('details')}</textarea>
+      <label>Title
+        <input name="title" placeholder="e.g. Pick up compost & spread it on my garden" required maxlength="100" value="${val('title')}"></label>
+      <label>Details
+        <textarea name="details" placeholder="What's involved, what you'll provide (tools, snacks, beer…)" maxlength="1000">${val('details')}</textarea></label>
       <div class="tag-editor" data-tags="${esc(JSON.stringify(t.tags || []))}">
+        <label for="${tagsId}">Tags</label>
         <input type="hidden" name="tags">
-        <div class="tag-box"><input class="tag-input" placeholder="Add tags, e.g. garden, social" aria-label="Add a tag" maxlength="30" enterkeyhint="done"></div>
+        <div class="tag-box"><input id="${tagsId}" class="tag-input" placeholder="e.g. garden, social" maxlength="30" enterkeyhint="done"></div>
         <div class="tag-suggest"></div>
       </div>
-      <div class="loc-field">
-          <input name="location" placeholder="📍 Where: lat,lon" maxlength="100" value="${val('location')}"
+      <div class="field">
+        <label for="${locId}">Where</label>
+        <div class="loc-field">
+          <input id="${locId}" name="location" placeholder="lat,lon" maxlength="100" value="${val('location')}"
             title="Latitude,longitude, e.g. 32.719649,-117.220272" autocomplete="off" spellcheck="false">
-          <button type="button" class="btn ghost small loc-pick" aria-label="Pick on a map" title="Pick on a map">🗺️</button>
+          <button type="button" class="loc-pick" aria-label="Pick on a map" title="Pick on a map">&#x1F5FA;&#xFE0E;</button>
+        </div>
       </div>
       ${whenInputs(t.when_text)}
       ${costInputs(t)}
       ${audienceInputs(t)}
-      <label class="inline max-attendees">👥 Max attendees
+      <label class="inline max-attendees">Max attendees
         <input name="max_attendees" type="number" inputmode="numeric" step="1" min="${Math.max(1, t.matched || 0)}" max="${MAX_ATTENDEES_LIMIT}"
-          placeholder="No limit" value="${t.max_attendees ?? ''}">
-        <small>Leave blank for no limit</small></label>`;
+          placeholder="No limit" value="${t.max_attendees ?? ''}"></label>`;
 }
 
 // "When": the browser's date and time picker for the first (or only) time, plus a Repeats menu whose choices
@@ -759,9 +770,9 @@ const repeatOptionsHtml = (start, selected) => repeatOptions(start)
 function whenInputs(v = '') {
   const w = parseWhen(v);
   return `
-      <label class="inline when-field">🗓 When
+      <label class="inline when-field">When
         <input name="when_text" type="datetime-local" value="${esc(w?.start ?? '')}"></label>
-      <label class="inline when-field">🔁 Repeats
+      <label class="inline when-field">Repeats
         <select name="when_repeat" ${w ? '' : 'disabled'}>${repeatOptionsHtml(w?.start, w?.repeat.kind)}</select></label>`;
 }
 // New date → new repeat choices, keeping the same kind of repeat where it still exists. "The Nth weekday" and
@@ -780,11 +791,11 @@ function mountWhenFields(form) {
 
 // Cost: an amount (blank or 0 = free) and a currency, which defaults to the last one picked.
 function costInputs(t = {}) {
-  const cur = t.cost_currency || lastCurrency();
+  const cur = t.cost_currency || lastCurrency(), costId = fieldId('cost');
   return `
       <div class="cost-field">
-        <label for="costAmount">💵 Cost</label>
-        <input id="costAmount" name="cost_amount" type="number" inputmode="decimal" min="0" step="any" placeholder="Free"
+        <label for="${costId}">Cost</label>
+        <input id="${costId}" name="cost_amount" type="number" inputmode="decimal" min="0" step="any" placeholder="Free"
           value="${t.cost_amount ? esc(t.cost_amount) : ''}">
         <select name="cost_currency" aria-label="Currency" title="${esc(currencyName(cur))}">
           ${CURRENCIES.map(c => `<option value="${c}" ${c === cur ? 'selected' : ''}>${c} · ${esc(currencyName(c))}</option>`).join('')}
@@ -822,8 +833,8 @@ function audienceInputs(t = {}) {
   const vis = t.visibility || 'private';
   return `
       <fieldset class="seg-pick"><legend>Who can see it?</legend><div class="seg">
-        <label><input type="radio" name="visibility" value="private" ${vis === 'private' ? 'checked' : ''}><span>🔒 Private</span></label>
-        <label><input type="radio" name="visibility" value="public" ${vis === 'public' ? 'checked' : ''}><span>🌐 Public</span></label>
+        <label><input type="radio" name="visibility" value="private" ${vis === 'private' ? 'checked' : ''}><span>Private</span></label>
+        <label><input type="radio" name="visibility" value="public" ${vis === 'public' ? 'checked' : ''}><span>Public</span></label>
       </div></fieldset>
       <div class="audience" ${vis === 'public' ? 'hidden' : ''} data-audience="${esc(JSON.stringify(t.id ? audienceOf(t.id) : emptyAudience()))}"></div>`;
 }
@@ -1013,10 +1024,10 @@ async function viewPost(v) {
   v.innerHTML = `
     <div class="section-title">Post something</div>
     <div class="idea" id="postIdea">
+      <button type="button" class="idea-prev" aria-label="Previous idea" title="Previous idea">‹</button>
       <button type="button" class="idea-open" title="Start a post from this idea">
         <span class="ico">💡</span><span class="text" aria-live="polite"></span>
       </button>
-      <button type="button" class="idea-prev" aria-label="Previous idea" title="Previous idea">‹</button>
       <button type="button" class="idea-next" aria-label="Next idea" title="Next idea">›</button>
     </div>
     <form class="stack" id="newEvent">
@@ -1027,7 +1038,7 @@ async function viewPost(v) {
     <div class="list">
       ${events.length ? events.map(t => `
         <div class="row">
-          <div class="dot ${tagLook(t.tags).cls}">${tagLook(t.tags).ico}</div>
+          ${tagLook(t.tags).ico ? `<div class="dot ${tagLook(t.tags).cls}">${tagLook(t.tags).ico}</div>` : ''}
           <div class="grow">
             <div class="title">${esc(t.title)}</div>
             ${t.tags.length ? `<div class="sub">${t.tags.map(x => '#' + esc(x)).join(' ')}</div>` : ''}
@@ -1067,10 +1078,12 @@ function openContactSheet(guid, onSaved) {
     <form class="stack panel" id="contactForm">
       <h2>Contact</h2>
       <p class="note">Only you see the nickname and tags you give them. They pick their own name for you.</p>
-      <input name="nickname" maxlength="60" placeholder="e.g. Robert from work" value="${esc(c.nickname)}">
+      <label>Nickname
+        <input name="nickname" maxlength="60" placeholder="e.g. Robert from work" value="${esc(c.nickname)}"></label>
       <div class="tag-editor" data-tags="${esc(JSON.stringify(c.tags || []))}">
+        <label for="contactTags">Tags</label>
         <input type="hidden" name="tags">
-        <div class="tag-box"><input class="tag-input" placeholder="Tags, e.g. family, work" aria-label="Add a tag" maxlength="30"></div>
+        <div class="tag-box"><input id="contactTags" class="tag-input" placeholder="e.g. family, work" maxlength="30"></div>
         <div class="tag-suggest"></div>
       </div>
       <div class="two">

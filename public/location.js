@@ -216,7 +216,7 @@ export function pickLocation(initial = '') {
   });
 }
 
-// Wires up the 🗺️ button next to a form's location input.
+// Wires up the Map button next to a form's location input.
 export function mountLocationField(form) {
   const input = form.querySelector('input[name=location]'), btn = form.querySelector('.loc-pick');
   if (!input || !btn) return;

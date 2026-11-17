@@ -1,28 +1,54 @@
 :root {
-  --bg: #f6f5f1;
-  --surface: #ffffff;
-  --text: #1c1917;
-  --muted: #78716c;
-  --line: #e7e5e4;
-  --yes: #16a34a;
-  --no: #dc2626;
-  --accent: #16a34a;
-  --accent-soft: #dcfce7;
-  --shadow: 0 10px 30px rgba(28, 25, 23, .12);
+  /* Forest floor: fir green on soil and bark browns. */
+  --bg: #f2eee5;
+  --surface: #fffcf6;
+  --text: #2b2219;
+  --muted: #776a5a;
+  --line: #e2d9c9;
+  --yes: #2f6b3a;
+  --no: #a8432c;
+  --accent: #2f6b3a;
+  --accent-soft: #e0e9d5;
+  --shadow: 0 10px 30px rgba(43, 34, 25, .12);
+  --wood-line: #934e23; /* the board's wood brown, for outlined buttons */
+  --warn-bg: #fef3c7; --warn-line: #fcd34d; --warn-text: #78350f; --warn-pill-bg: #fef3c7; --warn-pill-text: #92400e;
   --radius: 20px;
   color-scheme: light dark;
 }
+/* Dark: when the device asks for it (theme "automatic"), or when chosen (public/theme.js). */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --bg: #12110f;
-    --surface: #1f1d1a;
-    --text: #f5f5f4;
-    --muted: #a8a29e;
-    --line: #2f2c28;
-    --accent-soft: #14532d;
+  :root:not([data-theme="light"]) {
+    --bg: #14110d;
+    --surface: #211c16;
+    --text: #f0e9dd;
+    --muted: #a69885;
+    --line: #362e25;
+    --yes: #4e9258;
+    --no: #b4502f;
+    --accent: #4e9258;
+    --accent-soft: #24382a;
+    --wood-line: #a75e25;
     --shadow: 0 10px 30px rgba(0, 0, 0, .5);
+    --warn-bg: #451a03; --warn-line: #92400e; --warn-text: #fde68a; --warn-pill-bg: #78350f; --warn-pill-text: #fef3c7;
+    color-scheme: dark;
   }
 }
+:root[data-theme="dark"] {
+  --bg: #14110d;
+  --surface: #211c16;
+  --text: #f0e9dd;
+  --muted: #a69885;
+  --line: #362e25;
+  --yes: #4e9258;
+  --no: #b4502f;
+  --accent: #4e9258;
+  --accent-soft: #24382a;
+  --wood-line: #a75e25;
+  --shadow: 0 10px 30px rgba(0, 0, 0, .5);
+  --warn-bg: #451a03; --warn-line: #92400e; --warn-text: #fde68a; --warn-pill-bg: #78350f; --warn-pill-text: #fef3c7;
+  color-scheme: dark;
+}
+:root[data-theme="light"] { color-scheme: light; }
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
@@ -79,7 +105,13 @@ nav.tabs button.active { color: var(--accent); font-weight: 700; }
 .deck { position: relative; flex: 1; min-height: 440px; margin: 4px 0 16px; }
 .card {
   position: absolute; inset: 0;
-  background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow);
+  /* the same brown and dark outline as the buttons and the title board */
+  --text: #f6ecda; --muted: #f0dcc0; --line: rgba(255, 236, 210, .25); --bg: rgba(40, 18, 5, .22);
+  --accent: #d8eebd; --accent-soft: rgba(40, 18, 5, .28); --yes: #cdeab0; --no: #ffc2a8; --wood-line: #f0dcc0;
+  color: var(--text);
+  background: linear-gradient(180deg, #a05a28, #8a4720);
+  border: 1.5px solid #472610;
+  border-radius: 12px; box-shadow: var(--shadow);
   overflow: hidden; display: flex; flex-direction: column;
   touch-action: none; user-select: none; will-change: transform;
   transition: transform .3s ease, opacity .3s ease;
@@ -89,7 +121,7 @@ nav.tabs button.active { color: var(--accent); font-weight: 700; }
 .card:not(.top):not(.second) { opacity: 0; }
 .card .hero {
   height: 42%; min-height: 150px; display: grid; place-items: center;
-  font-size: 5rem; position: relative; background: linear-gradient(135deg, #d6d3d1, #57534e);
+  font-size: 5rem; position: relative; background: linear-gradient(135deg, rgba(40, 18, 5, .2), rgba(40, 18, 5, .55));
 }
 .card .body { padding: 18px 20px; flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
 .card h2 { font-size: 1.5rem; letter-spacing: -.01em; }
@@ -166,13 +198,15 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 textarea { resize: vertical; min-height: 80px; }
 textarea.details-input { min-height: 160px; } /* the post's Details: twice the usual height */
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+/* Buttons: the title board's wood brown and dark outline, lettered in Bungee like the board (cream, for contrast). */
 .btn {
-  border: 0; border-radius: 12px; padding: 12px 16px; font-weight: 700;
-  background: var(--accent); color: #fff;
+  border: 1.5px solid #472610; border-radius: 6px; padding: 12px 16px;
+  font-family: 'Bungee', 'Arial Black', Impact, sans-serif; font-weight: 400; font-size: .9rem; letter-spacing: .04em;
+  background: linear-gradient(180deg, #a05a28, #8a4720); color: #f6ecda; text-shadow: 0 1px 0 rgba(40, 18, 5, .5);
 }
-.btn.ghost { background: transparent; color: var(--text); border: 1px solid var(--line); }
-.btn.small { padding: 6px 10px; font-size: .85rem; font-weight: 600; }
-.btn.danger { background: transparent; color: var(--no); border: 1px solid var(--line); }
+.btn.ghost { background: transparent; color: var(--text); border-color: var(--wood-line); text-shadow: none; }
+.btn.small { padding: 6px 10px; font-size: .75rem; }
+.btn.danger { background: transparent; color: var(--no); border-color: currentColor; text-shadow: none; }
 .btn:disabled { opacity: .5; }
 .error { color: var(--no); font-size: .9rem; min-height: 1.2em; }
 
@@ -202,7 +236,7 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
 
 /* ---------- match modal ---------- */
 .overlay {
-  position: fixed; inset: 0; background: rgba(5, 46, 22, .96); backdrop-filter: blur(6px); z-index: 50;
+  position: fixed; inset: 0; background: rgba(24, 40, 26, .96); backdrop-filter: blur(6px); z-index: 50;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   color: #fff; text-align: center; padding: 24px; gap: 14px;
   animation: fade .25s ease;
@@ -230,7 +264,7 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
 .deck-wrap.is-empty .deck { display: flex; }
 
 /* ---------- edits / re-confirm ---------- */
-.pill.warn, .chip.warn { background: #fef3c7; color: #92400e; border-color: transparent; }
+.pill.warn, .chip.warn { background: var(--warn-pill-bg); color: var(--warn-pill-text); border-color: transparent; }
 .msg.sys.notice { background: var(--surface); border: 1px dashed var(--line); border-radius: 12px; text-align: left; max-width: 90%; }
 .reconfirm {
   background: var(--accent-soft); border-radius: 14px; padding: 12px 14px; margin-bottom: 8px;
@@ -246,9 +280,8 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
   border-radius: 20px 20px 0 0; max-height: 92vh; overflow: auto;
 }
 .sheet .note { color: var(--muted); font-size: .85rem; margin: 0; }
-@media (prefers-color-scheme: dark) { .pill.warn, .chip.warn { background: #78350f; color: #fef3c7; } }
 
-/* ---------- title on a cartoon wooden board ---------- */
+/* ---------- title on an oak plank ---------- */
 /* Bungee by David Jonathan Ross, SIL Open Font License 1.1 (public/fonts/Bungee-OFL.txt). Latin subset, bundled locally. */
 @font-face {
   font-family: 'Bungee';
@@ -258,28 +291,22 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
   src: url(/fonts/bungee-latin.woff2) format('woff2');
 }
 .board {
-  --ink: #3b2110;
-  position: relative; display: inline-block; width: fit-content;
-  padding: .32em 1em .26em;
+  position: relative; isolation: isolate; display: inline-block; width: fit-content;
+  padding: .85em 1.2em .8em; /* tall enough that the board image (about 2.4:1) isn't squashed much */
   font-family: 'Bungee', 'Arial Black', Impact, sans-serif;
   font-weight: 400; line-height: 1; letter-spacing: .03em;
-  color: #fff3d6;
-  -webkit-text-stroke: .07em var(--ink); paint-order: stroke fill;
-  text-shadow: 0 .07em 0 var(--ink);
-  background:
-    /* knot */
-    radial-gradient(ellipse .9em .28em at 74% 68%, #7a4419 0 30%, transparent 32% 48%, rgba(122, 68, 25, .45) 50% 58%, transparent 60%),
-    /* grain */
-    repeating-linear-gradient(177deg, transparent 0 .3em, rgba(110, 60, 20, .22) .3em .36em, transparent .36em .62em, rgba(110, 60, 20, .12) .62em .66em, transparent .66em .95em),
-    linear-gradient(180deg, #e0a05a, #c47d38 55%, #a8652a);
-  border: .09em solid var(--ink);
-  border-radius: .3em .45em .35em .5em / .5em .32em .52em .38em; /* a little wonky */
-  box-shadow:
-    inset 0 .12em 0 rgba(255, 255, 255, .3),
-    inset 0 -.14em 0 rgba(0, 0, 0, .22),
-    .1em .14em 0 var(--ink);
+  /* cream letters, like the buttons, with a dark edge below so they stand off the wood */
+  color: #f6ecda;
+  text-shadow: 0 .06em 0 rgba(40, 18, 5, .7), 0 0 .15em rgba(40, 18, 5, .35);
+  /* the shadow follows the board's outline */
+  filter: drop-shadow(0 .1em .1em rgba(0, 0, 0, .35));
   transform: rotate(-2.5deg);
   user-select: none;
+}
+/* The plank itself, behind the letters: a cartoonified band of grain with worn edges (public/board.webp). */
+.board::before {
+  content: ""; position: absolute; inset: 0; z-index: -1;
+  background: url(/board.webp) center / 100% 100% no-repeat;
 }
 
 /* ---------- rotating post ideas ---------- */
@@ -351,6 +378,7 @@ button.chip { font: inherit; font-size: .82rem; cursor: pointer; }
 .seg-pick input:checked + span { background: var(--accent); color: #fff; font-weight: 700; }
 .seg-pick input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: -2px; }
 .seg-pick input:disabled + span { color: var(--muted); opacity: .5; cursor: not-allowed; }
+#themePick { margin-bottom: 12px; } /* Profile: space before the settings form */
 .audience { display: flex; flex-direction: column; gap: 8px; }
 .audience .filter-row { flex-wrap: wrap; overflow: visible; }
 .filter-row.stacked .label { flex-basis: 100%; text-transform: none; letter-spacing: 0; font-size: .85rem; }
@@ -363,8 +391,7 @@ button.chip { font: inherit; font-size: .82rem; cursor: pointer; }
   background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
   padding: 12px 14px; font-size: .9rem; color: var(--text); line-height: 1.5;
 }
-.notice.warn { background: #fef3c7; border-color: #fcd34d; color: #78350f; }
-@media (prefers-color-scheme: dark) { .notice.warn { background: #451a03; border-color: #92400e; color: #fde68a; } }
+.notice.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn-text); }
 .note { color: var(--muted); font-size: .85rem; margin: 0 0 10px; }
 button.link { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-size: .9rem; cursor: pointer; text-align: left; }
 .chat-head button.link { color: var(--text); font-weight: 700; font-size: 1rem; }
@@ -385,7 +412,7 @@ a.map-link { color: inherit; text-decoration: underline dotted; text-underline-o
 a.chip.map-link { text-decoration: none; color: var(--accent); }
 .map {
   position: relative; height: min(55vh, 420px); overflow: hidden; border-radius: 14px; border: 1px solid var(--line);
-  background: #e5e3df; touch-action: none; user-select: none; cursor: grab;
+  background: #e6e0d4; touch-action: none; user-select: none; cursor: grab;
 }
 .map:active { cursor: grabbing; }
 .map:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -393,7 +420,7 @@ a.chip.map-link { text-decoration: none; color: var(--accent); }
 .map .pin { position: absolute; left: 0; top: 0; width: 36px; height: 36px; margin: -34px 0 0 -18px; pointer-events: none; }
 .map .pin svg { display: block; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .35)); }
 .map-zoom { position: absolute; right: 8px; top: 8px; display: flex; flex-direction: column; gap: 4px; }
-.map-zoom .btn { background: var(--surface); min-width: 36px; font-size: 1.1rem; }
+.map-zoom .btn { background: var(--surface); color: var(--text); border-color: var(--wood-line); text-shadow: none; min-width: 36px; font-size: 1.1rem; }
 .map-credit { position: absolute; right: 0; bottom: 0; background: rgba(255,255,255,.8); color: #333; font-size: .7rem; padding: 1px 6px; }
 .map-credit a { color: inherit; }
 .map-status { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-variant-numeric: tabular-nums; }

@@ -3,28 +3,39 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#16a34a">
+  <meta name="theme-color" content="#2f6b3a">
   <meta name="description" content="Bored? is an app to make life more fun. Find people to do things with, near you. Free, open source, ad-free, and it never asks who you are.">
   <title>Bored? Make life more fun</title>
   <link rel="preload" href="/fonts/bungee-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="manifest" href="/manifest.webmanifest">
   <script src="/landing.js"></script>
+  <script src="/theme.js"></script>
+  <script type="module" src="/about.js"></script>
   <style>
     :root {
-      --bg: #f6f5f1; --surface: #ffffff; --text: #1c1917; --muted: #78716c; --line: #e7e5e4;
-      --accent: #16a34a; --accent-ink: #ffffff; --accent-soft: #dcfce7; --accent-text: #15803d;
-      --shadow: 0 10px 30px rgba(28, 25, 23, .12);
+      --bg: #f2eee5; --surface: #fffcf6; --text: #2b2219; --muted: #776a5a; --line: #e2d9c9;
+      --accent: #2f6b3a; --accent-ink: #ffffff; --accent-soft: #e0e9d5; --accent-text: #2a5f33;
+      --shadow: 0 10px 30px rgba(43, 34, 25, .12); --wood-line: #934e23;
       color-scheme: light dark;
     }
+    /* Dark: when the device asks for it (theme "automatic"), or when chosen (public/theme.js). */
     @media (prefers-color-scheme: dark) {
-      :root {
-        --bg: #12110f; --surface: #1f1d1a; --text: #f5f5f4; --muted: #a8a29e; --line: #2f2c28;
-        --accent-soft: #14532d; --accent-text: #4ade80; --shadow: 0 10px 30px rgba(0, 0, 0, .5);
+      :root:not([data-theme="light"]) {
+        --bg: #14110d; --surface: #211c16; --text: #f0e9dd; --muted: #a69885; --line: #362e25;
+        --accent: #4e9258; --accent-soft: #24382a; --accent-text: #8cc293; --shadow: 0 10px 30px rgba(0, 0, 0, .5); --wood-line: #a75e25;
+        color-scheme: dark;
       }
     }
+    :root[data-theme="dark"] {
+      --bg: #14110d; --surface: #211c16; --text: #f0e9dd; --muted: #a69885; --line: #362e25;
+      --accent: #4e9258; --accent-soft: #24382a; --accent-text: #8cc293; --shadow: 0 10px 30px rgba(0, 0, 0, .5); --wood-line: #a75e25;
+      color-scheme: dark;
+    }
+    :root[data-theme="light"] { color-scheme: light; }
     * { box-sizing: border-box; }
     html, body { margin: 0; }
+    body { overflow-x: clip; } /* a swiped card flies off the side without making the page scroll sideways */
     body {
       font: 17px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
       background: var(--bg); color: var(--text);
@@ -40,35 +51,45 @@
     .muted { color: var(--muted); }
     .lede { font-size: 1.15rem; }
 
-    /* Title on a cartoon wooden board, same as the app (public/style.css). */
+    /* Title on an oak plank, same as the app (public/style.css). */
     @font-face {
       font-family: 'Bungee'; font-style: normal; font-weight: 400; font-display: swap;
       src: url(/fonts/bungee-latin.woff2) format('woff2');
     }
     .board {
-      --ink: #3b2110;
-      display: inline-block; padding: .32em 1em .26em;
-      font-family: 'Bungee', 'Arial Black', Impact, sans-serif; font-weight: 400; line-height: 1; letter-spacing: .03em;
-      color: #fff3d6; -webkit-text-stroke: .07em var(--ink); paint-order: stroke fill; text-shadow: 0 .07em 0 var(--ink);
-      background:
-        radial-gradient(ellipse .9em .28em at 74% 68%, #7a4419 0 30%, transparent 32% 48%, rgba(122, 68, 25, .45) 50% 58%, transparent 60%),
-        repeating-linear-gradient(177deg, transparent 0 .3em, rgba(110, 60, 20, .22) .3em .36em, transparent .36em .62em, rgba(110, 60, 20, .12) .62em .66em, transparent .66em .95em),
-        linear-gradient(180deg, #e0a05a, #c47d38 55%, #a8652a);
-      border: .09em solid var(--ink);
-      border-radius: .3em .45em .35em .5em / .5em .32em .52em .38em;
-      box-shadow: inset 0 .12em 0 rgba(255, 255, 255, .3), inset 0 -.14em 0 rgba(0, 0, 0, .22), .1em .14em 0 var(--ink);
-      transform: rotate(-2.5deg); user-select: none;
+      position: relative; isolation: isolate; display: inline-block; width: fit-content;
+      padding: .85em 1.2em .8em; /* tall enough that the board image (about 2.4:1) isn't squashed much */
+      font-family: 'Bungee', 'Arial Black', Impact, sans-serif;
+      font-weight: 400; line-height: 1; letter-spacing: .03em;
+      /* cream letters, like the buttons, with a dark edge below so they stand off the wood */
+      color: #f6ecda;
+      text-shadow: 0 .06em 0 rgba(40, 18, 5, .7), 0 0 .15em rgba(40, 18, 5, .35);
+      /* the shadow follows the board's outline */
+      filter: drop-shadow(0 .1em .1em rgba(0, 0, 0, .35));
+      transform: rotate(-2.5deg);
+      user-select: none;
+    }
+    /* The plank itself, behind the letters: a cartoonified band of grain with worn edges (public/board.webp). */
+    .board::before {
+      content: ""; position: absolute; inset: 0; z-index: -1;
+      background: url(/board.webp) center / 100% 100% no-repeat;
     }
 
     /* ---------- top bar ---------- */
-    .bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 0; }
-    .bar .board { font-size: 1.3rem; }
-    .btn {
-      display: inline-block; text-decoration: none; font-weight: 700; border-radius: 999px;
-      padding: 12px 22px; background: var(--accent); color: var(--accent-ink); border: 2px solid var(--accent);
+    /* The title board spans almost the whole width, like in the app. */
+    .bar { display: flex; flex-direction: column; padding: 20px 0 8px; }
+    .bar .board {
+      display: block; width: 97%; align-self: center; text-align: center;
+      font-size: clamp(2rem, 9vw, 4.2rem); transform: rotate(-1.2deg);
     }
-    .btn.ghost { background: transparent; color: var(--text); border-color: var(--line); }
-    .btn.small { padding: 7px 14px; font-size: .9rem; }
+    /* the board's wood brown and dark outline, lettered in Bungee (same as the app's buttons, public/style.css) */
+    .btn {
+      display: inline-block; text-decoration: none; border: 1.5px solid #472610; border-radius: 6px; padding: 12px 20px;
+      font-family: 'Bungee', 'Arial Black', Impact, sans-serif; font-weight: 400; font-size: .95rem; letter-spacing: .04em;
+      background: linear-gradient(180deg, #a05a28, #8a4720); color: #f6ecda; text-shadow: 0 1px 0 rgba(40, 18, 5, .5);
+    }
+    .btn.ghost { background: transparent; color: var(--text); border-color: var(--wood-line); text-shadow: none; }
+    .btn.small { padding: 7px 12px; font-size: .78rem; }
     .btn:focus-visible { outline: 3px solid var(--accent-text); outline-offset: 3px; }
 
     /* ---------- hero ---------- */
@@ -80,25 +101,45 @@
     /* A little swipe deck, drawn in CSS */
     .deck { position: relative; height: 360px; max-width: 340px; width: 100%; margin: 0 auto; }
     .card {
-      position: absolute; inset: 0; background: var(--surface); border: 1px solid var(--line); border-radius: 20px;
-      box-shadow: var(--shadow); padding: 22px; display: flex; flex-direction: column;
+      position: absolute; inset: 0;
+      /* the same brown and dark outline as the buttons and the title board */
+      --text: #f6ecda; --muted: #f0dcc0; --line: rgba(255, 236, 210, .25); --bg: rgba(40, 18, 5, .22);
+      --accent: #d8eebd; --accent-soft: rgba(40, 18, 5, .28); --yes: #cdeab0; --no: #ffc2a8; --wood-line: #f0dcc0;
+      color: var(--text);
+      background: linear-gradient(180deg, #a05a28, #8a4720);
+      border: 1.5px solid #472610;
+      --accent-text: #d8eebd;
+      border-radius: 12px; box-shadow: var(--shadow); padding: 22px; display: flex; flex-direction: column;
     }
     .card.back2 { transform: rotate(-7deg) translate(-14px, 10px); }
     .card.back1 { transform: rotate(4deg) translate(10px, 4px); }
-    .card.front { transform: rotate(-1.5deg); }
+    .card.front {
+      transform: rotate(-1.5deg); cursor: grab; user-select: none;
+      touch-action: pan-y; /* horizontal drags swipe the card; vertical ones still scroll the page */
+      transition: transform .25s ease;
+    }
+    .card.front.dragging { transition: none; cursor: grabbing; }
+    .card.front:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
     .card .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
     .chip { font-size: .78rem; font-weight: 600; background: var(--accent-soft); color: var(--accent-text); padding: 3px 10px; border-radius: 999px; }
     .card h3 { font-size: 1.35rem; margin-bottom: 8px; }
     .card .meta { color: var(--muted); font-size: .92rem; margin: 0 0 4px; }
     .card .swipe { margin-top: auto; display: flex; justify-content: space-between; gap: 10px; }
-    .card .swipe span { flex: 1; text-align: center; border-radius: 999px; padding: 10px; font-weight: 700; font-size: .95rem; }
-    .card .no { border: 2px solid var(--line); color: var(--muted); }
-    .card .yes { background: var(--accent); color: var(--accent-ink); }
+    .card .swipe button {
+      cursor: pointer; background: transparent; color: inherit;
+      flex: 1; text-align: center; border-radius: 6px; padding: 10px; border: 1.5px solid var(--wood-line);
+      font-family: 'Bungee', 'Arial Black', Impact, sans-serif; font-size: .82rem; letter-spacing: .04em;
+    }
+    .card .swipe .no { color: var(--text); }
+    .card .swipe .yes { background: #f6ecda; border-color: #472610; color: #3d220e; }
+    .card .swipe button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+    /* stamps fade in as the card is dragged (public/about.js): "I'm in!" to the right, "Nah" to the left */
     .stamp {
-      position: absolute; top: 26px; right: 18px; transform: rotate(12deg);
+      position: absolute; top: 26px; right: 18px; transform: rotate(12deg); opacity: 0; pointer-events: none;
       border: 3px solid var(--accent); color: var(--accent-text); border-radius: 8px; padding: 2px 10px;
       font-family: 'Bungee', 'Arial Black', sans-serif; font-size: 1.05rem; letter-spacing: .04em;
     }
+    .stamp.no { right: auto; left: 18px; transform: rotate(-12deg); border-color: var(--no); color: var(--no); }
 
     /* ---------- who it's for ---------- */
     .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
@@ -107,14 +148,17 @@
 
     /* ---------- how it works ---------- */
     ol.steps { list-style: none; padding: 0; margin: 0; counter-reset: step; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
-    ol.steps li { counter-increment: step; position: relative; padding-top: 44px; }
+    /* the number and the heading share a line; the text runs underneath */
+    ol.steps li { counter-increment: step; display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 8px 12px; }
     ol.steps li::before {
-      content: counter(step); position: absolute; top: 0; left: 0; width: 34px; height: 34px; border-radius: 50%;
+      content: counter(step); width: 34px; height: 34px; border-radius: 50%;
       display: grid; place-items: center; background: var(--accent); color: var(--accent-ink); font-weight: 800;
     }
-    ol.steps p { color: var(--muted); font-size: .97rem; margin: 0; }
+    ol.steps h3 { margin: 0; }
+    ol.steps p { grid-column: 1 / -1; color: var(--muted); font-size: .97rem; margin: 0; }
 
     /* ---------- why not ---------- */
+    .narrow p { max-width: 65ch; } /* comfortable line length for the text-only sections */
     .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; align-items: start; }
     .others { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
     .others li { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 16px; }
@@ -134,7 +178,11 @@
 
     /* ---------- closer ---------- */
     .closer { text-align: center; padding: 72px 0; }
-    .closer .board { font-size: clamp(1.4rem, 5vw, 2.4rem); margin-bottom: 28px; transform: rotate(-1.5deg); }
+    /* the same lettering as the logo, without the board: only the logo gets that */
+    .closer .slogan {
+      font-family: 'Bungee', 'Arial Black', Impact, sans-serif; font-weight: 400; line-height: 1; letter-spacing: .03em;
+      font-size: clamp(1.4rem, 5vw, 2.4rem); margin-bottom: 28px; color: var(--text);
+    }
     footer { border-top: 1px solid var(--line); padding: 24px 0 calc(24px + env(safe-area-inset-bottom)); font-size: .9rem; color: var(--muted); }
     footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; }
 
@@ -150,7 +198,6 @@
   <div class="wrap">
     <header class="bar">
       <span class="board" aria-label="Bored?">Bored?</span>
-      <a class="btn small" href="/?start">Open the app</a>
     </header>
 
     <div class="hero">
@@ -158,12 +205,8 @@
         <h1>Bored is an app to make life <em>more fun.</em></h1>
         <p class="lede">Want to do something? Post it. Neighbors who are in say so. Saw something you'd join? Swipe right. When both sides say yes, it's on.</p>
         <p class="muted">Free. Open source. No ads. No email, phone number, or photos, ever.</p>
-        <div class="cta">
-          <a class="btn" href="/?start">Find something to do</a>
-          <a class="btn ghost" href="#why-not">Why not just use Meetup?</a>
-        </div>
       </div>
-      <div class="deck" aria-hidden="true">
+      <div class="deck" aria-hidden="true"><!-- filled in by public/about.js; this card shows until then -->
         <div class="card back2"></div>
         <div class="card back1"></div>
         <div class="card front">
@@ -172,8 +215,7 @@
           <p class="meta">Saturday, 10:00</p>
           <p class="meta">Riverside Park, east lawn</p>
           <p class="meta">3 of 10 spots taken</p>
-          <div class="swipe"><span class="no">Nah</span><span class="yes">I'm in</span></div>
-          <span class="stamp">I'm in!</span>
+          <div class="swipe"><button type="button" class="no" tabindex="-1">Nah</button><button type="button" class="yes" tabindex="-1">I'm in</button></div>
         </div>
       </div>
     </div>
@@ -207,21 +249,31 @@
   <section id="why-not">
     <div class="wrap compare">
       <div>
-        <h2>Why not use Meetup?</h2>
-        <p>Meetup is alright, but it's a business. Its goal is to make money.</p>
-        <p>It doesn't value your privacy: you are the product. Many features are behind a paywall. Starting a group costs money. Joining one often means waiting for permission.</p>
-        <h2 style="margin-top:40px">Or any of the others?</h2>
-        <p>The answer is roughly the same for all of them. They're businesses that make money from ads, subscriptions, or fees, and they want to know who you are: your name, your face, your phone number, your address.</p>
+        <h2>What's wrong with other event sites?</h2>
+        <p>They're businesses. They make money from ads, subscriptions, ticket fees, or investors who expect a return, and most of them want to know who you are: your name, your face, your email, your phone number, your address.</p>
         <p>Bored doesn't, because Bored isn't a business.</p>
       </div>
       <ul class="others">
+        <li><b>Meetup</b><span>Organizers pay a subscription to run a group, members are offered a paid Meetup+ tier, and organizers can make you wait for approval or require a profile photo to join.</span></li>
         <li><b>Facebook Groups &amp; Events</b><span>Real-name profiles, paid for by ads built on what you do.</span></li>
+        <li><b>Eventbrite</b><span>Built for selling tickets, not for meeting people, with fees added to paid tickets.</span></li>
+        <li><b>Evite</b><span>Free invitations come with ads. Ad-free designs cost extra.</span></li>
+        <li><b>Paperless Post</b><span>Premium designs cost “Coins” you buy, and you need an account to send.</span></li>
+        <li><b>Partiful</b><span>Built around your phone number. Backed by venture capital.</span></li>
+        <li><b>Luma</b><span>Takes 5% of paid tickets unless the host pays for a Luma Plus subscription.</span></li>
         <li><b>Bumble For Friends</b><span>Profile photos up front, with paid upgrades for more.</span></li>
         <li><b>Nextdoor</b><span>Wants to verify your home address. Ad-supported.</span></li>
-        <li><b>Peanut</b><span>Photo profiles for parents, with a paid subscription tier.</span></li>
-        <li><b>Timeleft</b><span>Dinner with strangers, if you pay for a ticket or membership.</span></li>
-        <li><b>Eventbrite</b><span>Built for selling tickets, not for meeting people.</span></li>
+        <li><b>Peanut</b><span>Photo profiles and selfie verification for moms, with a paid Peanut Plus tier.</span></li>
+        <li><b>Timeleft</b><span>Dinner with strangers, for a membership or ticket fee on top of your meal.</span></li>
       </ul>
+    </div>
+  </section>
+
+  <section>
+    <div class="wrap narrow">
+      <h2>Can't I just text my friends if I want to hang out with them?</h2>
+      <p>You can, but if you texted all your friends every time you wanted to do any little thing, you'd probably overwhelm them and get left on read.</p>
+      <p>With Bored, you post it once. Whoever's up for it says so, and nobody else gets pestered. You can still keep it to people you know: share a post with just your contacts.</p>
     </div>
   </section>
 
@@ -242,9 +294,17 @@
     </div>
   </section>
 
+  <section>
+    <div class="wrap narrow">
+      <h2>How can Bored keep these promises?</h2>
+      <p>Bored is very lightweight. It doesn't store photos or use much network bandwidth, so it costs almost nothing to run.</p>
+      <p>It was made with passion, by people for people, not by a corporation for profit.</p>
+    </div>
+  </section>
+
   <section class="closer">
     <div class="wrap">
-      <div class="board">Touch grass.</div>
+      <div class="slogan">Touch grass.</div>
       <p class="lede">Get outside. Be social. Make life more fun.</p>
       <div class="cta" style="justify-content:center">
         <a class="btn" href="/?start">Open Bored</a>

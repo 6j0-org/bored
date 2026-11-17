@@ -1578,6 +1578,10 @@ async function viewProfile(v) {
     <div class="stack" id="pushSettings"></div>
 
     <div class="section-title">Settings</div>
+    <fieldset class="seg-pick" id="themePick"><legend>Theme (on this device)</legend><div class="seg">
+      ${[['auto', 'Automatic'], ['light', 'Light'], ['dark', 'Dark']].map(([value, label]) =>
+        `<label><input type="radio" name="theme" value="${value}" ${(window.boredTheme?.get() || 'auto') === value ? 'checked' : ''}><span>${label}</span></label>`).join('')}
+    </div></fieldset>
     <form class="stack" id="prefsForm">
       <label>Distance units
         <select name="distanceUnit">
@@ -1649,6 +1653,8 @@ async function viewProfile(v) {
     } catch (err) { toast(err.message); }
   });
   drawPushSettings(v.querySelector('#pushSettings'));
+  // The theme stays on this device (public/theme.js), unlike the settings below, which are saved in your vault.
+  v.querySelector('#themePick').addEventListener('change', (e) => window.boredTheme?.set(e.target.value));
   v.querySelector('#prefsForm').addEventListener('change', async (e) => {
     const { distanceUnit } = formData(e.currentTarget);
     try { await vault.update(api, (d) => { d.prefs = { ...d.prefs, distanceUnit }; }); toast('Saved'); }

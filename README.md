@@ -132,13 +132,18 @@ A post stays in the deck until it reaches its max attendees. Posts with no limit
 - `webauthn.js`: passkey registration/sign-in verification (no dependencies)
 - `idtoken.js`: verifies sign-in tokens from a 6j0.org identity server (`AUTH_MODE=6j0`)
 - `db.js`: SQLite schema, tag helpers
-- `public/about.html`, `public/landing.js`: the introduction page, shown at `/` on a first visit
+- `public/about.html`, `public/landing.js`, `public/about.js`: the introduction page, shown at `/` on a first visit, with a
+  swipeable deck of example posts
+- `public/examples.js`: the example posts, shared by that deck and the demo (`demo.js`)
 - `public/app.js`: single-page front-end (vanilla JS, swipe deck with pointer/touch/keyboard)
 - `public/secure.js`: passkeys + PRF, 6j0.org identity handoff, encrypted vault, key storage, E2E chat crypto
 - `public/location.js`: "lat,lon" locations, links to the viewer's maps app, and a small OpenStreetMap pin picker
+- `public/theme.js`: the automatic / light / dark theme switch, applied before the page draws
+- `public/board.webp`: the wooden board behind the Bored? title
 - `public/when.js`, `public/cost.js`: event time (with repeat rules) and cost formats, shared by server and browser
 - `public/fonts/`: bundled Bungee title font (SIL OFL 1.1, license alongside). The app loads nothing from outside its own server, except OpenStreetMap tiles while the location picker is open. Suggested place names come from OpenStreetMap's Nominatim, asked by the server (`/api/places/reverse`).
-- `seed.js`: demo data
+- `demo.js`: demo accounts and posts, and the ready-made account each visitor gets in demo mode (`DEMO=1`)
+- `seed.js`: adds the demo accounts and posts to a real database (`npm run seed`)
 - `TODO.md`: open security and privacy issues, by priority
 
 ## License

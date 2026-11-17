@@ -251,6 +251,16 @@ export async function finishIdSignIn(api) {
   return res;
 }
 
+// ---------- demo mode (server DEMO=1) ----------
+// No sign-in: a new account with a random key-encryption key that's thrown away (the server ignores the wrapped key).
+// The keys stay in IndexedDB like after any sign-in; once they're gone, the browser starts over with a new account.
+export async function createDemoAccount(api) {
+  const kek = await subtle.generateKey({ name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+  const res = await registerAccount(api, '/api/demo/register', kek, {});
+  vault.reset({ data: null, version: 0 });
+  return res;
+}
+
 // Add another passkey: unlock the vault key with an existing passkey, create the new one, wrap the key for it.
 export async function addPasskey(api, nextStep) {
   const opts = await api('/api/passkey/add/options', { method: 'POST' });

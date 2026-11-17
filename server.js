@@ -6,7 +6,8 @@ import { verifyIdToken, IdTokenError } from './idtoken.js';
 import { composeWhen, whenLabel, occursBetween } from './public/when.js';
 import { parseCost, costLabel } from './public/cost.js';
 import { vapidPublicKey, validEndpoint, sendPush } from './push.js';
-import { db, parseTags, setEventTags, MAX_TAGS, MAX_ATTENDEES_LIMIT, MAX_VIEWERS } from './db.js';
+import { db, DEMO, parseTags, setEventTags, MAX_TAGS, MAX_ATTENDEES_LIMIT, MAX_VIEWERS } from './db.js';
+import { seedDemo, seedVisitor, isDemoGuid, demoHostReply, pruneVisitors } from './demo.js';
 
 const PORT = Number(process.env.PORT || 3000);
 // Passkeys are bound to an origin. Defaults to whatever host the browser used (fine for localhost);
@@ -22,8 +23,11 @@ const MAX_SEALED = 200 * 1024; // max size of one encrypted blob (vault, key) in
 //   identity server's APPS list (default "bored"). ID_JWKS_URL overrides where its public keys are fetched from
 //   (default ID_ORIGIN + /.well-known/jwks.json), e.g. an in-cluster Service URL.
 // The two modes have separate accounts: switching a running instance from one to the other strands existing users.
-const AUTH_MODE = process.env.AUTH_MODE || 'local';
-if (!['local', '6j0'].includes(AUTH_MODE)) throw new Error(`AUTH_MODE must be "local" or "6j0", not "${AUTH_MODE}"`);
+// - DEMO=1 overrides both with "demo": no sign-in at all. Each browser gets its own throwaway account, filled with
+//   demo content (demo.js), in an in-memory database (db.js). For trying the app out, never for real use.
+if (DEMO && process.env.AUTH_MODE) console.warn(`DEMO=1: ignoring AUTH_MODE=${process.env.AUTH_MODE}`);
+const AUTH_MODE = DEMO ? 'demo' : process.env.AUTH_MODE || 'local';
+if (!['local', '6j0', 'demo'].includes(AUTH_MODE)) throw new Error(`AUTH_MODE must be "local" or "6j0", not "${AUTH_MODE}"`);
 const ID = AUTH_MODE === '6j0' ? (() => {
   const origin = process.env.ID_ORIGIN;
   if (!origin || new URL(origin).origin !== origin) throw new Error('AUTH_MODE=6j0 needs ID_ORIGIN, e.g. https://id.6j0.org');
@@ -319,7 +323,7 @@ const quoted = (title) => `“${String(title).slice(0, 60)}”`;
 
 const routes = [];
 // auth: true (must be signed in) | false (no user) | 'optional' (user if signed in, else null)
-// mode: only register the route in this AUTH_MODE ('local' | '6j0'); default: always.
+// mode: only register the route in this AUTH_MODE ('local' | '6j0' | 'demo'); default: always.
 const route = (method, pattern, handler, { auth = true, mode } = {}) => {
   if (mode && mode !== AUTH_MODE) return;
   const keys = [];
@@ -458,6 +462,22 @@ route('POST', '/api/id/register', async ({ body, res }) => {
   send(res, 200, { user: publicUser(user) }, newSession(res, userId));
 }, { auth: false, mode: '6j0' });
 
+// ---------- demo mode (DEMO=1) ----------
+// No sign-in: the browser makes its keys and vault as usual (public/secure.js), and gets a fresh account already
+// filled with demo content, plus nicknames for the demo accounts to save in its vault.
+const MAX_DEMO_VISITORS = 5000;
+route('POST', '/api/demo/register', async ({ body, res }) => {
+  const fields = { pub: chatPubkey(body.chatPubkey), priv: sealed(body.chatPrivkey, 'chat key'), vault: sealed(body.vault, 'vault') };
+  if (q('SELECT COUNT(*) n FROM users').get().n > MAX_DEMO_VISITORS) throw new HttpError(503, 'The demo is full right now. Please try again later.');
+  const { userId, names } = tx(() => {
+    const userId = Number(q('INSERT INTO users (guid, chat_pubkey, chat_privkey, vault) VALUES (?, ?, ?, ?)')
+      .run(randomUUID(), fields.pub, fields.priv, fields.vault).lastInsertRowid);
+    return { userId, names: seedVisitor(userId) };
+  });
+  const user = q('SELECT * FROM users WHERE id = ?').get(userId);
+  send(res, 200, { user: publicUser(user), names }, newSession(res, userId));
+}, { auth: false, mode: 'demo' });
+
 // ---------- encrypted vault (contacts, nicknames) ----------
 route('GET', '/api/vault', async ({ user, res }) => {
   send(res, 200, { data: user.vault, version: user.vault_version });
@@ -593,6 +613,18 @@ route('POST', '/api/events/:id/swipe', async ({ user, params, body, res }) => {
      ON CONFLICT(event_id, attendee_id) DO NOTHING`)
     .run(event.id, user.id, yes, str(body.note, 280, { field: 'Note' }), yes ? 'pending' : 'declined');
   if (yes && r.changes) notify(event.host_id, { body: `Someone wants to join ${quoted(event.title)}`, tag: 'confirm', open: 'confirm' });
+  // Demo mode: demo accounts say yes right away, so a visitor sees a match happen.
+  const host = DEMO && yes && r.changes && q('SELECT guid FROM users WHERE id = ?').get(event.host_id);
+  if (host && isDemoGuid(host.guid)) {
+    const swipeId = Number(r.lastInsertRowid);
+    const accepted = tx(() => {
+      const full = isFull(event);
+      q('UPDATE swipes SET status = ? WHERE id = ?').run(full ? 'waitlisted' : 'accepted', swipeId);
+      syncEventStatus(event.id);
+      return !full;
+    });
+    if (accepted) demoHostReply(swipeId, user, host.guid);
+  }
   send(res, 200, { ok: true });
 });
 
@@ -1075,4 +1107,8 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
-server.listen(PORT, () => console.log(`Bored? → http://localhost:${PORT}`));
+if (DEMO) {
+  seedDemo();
+  setInterval(pruneVisitors, 60 * 60 * 1000).unref();
+}
+server.listen(PORT, () => console.log(`Bored? → http://localhost:${PORT}${DEMO ? ' (demo: no sign-in, nothing is saved)' : ''}`));

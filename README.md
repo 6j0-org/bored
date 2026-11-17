@@ -18,6 +18,16 @@ npm run seed   # optional: demo posts from demo accounts (they have no passkeys,
 npm start      # http://localhost:3000
 ```
 
+### Demo mode
+
+`DEMO=1 npm start` runs a throwaway demo with no sign-in. Each browser automatically gets its own account,
+already filled in: demo posts in **Discover**, two requests to join a hike in **Confirm**, two plans with chats in
+**Plans**, and a past event in **Profile**. Demo hosts say yes as soon as you swipe right on their posts. "Start
+over" in Profile gives a fresh account. No passkey or PRF support is needed.
+
+Everything is kept in memory (`DB_PATH` and `AUTH_MODE` are ignored), so it all resets when the server stops, and
+visitor accounts are deleted after a day. It's for trying the app out and showing it to people, never for real use.
+
 On a first visit, `/` shows the introduction page (`public/about.html`). Its links go to `/?start`, which sets a
 `seen=1` cookie (no ID, nothing about the person) and redirects to the app at `/`. Browsers with that cookie or a
 session always get the app. Links with a URL fragment (invitations, sign-in tokens from a 6j0.org identity server)
@@ -33,7 +43,7 @@ otherwise.
 Env vars: `PORT` (default 3000), `DB_PATH` (default `./data.sqlite`), `ORIGIN` (e.g. `https://bored.example`; required
 behind HTTPS/proxies, passkeys are bound to it; also turns on `Secure` cookies), `RP_ID` (passkey domain; defaults to
 the `ORIGIN` hostname), `VAPID_SUBJECT` (a `mailto:` or `https:` contact for push services; defaults to `ORIGIN`),
-`PUSH_HOSTS` (extra push service hostnames to allow, comma-separated).
+`PUSH_HOSTS` (extra push service hostnames to allow, comma-separated), `DEMO` (`1` for [demo mode](#demo-mode)).
 
 ### Notifications
 

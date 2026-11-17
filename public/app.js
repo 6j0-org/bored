@@ -1,7 +1,7 @@
 // Bored? — vanilla JS front-end.
 import {
   prfSupport, createAccount, signIn, addPasskey, loadKeys, clearKeys, hasKeys, vault,
-  encryptMessage, decryptMessage, PrfUnsupportedError, startIdSignIn, finishIdSignIn, hasIdCallback,
+  encryptMessage, decryptMessage, PrfUnsupportedError, startIdSignIn, finishIdSignIn, hasIdCallback, createDemoAccount,
   newInviteKey, sealForInvite, openForInvite, sha1Hex, b64u,
 } from './secure.js';
 import { locationHtml, mountLocationField, pickLocation, PIN_SVG } from './location.js';
@@ -181,7 +181,8 @@ const POST_IDEAS = [
 ];
 const POST_IDEA_MS = 5000;
 
-// config.authMode: 'local' (Bored? passkeys) | '6j0' (sign in with a 6j0.org identity at config.idOrigin).
+// config.authMode: 'local' (Bored? passkeys) | '6j0' (sign in with a 6j0.org identity at config.idOrigin)
+//   | 'demo' (server DEMO=1: no sign-in; every browser gets its own throwaway account full of demo content).
 const state = { config: { authMode: 'local' }, me: null, tab: 'discover', chat: null, discoverTags: loadSet('discoverTags'), discoverCosts: new Set([...loadSet('discoverCosts')].filter(c => c in COST_FILTERS)),
   discoverDate: (() => { try { const d = localStorage.getItem('discoverDate'); return d in DATE_FILTERS ? d : ''; } catch { return ''; } })(),
   discoverNear: (() => { const n = loadJson('discoverNear', null); return n && Number.isFinite(n.lat) && Number.isFinite(n.lon) ? n : null; })(),
@@ -716,7 +717,18 @@ async function signOut() {
   try { await api('/api/logout', { method: 'POST' }); } catch {}
   await clearKeys();
   state.me = null; state.tab = 'discover'; state.chat = null;
+  if (isDemo()) return startDemo();
   render();
+}
+
+// Demo mode: a fresh account with demo posts, requests, plans, and chats, and nicknames for the demo people.
+const isDemo = () => state.config.authMode === 'demo';
+async function startDemo() {
+  const res = await createDemoAccount(api);
+  await refreshMe();
+  await vault.load(api);
+  await addContacts(Object.keys(res.names || {}), res.names);
+  await enterApp('discover');
 }
 
 // Where a post happens, as HTML: its place (linked to the map), "Online", or both ("City Hall and online").
@@ -1541,7 +1553,7 @@ function openContactSheet(guid, onSaved) {
 async function viewProfile(v) {
   const idMode = state.config.authMode === '6j0';
   await syncConnections();
-  const [ledger, passkeys, invites] = await Promise.all([api('/api/ledger'), idMode ? [] : api('/api/passkeys'), api('/api/invites')]);
+  const [ledger, passkeys, invites] = await Promise.all([api('/api/ledger'), idMode || isDemo() ? [] : api('/api/passkeys'), api('/api/invites')]);
   const me = state.me;
   const history = Object.fromEntries(ledger.map(l => [l.guid, l]));
   const contacts = Object.entries(vault.data.contacts).map(([guid, c]) => ({ guid, ...c, ...(history[guid] || {}) }))
@@ -1601,7 +1613,10 @@ async function viewProfile(v) {
         : `<p style="color:var(--muted)">${contacts.length ? 'No contacts with those tags.' : "Once you match with someone, they'll show up here for you to name and tag."}</p>`}
     </div>
 
-    ${idMode ? `<div class="section-title">Sign-in</div>
+    ${isDemo() ? `<div class="section-title">Demo</div>
+    <div class="notice">This is a demo account, made just for this browser. It's deleted after a day, and everything
+      resets when the server restarts. Start over to get a fresh account with the demo content back.</div>`
+    : idMode ? `<div class="section-title">Sign-in</div>
     <div class="notice">You sign in with your 6j0.org identity. Manage your passkeys and password at
       <a href="${esc(state.config.idOrigin)}/">${esc(idHost())}</a>. Keep at least two ways to sign in, so losing one doesn't lose your account.</div>` : `
     <div class="section-title">Passkeys</div>
@@ -1615,7 +1630,7 @@ async function viewProfile(v) {
     </div>
     <button class="btn ghost" id="addKey">Add another passkey</button>`}
 
-    <button class="btn danger" id="logout" style="margin-top:24px">Sign out</button>
+    <button class="btn danger" id="logout" style="margin-top:24px">${isDemo() ? 'Start over' : 'Sign out'}</button>
     ${ABOUT_LINKS}`;
 
   v.querySelector('#newInvite').addEventListener('click', createInvite);
@@ -1689,6 +1704,10 @@ if (state.config.authMode === '6j0' && hasIdCallback()) {
   await refreshMe();
   if (state.me && await loadKeys(state.me.guid)) {
     try { await vault.load(api); await syncConnections(); } catch { await clearKeys(); }
+  }
+  // Demo mode: nobody signs in. Without a usable account in this browser, make a new one.
+  if (isDemo() && !(state.me && hasKeys())) {
+    try { if (state.me) await api('/api/logout', { method: 'POST' }); await startDemo(); } catch (e) { toast(e.message); }
   }
   render();
   offerPendingInvite();

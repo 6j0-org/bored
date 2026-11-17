@@ -1,6 +1,9 @@
 import { DatabaseSync } from 'node:sqlite';
 
-export const db = new DatabaseSync(process.env.DB_PATH || new URL('./data.sqlite', import.meta.url).pathname);
+// DEMO=1 runs a throwaway demo site (see demo.js): an in-memory database, ignoring DB_PATH, so demo accounts and
+// demo content never land in a real database. Everything is gone when the server stops.
+export const DEMO = /^(1|true|yes|on)$/i.test(process.env.DEMO || '');
+export const db = new DatabaseSync(DEMO ? ':memory:' : process.env.DB_PATH || new URL('./data.sqlite', import.meta.url).pathname);
 
 db.exec(`
 PRAGMA journal_mode = WAL;

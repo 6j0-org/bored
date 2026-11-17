@@ -1390,7 +1390,7 @@ function openPostSheet(t = {}) {
       </div>
     </form>`;
   document.body.appendChild(sheet);
-  sheet.querySelectorAll('.tag-editor').forEach(mountTagEditor);
+  sheet.querySelectorAll('.tag-editor').forEach(el => mountTagEditor(el));
   mountAudience(sheet.querySelector('form'));
   mountLocationField(sheet.querySelector('form'));
   mountWhenFields(sheet.querySelector('form'));
@@ -1475,7 +1475,7 @@ async function viewPost(v) {
         </div>`).join('') : `<p style="color:var(--muted)">Nothing yet. What would you like to host?</p>`}
     </div>`;
   rotatePostIdeas(v.querySelector('#postIdea'));
-  v.querySelectorAll('.tag-editor').forEach(mountTagEditor);
+  v.querySelectorAll('.tag-editor').forEach(el => mountTagEditor(el));
   mountAudience(v.querySelector('#newEvent'));
   mountLocationField(v.querySelector('#newEvent'));
   mountWhenFields(v.querySelector('#newEvent'));

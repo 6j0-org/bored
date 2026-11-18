@@ -1041,7 +1041,8 @@ const STATIC = {
   '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/secure.js': 'secure.js', '/style.css': 'style.css', '/location.js': 'location.js', '/when.js': 'when.js', '/cost.js': 'cost.js', '/ics.js': 'ics.js',
   '/about': 'about.html', '/about.html': 'about.html', '/landing.js': 'landing.js', '/about.js': 'about.js', '/examples.js': 'examples.js',
   '/sw.js': 'sw.js', '/theme.js': 'theme.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon.svg': 'icon.svg', '/board.webp': 'board.webp',
-  '/fonts/national-park-latin.woff2': 'fonts/national-park-latin.woff2', // National Park, SIL OFL 1.1 (see public/fonts/NationalPark-OFL.txt)
+  // National Park, SIL OFL 1.1 (see public/fonts/NationalPark-OFL.txt)
+  '/fonts/national-park-latin.woff2': 'fonts/national-park-latin.woff2', '/fonts/national-park-latin-ext.woff2': 'fonts/national-park-latin-ext.woff2',
 };
 // Browser files from npm packages (package.json), served from our own origin like everything else: npm is only
 // needed to install them, never while the app runs. Paths are relative to this file.

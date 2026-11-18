@@ -151,15 +151,17 @@ export function nextMessage(channelMessages, role, fields) {
 
 // input:
 //   me:       { sign } my signing public key (JWK), to tell which posts are mine
-//   posts:    [{ post, signer, shared?: true } | { unshare: { pid, v }, signer }], every version seen, signatures
-//             already checked (public posts, shares and unshares from my inbox, and my own from the vault)
+//   posts:    [{ post, signer, shared?: true, host?: guid } | { unshare: { pid, v }, signer }], every version
+//             seen, signatures already checked (public posts, shares and unshares from my inbox, and my own from the
+//             vault). host is the host's GUID when known (a share says who it's from).
 //   channels: [{ id, role: 'host' | 'attendee', opened, messages }], id is the channel secret, opened sorts
 //             requests first come, first served (when the join arrived)
 //   passed:   pids I swiped no on
 //
 // Returns { posts, deck, requests, hosting, todo, badges, together }:
 //   posts:    Map pid → newest version, with .signer and .hidden (unshared from me)
-//   deck:     posts to swipe on: live, not mine, not hidden, not passed, and not already asked about
+//   deck:     posts to swipe on: live, not mine, not hidden, not passed, and not already asked about (a request I
+//             took back doesn't count, so the post comes back)
 //   requests: my requests to join (I'm the attendee), newest first: channel state plus post and channel id
 //   hosting:  my posts, each with its requests ({ ...channel state, id }), counts, and the status it should have
 //   todo:     what the host's browser should send: { type: 'promote', ch } and { type: 'status', pid, status }
@@ -179,7 +181,7 @@ export function derive({ me, posts = [], channels = [], passed = [] }) {
     if (e.unshare) { if (Number.isInteger(e.unshare.v)) unshared.set(pid, Math.max(unshared.get(pid) || 0, e.unshare.v)); continue; }
     if (!isPost(e.post)) continue;
     const cur = latest.get(pid);
-    if (!cur || e.post.v > cur.v) latest.set(pid, { ...e.post, signer: e.signer, shared: Boolean(e.shared) });
+    if (!cur || e.post.v > cur.v) latest.set(pid, { ...e.post, signer: e.signer, shared: Boolean(e.shared), host: e.host ?? cur?.host ?? null });
   }
   for (const [pid, p] of latest) p.hidden = (unshared.get(pid) || 0) >= p.v;
 
@@ -191,7 +193,7 @@ export function derive({ me, posts = [], channels = [], passed = [] }) {
   // My requests (I'm the attendee).
   const asked = new Set();
   const requests = replayed.filter(x => x.c.role === 'attendee').map(({ c, st }) => {
-    asked.add(st.pid);
+    if (st.status !== 'cancelled') asked.add(st.pid);
     const post = latest.get(st.pid) || null;
     if (st.status === 'attended') count(st.hello.host?.guid);
     return { ...st, id: c.id, post, closed: !post || !LIVE.includes(post.status) };

@@ -5,7 +5,12 @@ import {
   newInviteKey, sealForInvite, openForInvite, sha1Hex, b64u, ensureKeys,
 } from './secure.js';
 import { locationHtml, mountLocationField, pickLocation, PIN_SVG } from './location.js';
-import { parseWhen, repeatOptions, whenLabel as fmtWhen, localToday } from './when.js';
+import { parseWhen, repeatOptions, whenLabel as fmtWhen, localToday, occursBetween } from './when.js';
+import {
+  initMail, resetMail, loadMail, mailView, requestJoin, sendOn, pass, unpass, savePrivatePost, setPostStatus, reshare,
+} from './mail.js';
+import { LIVE } from './posts.js';
+import { postFields, FIELD_LABELS } from './postfields.js';
 import { CURRENCIES, DEFAULT_CURRENCY, costLabel } from './cost.js';
 import { toSvg as identicon } from './vendor/jdenticon.js';
 import { addToCalendar } from './ics.js';
@@ -230,7 +235,7 @@ async function api(path, { method = 'GET', body } = {}) {
     body: body !== undefined ? JSON.stringify(body) : method !== 'GET' ? '{}' : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && state.me && !path.startsWith('/api/passkey/') && !path.startsWith('/api/id/')) { state.me = null; await clearKeys(); render(); }
+  if (res.status === 401 && state.me && !path.startsWith('/api/passkey/') && !path.startsWith('/api/id/')) { state.me = null; await clearKeys(); resetMail(); render(); }
   if (!res.ok) throw Object.assign(new Error(data.error || 'Request failed'), { status: res.status });
   return data;
 }
@@ -513,8 +518,14 @@ document.addEventListener('keydown', (e) => mountDeck.keyHandler?.(e));
 
 // ---------- views ----------
 
+// Tab badges: the server's counts for posts it still stores, plus what the mail says (public/mail.js).
+function badgeCounts() {
+  const c = state.me?.counts || {}, m = mailView()?.badges || {};
+  return { confirm: (c.confirm || 0) + (m.confirm || 0), plans: (c.plans || 0) + (m.plans || 0) };
+}
+
 function shell(content) {
-  const me = state.me, c = me?.counts || {};
+  const me = state.me, c = badgeCounts();
   const tabs = me ? TABS : GUEST_TABS;
   // The page's name under the board. The account screen is "Unlock" for someone signed in without their keys here.
   const title = state.tab === 'account' ? (me ? 'Unlock' : 'Sign in') : TABS.find(t => t.id === state.tab)?.label || '';
@@ -558,6 +569,8 @@ async function enterApp(tab = 'discover') {
   await vault.load(api);
   await ensureKeys(api);
   await syncConnections();
+  await loadMail().catch(err => console.warn(err));
+  syncAudiences().catch(err => console.warn(err));
   state.tab = tab; state.chat = null;
   render();
   offerPendingInvite();
@@ -733,6 +746,7 @@ async function signOut() {
   await turnOffPush().catch(() => {}); // a signed-out device shouldn't get this account's notifications
   try { await api('/api/logout', { method: 'POST' }); } catch {}
   await clearKeys();
+  resetMail();
   state.me = null; state.tab = 'discover'; state.chat = null;
   if (isDemo()) return startDemo();
   render();
@@ -773,9 +787,43 @@ function eventCard(t) {
       ${t.details ? `<div class="details">${esc(t.details)}</div>` : ''}
       <div class="who">${avatar(t.host.guid || t.host.icon)}
         <div>${contactName(t.host.guid) ? `<b>${esc(contactName(t.host.guid))}</b>` : ''}
-          <small>Hosted ${t.host.hosted} · Attended ${t.host.attended}</small></div>
+          ${t.mail ? '' : `<small>Hosted ${t.host.hosted} · Attended ${t.host.attended}</small>`}</div>
       </div>
     </div>`;
+}
+
+// Encrypted posts (public/mail.js) as Discover cards, and the Discover filters for them. Only this browser can read
+// them, so it filters them itself, with the same rules the server uses for the posts it stores (/api/discover).
+const mailCard = (p) => ({ ...p, id: `m:${p.pid}`, mail: true, post: p, visibility: 'private', tags: p.tags || [], host: { guid: p.host } });
+function distanceKm({ lat, lon }, location) {
+  const m = /^(-?[\d.]+),(-?[\d.]+)$/.exec(location || '');
+  if (!m) return Infinity;
+  const rad = Math.PI / 180, dLat = (m[1] - lat) * rad, dLon = (m[2] - lon) * rad;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat * rad) * Math.cos(m[1] * rad) * Math.sin(dLon / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(a)); // Earth's mean diameter, km
+}
+function mailPostMatches(p) {
+  const tags = state.discoverTags, costs = state.discoverCosts, near = state.discoverNear;
+  const km = near && state.discoverRadius ? state.discoverRadius * kmPerUnit() : 0, online = state.discoverOnline;
+  if (tags.size && !(p.tags || []).some(t => tags.has(t))) return false;
+  if (costs.size && !costs.has(p.cost_amount > 0 ? 'paid' : 'free')) return false;
+  if (state.discoverDate) { const [from, to] = dateFilterRange(state.discoverDate); if (!occursBetween(p.when_text, from, to)) return false; }
+  if (km || online) return (km && distanceKm(near, p.location) <= km) || (online && p.online > 0);
+  return true;
+}
+// Add encrypted posts to the server's filter counts.
+function addMailCounts(opts, posts) {
+  const tags = new Map(opts.tags.map(t => [t.tag, t.count]));
+  for (const p of posts) for (const t of p.tags || []) tags.set(t, (tags.get(t) || 0) + 1);
+  const near = state.discoverNear;
+  return {
+    ...opts,
+    tags: [...tags].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag)),
+    costs: opts.costs.map(c => ({ ...c, count: c.count + posts.filter(p => (p.cost_amount > 0 ? 'paid' : 'free') === c.cost).length })),
+    dates: (opts.dates || []).map(d => { const [from, to] = dateFilterRange(d.key); return { ...d, count: d.count + posts.filter(p => occursBetween(p.when_text, from, to)).length }; }),
+    distances: near ? RADII.map((r, i) => ({ km: r * kmPerUnit(), count: (opts.distances?.[i]?.count ?? 0) + posts.filter(p => distanceKm(near, p.location) <= r * kmPerUnit()).length })) : opts.distances,
+    online: (opts.online ?? 0) + posts.filter(p => p.online > 0).length,
+  };
 }
 
 async function viewDiscover(v) {
@@ -830,8 +878,12 @@ async function viewDiscover(v) {
     const fp = new URLSearchParams({ dates: Object.keys(DATE_FILTERS).map(k => [k, ...dateFilterRange(k)].join(':')).join(',') });
     if (near) { fp.set('near', roughSpot(near)); fp.set('radii', RADII.map(r => r * kmPerUnit()).join(',')); }
     let opts;
-    [events, opts] = await Promise.all([api('/api/discover' + (params.size ? `?${params}` : '')), api(`/api/discover/filters?${fp}`)]);
-    options = opts;
+    let mail;
+    [events, opts, mail] = await Promise.all([api('/api/discover' + (params.size ? `?${params}` : '')), api(`/api/discover/filters?${fp}`),
+      state.me && hasKeys() ? loadMail().catch(() => mailView()) : null]);
+    const mailPosts = mail?.deck || [];
+    events = [...mailPosts.filter(mailPostMatches).map(mailCard), ...events];
+    options = addMailCounts(opts, mailPosts);
     drawFilters();
     mountDeck(host, deckOptions(events, { tags: [...state.discoverTags], costs: [...state.discoverCosts], date: state.discoverDate,
       near: [near && state.discoverRadius && `Within ${fmtDistance(state.discoverRadius)} of ${near.label.toLowerCase()}`,
@@ -879,7 +931,7 @@ async function viewDiscover(v) {
   });
   v.addEventListener('click', (e) => {
     const cal = e.target.closest('[data-ics]');
-    if (cal) addToCalendar(events.find(t => t.id === Number(cal.dataset.ics)));
+    if (cal) addToCalendar(events.find(t => String(t.id) === cal.dataset.ics));
     if (e.target.id === 'goPost') go('post');
     if (e.target.id === 'clearFilters') { clearAll(); saveDiscoverFilters(); load().catch(err => toast(err.message)); }
   });
@@ -897,13 +949,23 @@ function deckOptions(events, filters) {
         if (yes) { toast('Sign in or create an account to say yes.'); go('account'); return KEEP_CARD; }
         return;
       }
-      await api(`/api/events/${t.id}/swipe`, { method: 'POST', body: { yes } });
+      if (t.mail) {
+        if (!yes) return pass(t.pid);
+        t.ch = await requestJoin(t.post);
+      } else await api(`/api/events/${t.id}/swipe`, { method: 'POST', body: { yes } });
       if (yes) toast(t.status === 'full'
         ? `Asked to join the waitlist for “${t.title}”. If the host says yes, you'll get the next open spot.`
         : `Asked to join “${t.title}”! You'll match if the host swipes yes too.`);
     },
     onUndo: async (t, yes) => {
-      if (state.me) await api(`/api/events/${t.id}/swipe`, { method: 'DELETE' });
+      if (state.me && t.mail) {
+        if (!yes) await unpass(t.pid);
+        else {
+          const r = mailView()?.requests.find(x => x.id === t.ch);
+          if (r && !['pending', 'waitlisted'].includes(r.status)) throw new Error('They already answered. Message them in Plans if you need to back out.');
+          await sendOn(t.ch, { type: 'unjoin' });
+        }
+      } else if (state.me) await api(`/api/events/${t.id}/swipe`, { method: 'DELETE' });
       toast(yes ? `Took back your request to join “${t.title}”` : 'Undone');
     },
     empty: filters.tags.length || filters.costs.length || filters.date || filters.near
@@ -936,8 +998,29 @@ function connectCard(c) {
       </div>`;
 }
 
+// Requests to join my encrypted posts: anonymous until I say yes (the person's name and contact come with the match).
+function mailRequests(view) {
+  return (view?.hosting || []).filter(h => LIVE.includes(h.post.status)).flatMap(h => h.requests
+    .filter(r => r.status === 'pending')
+    .map(r => ({ kind: 'mail', ch: r.id, pid: h.post.pid, title: h.post.title, note: r.note, full: h.status === 'full' })));
+}
+// A yes on a full post puts them on the waitlist, as the server does for the posts it stores.
+function mailAnswer(view, pid) {
+  const h = view?.hosting.find(x => x.post.pid === pid);
+  const max = h?.post.max_attendees ?? null;
+  return max !== null && h.counts.accepted + h.counts.attended >= max ? 'waitlisted' : 'accepted';
+}
+const mailRequestCard = (o) => `
+      <div class="hero">${avatar(null, 'big')}</div>
+      <div class="body">
+        <div class="meta"><span class="chip">Wants to join: <b>${esc(o.title)}</b></span></div>
+        ${o.note ? `<div class="details">“${esc(o.note)}”</div>` : ''}
+        ${o.full ? `<p class="note">This post is full, so saying yes puts them on the waitlist. They'll be matched automatically when a spot opens.</p>` : ''}
+        <p class="note">Requests are anonymous: you'll see who it is once you say yes.</p>
+      </div>`;
+
 async function viewConfirm(v) {
-  const [interested, requests] = await Promise.all([api('/api/confirm'), api('/api/connection-requests')]);
+  const [interested, requests, mail] = await Promise.all([api('/api/confirm'), api('/api/connection-requests'), loadMail().catch(() => mailView())]);
   // Their suggested nickname, decrypted with the key of the invitation they used (kept in my vault).
   for (const c of requests) {
     const inv = c.invite_id && inviteOf(c.invite_id);
@@ -945,8 +1028,8 @@ async function viewConfirm(v) {
     c.suggested = inv?.key && c.note ? await openForInvite(inv.key, c.note) : null;
   }
   mountDeck(v, {
-    items: [...requests.map(c => ({ ...c, kind: 'connect' })), ...interested],
-    renderCard: (o) => o.kind === 'connect' ? connectCard(o) : `
+    items: [...requests.map(c => ({ ...c, kind: 'connect' })), ...mailRequests(mail), ...interested],
+    renderCard: (o) => o.kind === 'connect' ? connectCard(o) : o.kind === 'mail' ? mailRequestCard(o) : `
       <div class="hero">
         ${avatar(o.attendee.guid || o.attendee.icon, 'big')}
       </div>
@@ -974,6 +1057,15 @@ async function viewConfirm(v) {
         }
         return;
       }
+      if (o.kind === 'mail') {
+        const status = yes ? mailAnswer(mailView(), o.pid) : 'declined';
+        await sendOn(o.ch, { type: 'answer', status });
+        shellRefreshBadges();
+        if (status === 'accepted') showMatch(null, o.title, `m:${o.ch}`);
+        else if (status === 'waitlisted') toast(`Added them to the waitlist for “${o.title}”`);
+        loadMail().then(shellRefreshBadges, () => {}); // say hello, so they become a contact
+        return;
+      }
       const r = await api(`/api/confirm/${o.id}/respond`, { method: 'POST', body: { yes } });
       await refreshMe();
       shellRefreshBadges();
@@ -988,6 +1080,13 @@ async function viewConfirm(v) {
         shellRefreshBadges();
         return toast(yes ? 'Disconnected' : 'Undone');
       }
+      if (o.kind === 'mail') {
+        const r = mailView()?.hosting.flatMap(h => h.requests).find(x => x.id === o.ch);
+        if (r?.chatted) throw new Error("You've already started chatting, so this match can't be undone");
+        await sendOn(o.ch, { type: 'undo' });
+        shellRefreshBadges();
+        return toast(yes ? 'Unmatched' : 'Undone');
+      }
       await api(`/api/confirm/${o.id}/undo`, { method: 'POST' });
       await refreshMe();
       shellRefreshBadges();
@@ -1000,7 +1099,7 @@ async function viewConfirm(v) {
 }
 
 function showMatch(otherGuid, title, matchId) {
-  const known = isContact(otherGuid);
+  const known = Boolean(otherGuid) && isContact(otherGuid);
   const o = document.createElement('div');
   o.className = 'overlay';
   o.innerHTML = `
@@ -1017,7 +1116,7 @@ function showMatch(otherGuid, title, matchId) {
 
 function shellRefreshBadges() {
   // Re-render only the nav badges without disturbing the current deck.
-  const c = state.me.counts || {};
+  const c = badgeCounts();
   app.querySelectorAll('nav.tabs button').forEach(b => {
     b.querySelector('.badge')?.remove();
     const n = b.dataset.tab === 'confirm' ? c.confirm : b.dataset.tab === 'plans' ? c.plans : 0;
@@ -1025,14 +1124,33 @@ function shellRefreshBadges() {
   });
 }
 
+// Matches on encrypted posts (public/mail.js), shaped like the server's /api/matches rows. id is "m:<channel>".
+// Waitlisted requests are only mine as an attendee. The other person is known from their hello (or, for a private
+// post I asked to join, from the share it came in).
+function mailMatches(view) {
+  const row = (r, role, post) => {
+    const other = r.hello[role === 'host' ? 'attendee' : 'host']?.guid || (role === 'attendee' ? post.host : null) || null;
+    const last = [...r.timeline].reverse().find(t => t.event === 'chat');
+    return { id: `m:${r.id}`, ch: r.id, mail: true, role, status: r.status, reconfirm: r.reconfirm, other, state: r,
+      title: post.title, when_text: post.when_text, location: post.location, location_name: post.location_name, online: post.online,
+      last_message: last?.text || '' };
+  };
+  return [
+    ...(view?.requests || []).filter(r => r.post && ['accepted', 'attended', 'withdrawn', 'waitlisted'].includes(r.status)).map(r => row(r, 'attendee', r.post)),
+    ...(view?.hosting || []).flatMap(h => h.requests.filter(r => ['accepted', 'attended', 'withdrawn'].includes(r.status)).map(r => row(r, 'host', h.post))),
+  ].sort((a, b) => b.state.updatedAt - a.state.updatedAt);
+}
+const nameOrSomeone = (guid) => displayName(guid) || 'Someone';
+
 async function viewPlans(v) {
   if (state.chat) return viewChat(v, state.chat);
-  const matches = await api('/api/matches');
-  await ensureContacts(matches);
+  const [old, mail] = await Promise.all([api('/api/matches'), loadMail().catch(() => mailView())]);
+  await ensureContacts(old);
   // Decrypt the last-message previews (only you and the other person can read them).
-  await Promise.all(matches.map(async m => {
+  await Promise.all(old.map(async m => {
     if (m.last_message && m.last_kind === 'user') m.last_message = await decryptMessage(m.id, m.other_pubkey, m.last_message) ?? 'Encrypted message';
   }));
+  const matches = [...mailMatches(mail), ...old];
   if (!matches.length) {
     v.innerHTML = `<div class="empty"><h3>No plans yet</h3>
       <p>Swipe right on something you'd like to join. When the host swipes yes on you, you'll match.</p>
@@ -1051,7 +1169,7 @@ async function viewPlans(v) {
     <button class="row" data-id="${m.id}">
       <div class="grow">
         <div class="title">${esc(m.title)}</div>
-        <div class="sub">${m.role === 'attendee' ? `Hosted by ${esc(displayName(m.other))}` : `${esc(displayName(m.other))} is going`}${m.last_message ? ' · ' + esc(m.last_message) : ''}</div>
+        <div class="sub">${m.role === 'attendee' ? `Hosted by ${esc(nameOrSomeone(m.other))}` : `${esc(nameOrSomeone(m.other))} is going`}${m.last_message ? ' · ' + esc(m.last_message) : ''}</div>
       </div>
       ${pill(m)}
     </button>`;
@@ -1060,9 +1178,9 @@ async function viewPlans(v) {
     <div class="row">
       <div class="grow">
         <div class="title">${esc(m.title)}</div>
-        <div class="sub">${contactName(m.other) ? `Hosted by ${esc(contactName(m.other))} · ` : ''}#${m.waitlist_pos} on the waitlist</div>
+        <div class="sub">${contactName(m.other) ? `Hosted by ${esc(contactName(m.other))} · ` : ''}${m.waitlist_pos ? `#${m.waitlist_pos} on the waitlist` : 'On the waitlist'}</div>
       </div>
-      <button class="btn ghost small" data-leave="${m.event_id}">Leave</button>
+      <button class="btn ghost small" ${m.mail ? `data-leave-ch="${esc(m.ch)}"` : `data-leave="${m.event_id}"`}>Leave</button>
     </div>`;
   v.innerHTML = `
     ${active.length ? `<div class="section-title">Happening</div><div class="list">${active.map(row).join('')}</div>` : ''}
@@ -1070,7 +1188,12 @@ async function viewPlans(v) {
       <p class="note">These posts are full. You'll be matched automatically, in order, when a spot opens.</p>
       <div class="list">${waiting.map(waitRow).join('')}</div>` : ''}
     ${past.length ? `<div class="section-title">Past</div><div class="list">${past.map(row).join('')}</div>` : ''}`;
-  v.querySelectorAll('button.row').forEach(r => r.onclick = () => { state.chat = Number(r.dataset.id); render(); });
+  v.querySelectorAll('button.row').forEach(r => r.onclick = () => { const id = r.dataset.id; state.chat = id.startsWith('m:') ? id : Number(id); render(); });
+  v.querySelectorAll('[data-leave-ch]').forEach(b => b.onclick = async () => {
+    if (!confirm('Leave this waitlist?')) return;
+    try { await sendOn(b.dataset.leaveCh, { type: 'unjoin' }); toast('Left the waitlist'); render(); }
+    catch (err) { toast(err.message); }
+  });
   v.querySelectorAll('[data-leave]').forEach(b => b.onclick = async () => {
     if (!confirm('Leave this waitlist?')) return;
     try { await api(`/api/events/${b.dataset.leave}/swipe`, { method: 'DELETE' }); toast('Left the waitlist'); render(); }
@@ -1078,7 +1201,105 @@ async function viewPlans(v) {
   });
 }
 
+// The chat for a match on an encrypted post: the channel's timeline (chat and what happened), and its actions as
+// messages on the channel. Re-checks for new mail every 5 seconds while open.
+const mailSystemLine = (t, m) => ({
+  promoted: "A spot opened up, so you're off the waitlist and in!",
+  updated: `The post was updated: ${(t.changes || []).map(k => FIELD_LABELS[k] || k).join(', ') || 'details'}.${m.role === 'attendee' ? ' Please re-confirm you can still make it.' : ''}`,
+  reconfirmed: 'Re-confirmed: still in!',
+  'reconfirm-no': "Can't make it after the change, so dropped out.",
+  left: "Can't make it anymore, so dropped out.",
+}[t.event]);
+
+async function viewMailChat(v, id) {
+  await loadMail().catch(() => {});
+  const find = () => mailMatches(mailView()).find(x => x.id === id);
+  const m = find();
+  if (!m || m.status === 'waitlisted') { state.chat = null; return viewPlans(v); }
+  const name = nameOrSomeone(m.other);
+  v.innerHTML = `
+    <div class="chat">
+      <div class="chat-head">
+        <button class="back" aria-label="Back">←</button>
+        ${avatar(m.other)}
+        <div class="grow" style="flex:1;min-width:0">
+          ${m.other ? `<button type="button" class="link" id="rename" title="Change the nickname only you see">${esc(name)} ✎</button>` : `<b>${esc(name)}</b>`}
+          <div class="sub" style="color:var(--muted);font-size:.85rem">${esc(m.title)}${m.when_text ? ` · <button type="button" class="link cal-link" id="addCal" title="Add to your calendar">${esc(whenLabel(m.when_text))}</button>` : ''}${whereHtml(m) ? ' · ' + whereHtml(m) : ''}</div>
+        </div>
+        ${m.role === 'host' && m.status === 'accepted' ? `<button class="btn small" id="happened">It happened</button>` : ''}
+        ${m.role === 'attendee' && m.status === 'accepted' && !m.reconfirm ? `<button class="btn ghost small" id="leave">Can't make it</button>` : ''}
+      </div>
+      <div class="msgs" id="msgs"></div>
+      ${m.status === 'accepted' && m.reconfirm && m.role === 'attendee' ? `
+        <div class="reconfirm">
+          <div><b>${esc(name)} changed this post.</b> Can you still make it?</div>
+          <div class="btns">
+            <button class="btn small" id="stillIn">I'm still in</button>
+            <button class="btn danger small" id="cantGo">Can't make it</button>
+          </div>
+        </div>` : ''}
+      ${m.status === 'accepted' ? `
+        <form class="composer" id="composer">
+          <label class="sr-only" for="chatBody">Message</label>
+          <input id="chatBody" name="body" placeholder="Say hi, sort out the details…" autocomplete="off" maxlength="2000" required>
+          <button class="btn">Send</button>
+        </form>` : ''}
+    </div>`;
+  v.querySelector('.back').onclick = () => { state.chat = null; render(); };
+  v.querySelector('#rename')?.addEventListener('click', () => openContactSheet(m.other, () => render()));
+  v.querySelector('#addCal')?.addEventListener('click', () => addToCalendar({ id: m.id, title: m.title, location: m.location, location_name: m.location_name, online: m.online, when_text: m.when_text }));
+
+  const msgsEl = v.querySelector('#msgs');
+  let drawn = '';
+  function drawMsgs(x) {
+    const nm = esc(nameOrSomeone(x.other));
+    const html = `<div class="msg sys">${x.role === 'attendee' ? `You asked to join and ${nm} said yes!` : `${nm} asked to join and you said yes!`}</div>` +
+      x.state.timeline.map(t => t.event === 'chat'
+        ? `<div class="msg ${t.role === x.role ? 'mine' : ''}">${esc(t.text)}</div>`
+        : mailSystemLine(t, x) ? `<div class="msg sys notice">${esc(mailSystemLine(t, x))}</div>` : '').join('') +
+      (x.status === 'attended' ? '<div class="msg sys">Marked as happened. Hope it was fun!</div>'
+        : x.status === 'accepted' && x.reconfirm && x.role === 'host' ? `<div class="msg sys">Waiting for ${nm} to re-confirm</div>` : '');
+    if (html === drawn) return;
+    drawn = html; msgsEl.innerHTML = html;
+    msgsEl.scrollTop = msgsEl.scrollHeight;
+    window.scrollTo(0, document.body.scrollHeight);
+  }
+  drawMsgs(m);
+  // Anything that changes the buttons (a re-confirm request, the other side leaving, …) redraws the whole chat.
+  const shape = (x) => `${x?.status}|${x?.reconfirm}|${x?.other}`;
+  const poll = setInterval(async () => {
+    if (state.chat !== id || !document.body.contains(msgsEl)) return clearInterval(poll);
+    await loadMail().catch(() => {});
+    const x = find();
+    if (shape(x) !== shape(m)) { clearInterval(poll); return render(); }
+    drawMsgs(x);
+  }, 5000);
+
+  const act = async (fields, done) => {
+    try { await sendOn(m.ch, fields); if (done) toast(done); shellRefreshBadges(); render(); }
+    catch (err) { toast(err.message); }
+  };
+  v.querySelector('#composer')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const input = e.target.body;
+    // Read first, so this message counts as coming after everything already here.
+    try { await loadMail().catch(() => {}); await sendOn(m.ch, { type: 'chat', text: input.value }); input.value = ''; drawMsgs(find()); }
+    catch (err) { toast(err.message); }
+  });
+  v.querySelector('#stillIn')?.addEventListener('click', () => act({ type: 'reconfirm', yes: true }, `Told ${name} you're still in`));
+  v.querySelector('#cantGo')?.addEventListener('click', () => {
+    if (confirm(`Drop out of “${m.title}”? ${name} will be told you can't make it.`)) act({ type: 'reconfirm', yes: false }, "You've dropped out");
+  });
+  v.querySelector('#leave')?.addEventListener('click', () => {
+    if (confirm(`Drop out of “${m.title}”? ${name} will be told, and your spot goes to the next person on the waitlist.`)) act({ type: 'leave' }, "You've dropped out");
+  });
+  v.querySelector('#happened')?.addEventListener('click', () => {
+    if (confirm(`Mark “${m.title}” as happened with ${name}?`)) act({ type: 'happened' }, `Glad it happened! Thanks, ${name}.`);
+  });
+}
+
 async function viewChat(v, id) {
+  if (typeof id === 'string') return viewMailChat(v, id);
   const matches = await api('/api/matches');
   const m = matches.find(x => x.id === id);
   if (!m) { state.chat = null; return viewPlans(v); }
@@ -1304,18 +1525,21 @@ const contactGroups = () => {
 
 // Private posts need contacts to share with (the server checks this too). Without any, new posts are public; a post
 // that's already private can stay that way.
+// Encrypted posts (t.mail) are private only, until public posts move to encryption too.
 function audienceInputs(t = {}) {
   const noContacts = !Object.keys(vault.data.contacts).length;
   const vis = t.visibility || (noContacts ? 'public' : 'private');
   const lockPrivate = noContacts && vis !== 'private';
+  const lockPublic = Boolean(t.mail);
   return `
       <fieldset class="seg-pick"><legend>Who can see it?</legend><div class="seg">
         <label><input type="radio" name="visibility" value="private" ${vis === 'private' ? 'checked' : ''} ${lockPrivate ? 'disabled' : ''}><span>Private</span></label>
-        <label><input type="radio" name="visibility" value="public" ${vis === 'public' ? 'checked' : ''}><span>Public</span></label>
+        <label><input type="radio" name="visibility" value="public" ${vis === 'public' ? 'checked' : ''} ${lockPublic ? 'disabled' : ''}><span>Public</span></label>
       </div></fieldset>
+      ${lockPublic ? `<p class="note">This post is encrypted, so it stays private.</p>` : ''}
       ${lockPrivate ? `<p class="note">Private posts are shared with your contacts. You'll have some once you match with
         someone on a post, or connect through an invitation from Profile.</p>` : ''}
-      <div class="audience" ${vis === 'public' ? 'hidden' : ''} data-audience="${esc(JSON.stringify(t.id ? audienceOf(t.id) : emptyAudience()))}"></div>`;
+      <div class="audience" ${vis === 'public' ? 'hidden' : ''} data-audience="${esc(JSON.stringify(t.audience || (t.id ? audienceOf(t.id) : emptyAudience())))}"></div>`;
 }
 
 // Draws the group and contact chips; form.audience() returns the current pick.
@@ -1354,8 +1578,17 @@ function mountAudience(form) {
 }
 
 // Create or update a post from its form, including who can see it, and remember the pick in the vault.
+// New private posts, and edits to them, are encrypted (public/mail.js): id "m:<pid>". Public posts, and private
+// posts made before encryption, are still stored by the server.
 async function saveEvent(form, id) {
   const pick = form.audience?.() ?? null;
+  const pid = typeof id === 'string' && id.startsWith('m:') ? id.slice(2) : null;
+  if (pid || (!id && pick)) {
+    if (!pick) throw new Error('This post is encrypted, so it stays private.');
+    const h = mailView()?.hosting.find(x => x.post.pid === pid);
+    const fields = await postFields(formData(form), { matched: h ? h.counts.accepted + h.counts.attended : 0 });
+    return savePrivatePost({ pid, fields, audience: { groups: [...pick.groups], contacts: [...pick.contacts] }, guids: audienceGuids(pick) });
+  }
   const body = { ...formData(form), viewers: pick ? audienceGuids(pick) : [] };
   const r = id ? await api(`/api/events/${id}`, { method: 'PATCH', body }) : await api('/api/events', { method: 'POST', body });
   const eventId = id || r.id;
@@ -1370,16 +1603,21 @@ async function saveEvent(form, id) {
   return r;
 }
 
-// What a new post's audience is, for the toast after posting.
-function postedMessage(form) {
+// What a new post's audience is, for the toast after posting. r is what saveEvent returned.
+function postedMessage(form, r = {}) {
   const pick = form.audience?.();
   if (!pick) return 'Posted! Anyone can now swipe on it.';
-  const n = audienceGuids(pick).length;
-  return n ? `Posted! ${n === 1 ? '1 person' : `${n} people`} can now swipe on it.` : 'Posted. Only you can see it until you share it with someone.';
+  const n = r.shared ?? audienceGuids(pick).length;
+  const later = r.missing ? ` ${r.missing === 1 ? '1 person gets' : `${r.missing} people get`} it once they open Bored? again.` : '';
+  return (n ? `Posted! ${n === 1 ? '1 person' : `${n} people`} can now swipe on it.` : 'Posted. Only you can see it until you share it with someone.') + later;
 }
 
-// After contacts' groups change, re-send who can see each private post shared with a group.
+// After contacts' groups change, re-send who can see each private post shared with a group. Encrypted posts are
+// shared again with whoever's new in their audience, including contacts who couldn't be reached before.
 async function syncAudiences() {
+  for (const [pid, p] of Object.entries(vault.data.posts || {})) {
+    await reshare(pid, audienceGuids(p.audience || emptyAudience())).catch(err => console.warn(err));
+  }
   const entries = Object.entries(vault.data.audiences || {}).filter(([, a]) => a.groups?.length);
   const gone = [];
   await Promise.all(entries.map(([id, a]) => api(`/api/events/${id}/viewers`, { method: 'PUT', body: { viewers: audienceGuids(a) } })
@@ -1459,8 +1697,8 @@ function openPostSheet(t = {}) {
         const r = await saveEvent(e.target, t.id);
         toast(r.notified ? `Saved. Asked ${r.notified} attendee${r.notified > 1 ? 's' : ''} to re-confirm.` : 'Saved');
       } else {
-        await saveEvent(e.target);
-        toast(postedMessage(e.target));
+        const r = await saveEvent(e.target);
+        toast(postedMessage(e.target, r));
       }
       close();
       render();
@@ -1495,7 +1733,13 @@ function rotatePostIdeas(el) {
 }
 
 async function viewPost(v) {
-  const events = await api('/api/events');
+  const [old, mail] = await Promise.all([api('/api/events'), loadMail().catch(() => mailView())]);
+  const mine = (mail?.hosting || []).filter(h => h.post.status !== 'cancelled').map(h => ({
+    ...h.post, id: `m:${h.post.pid}`, mail: true, visibility: 'private', tags: h.post.tags || [], status: h.status,
+    pending: h.counts.pending, matched: h.counts.accepted + h.counts.attended, waitlisted: h.counts.waitlisted, awaiting: h.counts.reconfirm,
+    viewers: vault.data.posts?.[h.post.pid]?.sharedWith.length || 0, audience: vault.data.posts?.[h.post.pid]?.audience,
+  }));
+  const events = [...mine, ...old];
   const statusPill = (t) => ({
     open: `<span class="pill">${t.pending ? `${t.pending} interested` : 'Looking'}</span>`,
     full: `<span class="pill go">It's on</span>`,
@@ -1537,12 +1781,16 @@ async function viewPost(v) {
   mountCostFields(v.querySelector('#newEvent'));
   v.querySelector('#newEvent').onsubmit = async (e) => {
     e.preventDefault();
-    try { await saveEvent(e.target); toast(postedMessage(e.target)); render(); }
+    try { const r = await saveEvent(e.target); toast(postedMessage(e.target, r)); render(); }
     catch (err) { toast(err.message); }
   };
-  v.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openPostSheet(events.find(t => t.id === Number(b.dataset.edit))));
+  v.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openPostSheet(events.find(t => String(t.id) === b.dataset.edit)));
   v.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
     if (!confirm('Remove this post?')) return;
+    if (b.dataset.del.startsWith('m:')) {
+      try { await setPostStatus(b.dataset.del.slice(2), 'cancelled'); } catch (err) { return toast(err.message); }
+      return render();
+    }
     await api(`/api/events/${b.dataset.del}`, { method: 'DELETE' });
     if (vault.data.audiences?.[b.dataset.del]) await vault.update(api, (d) => { delete d.audiences[b.dataset.del]; }).catch(() => {});
     render();
@@ -1599,6 +1847,7 @@ async function viewProfile(v) {
   const [ledger, passkeys, invites] = await Promise.all([api('/api/ledger'), idMode || isDemo() ? [] : api('/api/passkeys'), api('/api/invites')]);
   const me = state.me;
   const history = Object.fromEntries(ledger.map(l => [l.guid, l]));
+  for (const [guid, n] of Object.entries(mailView()?.together || {})) history[guid] = { ...history[guid], together: (history[guid]?.together || 0) + n };
   const contacts = Object.entries(vault.data.contacts).map(([guid, c]) => ({ guid, ...c, ...(history[guid] || {}) }))
     .sort((a, b) => (a.nickname || '~').localeCompare(b.nickname || '~'));
   const allTags = [...new Set(contacts.flatMap(c => c.tags || []))].sort();
@@ -1726,9 +1975,15 @@ async function viewProfile(v) {
 }
 
 // Keep badges fresh without re-rendering the current view.
-setInterval(async () => { if (state.me && hasKeys()) { await refreshMe(); if (state.me) shellRefreshBadges(); } }, 20000);
+setInterval(async () => {
+  if (!state.me || !hasKeys()) return;
+  await refreshMe();
+  await loadMail().catch(() => {});
+  if (state.me) shellRefreshBadges();
+}, 20000);
 
 // Boot: restore the session and, if this browser still holds the keys, the vault.
+initMail(api);
 try { state.config = await api('/api/config'); } catch {}
 // An invitation link (#invite=…): remember it through sign-in, and take it out of the address bar.
 {
@@ -1753,6 +2008,7 @@ if (state.config.authMode === '6j0' && hasIdCallback()) {
   await refreshMe();
   if (state.me && await loadKeys(state.me.guid)) {
     try { await vault.load(api); await ensureKeys(api); await syncConnections(); } catch { await clearKeys(); }
+    if (hasKeys()) await loadMail().catch(err => console.warn(err));
   }
   // Demo mode: nobody signs in. Without a usable account in this browser, make a new one.
   if (isDemo() && !(state.me && hasKeys())) {

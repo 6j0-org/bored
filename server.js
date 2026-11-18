@@ -1204,7 +1204,7 @@ route('GET', '/api/ledger', async ({ user, res }) => {
 // ---------- server ----------
 
 const STATIC = {
-  '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/secure.js': 'secure.js', '/hpke.js': 'hpke.js', '/style.css': 'style.css', '/location.js': 'location.js', '/when.js': 'when.js', '/cost.js': 'cost.js', '/ics.js': 'ics.js',
+  '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/secure.js': 'secure.js', '/hpke.js': 'hpke.js', '/posts.js': 'posts.js', '/style.css': 'style.css', '/location.js': 'location.js', '/when.js': 'when.js', '/cost.js': 'cost.js', '/ics.js': 'ics.js',
   '/pii.js': 'pii.js', '/libphonenumber.js': 'libphonenumber.js',
   '/about': 'about.html', '/about.html': 'about.html', '/landing.js': 'landing.js', '/about.js': 'about.js', '/examples.js': 'examples.js',
   '/sw.js': 'sw.js', '/theme.js': 'theme.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon.svg': 'icon.svg', '/board.webp': 'board.webp',

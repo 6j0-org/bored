@@ -10,7 +10,15 @@ const q = (sql) => db.prepare(sql);
 
 // Demo accounts get fixed, recognizable GUIDs (…-00000000000N) so re-running the seed doesn't duplicate them.
 // The names are only used inside this file, and as the nicknames a demo visitor starts with.
-const DEMO_USERS = { maya: 'Maya', dev: 'Dev', rosa: 'Rosa', sam: 'Sam' };
+// New accounts go at the end: the GUID is the position in this list.
+const DEMO_USERS = {
+  maya: 'Maya', dev: 'Dev', rosa: 'Rosa', sam: 'Sam',
+  // Hosts of the life-stage examples in public/examples.js, from teens to seventies.
+  jaylen: 'Jaylen', priya: 'Priya', hina: 'Hina', marcus: 'Marcus', ellie: 'Ellie', valeria: 'Valeria',
+  nate: 'Nate', aisha: 'Aisha', camille: 'Camille', tom: 'Tom', lena: 'Lena', rodrigo: 'Rodrigo',
+  gloria: 'Gloria', craig: 'Craig', jihoon: 'Ji-hoon', hank: 'Hank', linda: 'Linda', wanjiru: 'Wanjiru',
+  walt: 'Walt', dottie: 'Dottie', giuseppe: 'Giuseppe',
+};
 const GUID_PREFIX = '00000000-0000-4000-8000-';
 export const isDemoGuid = (guid) => String(guid).startsWith(GUID_PREFIX);
 
@@ -101,13 +109,13 @@ export function seedVisitor(visitorId) {
     ['them', 'Perfect. I will bring a ball and a pump.'],
   ]);
 
-  // …and going to Rosa's jazz night.
-  const jazz = q(`SELECT id FROM events WHERE host_id = ? AND title = 'Jazz in the park'`).get(ids.rosa).id;
-  const jazzMatch = swipe(jazz, visitorId, 'accepted');
-  addChat(jazzMatch, 'rosa', visitor, [
-    ['them', 'Glad you can come! I will be near the bandstand with a red blanket.'],
-    ['me', 'Great. Want me to bring anything?'],
-    ['them', 'Maybe a thermos of tea if it gets chilly.'],
+  // …and getting ramen with Dev.
+  const ramen = q(`SELECT id FROM events WHERE host_id = ? AND title = 'Get some ramen at Chef Jun'`).get(ids.dev).id;
+  const ramenMatch = swipe(ramen, visitorId, 'accepted');
+  addChat(ramenMatch, 'dev', visitor, [
+    ['them', 'Glad you can come! I will grab a table by the window.'],
+    ['me', 'Great. Do they take reservations?'],
+    ['them', 'Nope, so I will get there a few minutes early.'],
   ]);
 
   // History: a beach cleanup that already happened, so Profile shows stats and a contact you've done things with.
@@ -117,7 +125,7 @@ export function seedVisitor(visitorId) {
   q('INSERT INTO event_viewers (event_id, user_id) VALUES (?, ?)').run(cleanup, visitorId);
   swipe(cleanup, visitorId, 'attended');
 
-  return Object.fromEntries(['maya', 'rosa', 'sam'].map(h => [q('SELECT guid FROM users WHERE id = ?').get(ids[h]).guid, DEMO_USERS[h]]));
+  return Object.fromEntries(['maya', 'dev', 'sam'].map(h => [q('SELECT guid FROM users WHERE id = ?').get(ids[h]).guid, DEMO_USERS[h]]));
 }
 
 // When a demo visitor says yes to a demo account's post, the demo host says yes back with a short hello.

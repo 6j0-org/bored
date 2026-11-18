@@ -1,7 +1,8 @@
 // Event locations are stored as "lat,lon", e.g. "32.719649,-117.220272".
-// This module parses them, links them to the viewer's maps app, and provides a small OpenStreetMap picker.
+// This module parses them, links them to the viewer's maps app, and provides a small OpenStreetMap location picker.
 // Posts can also carry a friendly name for the spot ("Ocean Beach Pier"), shown instead of the coordinates. The
-// picker suggests one from OpenStreetMap's Nominatim, asked through our own server (/api/places/reverse).
+// picker suggests one from OpenStreetMap's Nominatim, asked through our own server (/api/places/reverse), and can
+// search Nominatim for places the same way (/api/places/search).
 // The picker uses no library. Its tiles come from tile.openstreetmap.org, and only while it is open: that is the
 // only third-party request the browser makes, so the rest of the app never talks to OSM directly.
 
@@ -56,6 +57,18 @@ async function lookUpName([lat, lon]) {
   } catch { return ''; }
 }
 
+// Places matching q, ranked by closeness to view ([west, south, east, north]); see searchPlaces in server.js.
+// Throws an Error with a message to show if the search failed.
+async function searchPlaces(q, view) {
+  const params = new URLSearchParams({ q, ...(view ? { view: view.map(n => n.toFixed(4)).join(',') } : {}) });
+  let r;
+  try { r = await fetch(`/api/places/search?${params}`, { credentials: 'same-origin' }); }
+  catch { throw new Error("Couldn't reach the server. Try moving the map instead."); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || "Couldn't search for places right now. Try moving the map instead.");
+  return j.places || [];
+}
+
 // ---------- picker ----------
 
 const TILE = 256, MIN_Z = 2, MAX_Z = 19;
@@ -76,7 +89,7 @@ function unproject(x, y, z) {
 // or undefined if they cancelled.
 // Options: title; note (the hint under the map); nameField: false hides the place name box and never looks one up;
 // clearLabel for the button that resolves to ''.
-const POST_NOTE = `Tap the map to drop the pin. Anyone who can see your post can see this spot, so a nearby
+const POST_NOTE = `Search for a place, or tap the map to drop the pin. Anyone who can see your post can see this spot, so a nearby
   landmark may be better than your front door.`;
 export function pickLocation(initial = '', initialName = '', { title = 'Where?', note = POST_NOTE, nameField = true, clearLabel = 'No location' } = {}) {
   return new Promise((resolve) => {
@@ -89,6 +102,12 @@ export function pickLocation(initial = '', initialName = '', { title = 'Where?',
     sheet.innerHTML = `
       <div class="panel stack">
         <h2>${esc(title)}</h2>
+        <form class="map-search" role="search">
+          <input type="search" name="q" maxlength="200" autocomplete="off" enterkeyhint="search"
+            placeholder="Search for a place or address" aria-label="Search for a place or address">
+          <button type="submit" class="btn ghost small">Search</button>
+        </form>
+        <ul class="map-results" hidden aria-live="polite"></ul>
         <div class="map" tabindex="0" aria-label="Map. Drag to move, tap to place the pin, and plus and minus keys to zoom.">
           <div class="tiles"></div>
           <div class="pin" hidden>${MAP_PIN_SVG}</div>
@@ -225,6 +244,68 @@ export function pickLocation(initial = '', initialName = '', { title = 'Where?',
     });
     sheet.querySelectorAll('[data-zoom]').forEach(b => b.onclick = () => zoom(Number(b.dataset.zoom)));
 
+    // Search: Nominatim's policy forbids searching as you type, so it searches when the form is submitted.
+    // Typed coordinates ("32.7196, -117.2203") go straight to that spot without asking anyone.
+    const searchForm = sheet.querySelector('.map-search'), searchIn = searchForm.elements.q;
+    const resultsEl = sheet.querySelector('.map-results');
+    let searchNo = 0;
+    const showResults = (html) => { resultsEl.innerHTML = html; resultsEl.hidden = !html; };
+    // The current view as [west, south, east, north], or null when it shows the whole world's width anyway.
+    const view = () => {
+      const w = map.clientWidth, h = map.clientHeight;
+      if (w >= TILE * 2 ** z) return null;
+      const [north, west] = unproject(cx - w / 2, Math.max(0, cy - h / 2), z);
+      const [south, east] = unproject(cx + w / 2, Math.min(TILE * 2 ** z, cy + h / 2), z);
+      return [west, south, east, north];
+    };
+    // The closest zoom (up to 17) at which bbox ([south, north, west, east]) fits in the map with a margin.
+    const fitZoom = ([s, n, w, e]) => {
+      for (let nz = 17; nz > MIN_Z; nz--) {
+        const [x1, y1] = project(n, w, nz), [x2, y2] = project(s, e, nz);
+        if (Math.abs(x2 - x1) <= map.clientWidth * 0.8 && Math.abs(y2 - y1) <= map.clientHeight * 0.8) return nz;
+      }
+      return MIN_Z;
+    };
+    // Move the map and pin to a place. Its name fills the name box unless the person has typed their own.
+    const goTo = ({ lat, lon, bbox, name }) => {
+      showResults('');
+      searchNo++;
+      pin = [lat, lon];
+      z = bbox ? fitZoom(bbox) : Math.max(z, 16);
+      [cx, cy] = project(...pin, z);
+      draw();
+      if (name && nameField && !typed) {
+        lookup++; // drop any name lookup still on its way
+        nameEl.value = name;
+        nameEl.placeholder = 'e.g. Ocean Beach Pier';
+      } else pinMoved();
+      map.focus(); // closes the on-screen keyboard, so the map is in view
+    };
+    let found = [];
+    searchForm.onsubmit = async (e) => {
+      e.preventDefault();
+      const q = searchIn.value.trim(), ll = parseLatLon(q);
+      if (ll) return goTo({ lat: ll[0], lon: ll[1] });
+      if (q.length < 2) return showResults('<li class="note">Type at least 2 letters to search.</li>');
+      const n = ++searchNo;
+      showResults('<li class="note">Searching…</li>');
+      try {
+        const places = await searchPlaces(q, view());
+        if (n !== searchNo) return;
+        found = places;
+        showResults(places.length
+          ? places.map((p, i) => `<li><button type="button" data-result="${i}"><strong>${esc(p.name)}</strong>
+              ${p.detail ? `<span>${esc(p.detail)}</span>` : ''}</button></li>`).join('')
+          : '<li class="note">No places found. Try adding the town, or move the map and tap the spot.</li>');
+      } catch (err) {
+        if (n === searchNo) showResults(`<li class="note">${esc(err.message)}</li>`);
+      }
+    };
+    resultsEl.onclick = (e) => {
+      const b = e.target.closest('[data-result]');
+      if (b) goTo(found[Number(b.dataset.result)]);
+    };
+
     sheet.querySelector('[data-here]').onclick = (e) => {
       if (!navigator.geolocation) return (coordsEl.textContent = "This browser can't share your location");
       e.target.disabled = true;
@@ -241,7 +322,14 @@ export function pickLocation(initial = '', initialName = '', { title = 'Where?',
       sheet.remove(); removeEventListener('resize', draw); document.removeEventListener('keydown', onEsc, true);
       resolve(value);
     };
-    const onEsc = (e) => { if (e.key === 'Escape') { e.stopPropagation(); finish(undefined); } };
+    const onEsc = (e) => {
+      if (e.key !== 'Escape') return;
+      e.stopPropagation();
+      // In the search box, Escape clears the search first; another closes the picker.
+      if (document.activeElement === searchIn && (searchIn.value || !resultsEl.hidden)) {
+        e.preventDefault(); searchIn.value = ''; searchNo++; showResults('');
+      } else finish(undefined);
+    };
     document.addEventListener('keydown', onEsc, true);
     addEventListener('resize', draw);
     sheet.querySelector('[data-cancel]').onclick = () => finish(undefined);

@@ -132,12 +132,32 @@ function maxAttendeesField(v) {
   return n;
 }
 
-// Reverse geocoding for the map picker: coordinates → a friendly place name, from OpenStreetMap's Nominatim.
-// The browser asks us rather than OSM, so it doesn't talk to another server. Nominatim's usage policy allows at most
-// one request a second with an identifying User-Agent, so requests are spaced out and answers are cached.
-const NOMINATIM = 'https://nominatim.openstreetmap.org/reverse';
+// Geocoding for the location picker, from OpenStreetMap's Nominatim: coordinates → a friendly place name (reverse),
+// and a typed query → matching places (search). The browser asks us rather than OSM, so it doesn't talk to another
+// server. Nominatim's usage policy allows at most one request a second with an identifying User-Agent, so requests
+// are spaced out and answers are cached. The policy also forbids search-as-you-type, so the picker searches on submit.
+const NOMINATIM = 'https://nominatim.openstreetmap.org';
 const placeCache = new Map(); // "lat,lon" (5 decimals, about a metre) → name
+const searchCache = new Map(); // query, view, and language → results
 let nextNominatim = 0;
+// GET a Nominatim endpoint (e.g. 'reverse'), waiting our turn. failMsg is the error shown if OSM doesn't answer.
+async function nominatim(path, params, lang, failMsg) {
+  const wait = nextNominatim - Date.now();
+  nextNominatim = Math.max(Date.now(), nextNominatim) + 1100;
+  if (wait > 5000) throw new HttpError(503, 'Too many place lookups right now. Try again shortly.');
+  if (wait > 0) await new Promise(r => setTimeout(r, wait));
+  const r = await fetch(`${NOMINATIM}/${path}?${new URLSearchParams({ format: 'jsonv2', addressdetails: '1', ...params })}`, {
+    headers: { 'User-Agent': 'Bored-event-app/0.1 (self-hosted)', ...(lang ? { 'Accept-Language': lang } : {}) },
+    signal: AbortSignal.timeout(8000),
+  }).catch(() => null);
+  if (!r?.ok) throw new HttpError(502, failMsg);
+  return r.json();
+}
+const cachePut = (cache, key, value) => {
+  if (cache.size > 1000) cache.delete(cache.keys().next().value);
+  cache.set(key, value);
+  return value;
+};
 function placeName(a = {}, name = '') {
   const street = [a.house_number, a.road].filter(Boolean).join(' ');
   const area = a.neighbourhood || a.suburb || a.quarter || a.hamlet;
@@ -148,21 +168,28 @@ function placeName(a = {}, name = '') {
 async function reverseGeocode(lat, lon, lang) {
   const key = `${lat.toFixed(5)},${lon.toFixed(5)}|${lang}`;
   if (placeCache.has(key)) return placeCache.get(key);
-  const wait = nextNominatim - Date.now();
-  nextNominatim = Math.max(Date.now(), nextNominatim) + 1100;
-  if (wait > 5000) throw new HttpError(503, 'Too many place lookups right now. Type a name instead, or try again shortly.');
-  if (wait > 0) await new Promise(r => setTimeout(r, wait));
-  const url = `${NOMINATIM}?format=jsonv2&addressdetails=1&zoom=18&lat=${lat}&lon=${lon}`;
-  const r = await fetch(url, {
-    headers: { 'User-Agent': 'Bored-event-app/0.1 (self-hosted)', ...(lang ? { 'Accept-Language': lang } : {}) },
-    signal: AbortSignal.timeout(8000),
-  }).catch(() => null);
-  if (!r?.ok) throw new HttpError(502, "Couldn't look up a name for that spot. You can type one.");
-  const j = await r.json();
+  const j = await nominatim('reverse', { zoom: '18', lat, lon }, lang, "Couldn't look up a name for that spot. You can type one.");
   const name = placeName(j.address, j.name) || String(j.display_name || '').split(',').slice(0, 3).join(',').trim().slice(0, 100);
-  if (placeCache.size > 1000) placeCache.delete(placeCache.keys().next().value);
-  placeCache.set(key, name);
-  return name;
+  return cachePut(placeCache, key, name);
+}
+// Up to 6 places matching q, preferring ones inside view ([west, south, east, north], the map's current view) without
+// being limited to it, so "Ocean Beach" finds the nearby one first and "Paris" still finds Paris. Each has a name
+// (short, for the place name box), detail (the rest of the address, to tell matches apart), lat, lon, and
+// bbox ([south, north, west, east], to zoom the map to fit), or null.
+async function searchPlaces(q, view, lang) {
+  const key = `${q.toLowerCase()}|${view?.join(',') ?? ''}|${lang}`;
+  if (searchCache.has(key)) return searchCache.get(key);
+  const params = { q, limit: '6', ...(view ? { viewbox: view.join(','), bounded: '0' } : {}) };
+  const rows = await nominatim('search', params, lang, "Couldn't search for places right now. Try moving the map instead.");
+  const places = (Array.isArray(rows) ? rows : []).map((p) => {
+    const name = placeName(p.address, p.name) || String(p.display_name || '').split(',')[0].trim().slice(0, 100);
+    const detail = String(p.display_name || '').split(',').map(x => x.trim())
+      .filter(x => x && !name.includes(x)).slice(0, 4).join(', ');
+    const bbox = (p.boundingbox || []).map(Number);
+    return { name, detail, lat: Number(p.lat), lon: Number(p.lon),
+      bbox: bbox.length === 4 && bbox.every(Number.isFinite) ? bbox : null };
+  }).filter(p => p.name && Number.isFinite(p.lat) && Number.isFinite(p.lon));
+  return cachePut(searchCache, key, places);
 }
 
 // Location: "lat,lon" with 6 decimals, e.g. "32.719649,-117.220272", or blank.
@@ -560,13 +587,26 @@ function distanceKm({ lat, lon }, location) {
   return 12742 * Math.asin(Math.sqrt(a)); // Earth's mean diameter, km
 }
 
-// Map picker: a friendly name for a spot (signed-in hosts only). ?lat=&lon=
+const placesLang = (req) => String(req.headers['accept-language'] || '').split(',')[0].trim().slice(0, 20).replace(/[^\w-]/g, '');
+
+// Location picker: a friendly name for a spot (signed-in users only). ?lat=&lon=
 route('GET', '/api/places/reverse', async ({ req, query, res }) => {
   const lat = Number(query.get('lat')), lon = Number(query.get('lon'));
   if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180)
     throw new HttpError(400, 'Bad coordinates');
-  const lang = String(req.headers['accept-language'] || '').split(',')[0].trim().slice(0, 20).replace(/[^\w-]/g, '');
-  send(res, 200, { name: await reverseGeocode(lat, lon, lang) });
+  send(res, 200, { name: await reverseGeocode(lat, lon, placesLang(req)) });
+});
+
+// Location picker: places matching a typed search (signed-in users only). ?q=&view=west,south,east,north
+// The view only ranks results. It's rounded to 2 decimals (about a kilometre) so nearby views share cached answers.
+route('GET', '/api/places/search', async ({ req, query, res }) => {
+  const q = String(query.get('q') || '').replace(/\s+/g, ' ').trim();
+  if (q.length < 2) throw new HttpError(400, 'Type at least 2 letters to search');
+  if (q.length > 200) throw new HttpError(400, 'That search is too long');
+  const v = String(query.get('view') || '').split(',').map(Number);
+  const view = v.length === 4 && v.every(Number.isFinite) && Math.abs(v[1]) <= 90 && Math.abs(v[3]) <= 90
+    ? v.map(n => Math.max(-180, Math.min(180, n)).toFixed(2)) : null;
+  send(res, 200, { places: await searchPlaces(q, view, placesLang(req)) });
 });
 
 // In demo mode, each visitor gets their own shuffle of the example posts instead of newest first: a hash of the post

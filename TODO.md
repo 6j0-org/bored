@@ -203,8 +203,6 @@ Moderation - default list of words to filter out? Default follow moderators. Fil
 
 Federation between instances with activity pub?
 
-Get rid of neighbor verbiage everywhere.
-
 export data
 
 map picker should have search field. good luck. Nominatum is not great.

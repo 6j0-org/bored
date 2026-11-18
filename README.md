@@ -1,7 +1,7 @@
 # Bored?
 
 A local event board that works like a dating app.
-Host an event. Neighbors swipe through posts in **Discover**, and **right = "I'm in"**.
+Host an event. Users swipe through posts in **Discover**, and **right = "I'm in"**.
 In **Confirm**, the host swipes through the people who want to join, and **right = "Let's do it"**. When both sides say yes, it's on:
 it shows up in **Plans**, where you chat and sort out details. Afterwards the host marks it as happened.
 

@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#2f6b3a">
-  <meta name="description" content="Bored? is an app to make life more fun. Find people to do things with, near you. Free, open source, ad-free, and it never asks who you are.">
+  <meta name="description" content="Bored? is an app to make life more fun. Find people to do things with, near you. Free libre open source, ad-free, and it never asks who you are.">
   <title>Bored? Make life more fun</title>
-  <link rel="preload" href="/fonts/bungee-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/national-park-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="manifest" href="/manifest.webmanifest">
   <script src="/landing.js"></script>
@@ -53,14 +53,14 @@
 
     /* Title on an oak plank, same as the app (public/style.css). */
     @font-face {
-      font-family: 'Bungee'; font-style: normal; font-weight: 400; font-display: swap;
-      src: url(/fonts/bungee-latin.woff2) format('woff2');
+      font-family: 'National Park'; font-style: normal; font-weight: 800; font-display: swap;
+      src: url(/fonts/national-park-latin.woff2) format('woff2');
     }
     .board {
       position: relative; isolation: isolate; display: inline-block; width: fit-content;
-      padding: .85em 1.2em .8em; /* tall enough that the board image (about 2.4:1) isn't squashed much */
-      font-family: 'Bungee', 'Arial Black', Impact, sans-serif;
-      font-weight: 400; line-height: 1; letter-spacing: .03em;
+      padding: .6em .9em .58em; /* tall enough that the board image (about 2.4:1) isn't squashed much */
+      font-family: 'National Park', 'Trebuchet MS', sans-serif;
+      font-weight: 800; line-height: 1; letter-spacing: .01em;
       /* cream letters, like the buttons, with a dark edge below so they stand off the wood */
       color: #f6ecda;
       text-shadow: 0 .06em 0 rgba(40, 18, 5, .7), 0 0 .15em rgba(40, 18, 5, .35);
@@ -80,12 +80,12 @@
     .bar { display: flex; flex-direction: column; padding: 20px 0 8px; }
     .bar .board {
       display: block; width: 97%; align-self: center; text-align: center;
-      font-size: clamp(2rem, 9vw, 4.2rem); transform: rotate(-1.2deg);
+      font-size: clamp(2.7rem, 12vw, 5.4rem); transform: rotate(-1.2deg);
     }
-    /* the board's wood brown and dark outline, lettered in Bungee (same as the app's buttons, public/style.css) */
+    /* the board's wood brown and dark outline, lettered in National Park (same as the app's buttons, public/style.css) */
     .btn {
       display: inline-block; text-decoration: none; border: 1.5px solid #472610; border-radius: 6px; padding: 12px 20px;
-      font-family: 'Bungee', 'Arial Black', Impact, sans-serif; font-weight: 400; font-size: .95rem; letter-spacing: .04em;
+      font-family: 'National Park', 'Trebuchet MS', sans-serif; font-weight: 800; font-size: .95rem; letter-spacing: .01em;
       background: linear-gradient(180deg, #a05a28, #8a4720); color: #f6ecda; text-shadow: 0 1px 0 rgba(40, 18, 5, .5);
     }
     .btn.ghost { background: transparent; color: var(--text); border-color: var(--wood-line); text-shadow: none; }
@@ -128,7 +128,7 @@
     .card .swipe button {
       cursor: pointer; background: transparent; color: inherit;
       flex: 1; text-align: center; border-radius: 6px; padding: 10px; border: 1.5px solid var(--wood-line);
-      font-family: 'Bungee', 'Arial Black', Impact, sans-serif; font-size: .82rem; letter-spacing: .04em;
+      font-family: 'National Park', 'Trebuchet MS', sans-serif; font-weight: 800; font-size: .9rem; letter-spacing: .01em;
     }
     .card .swipe .no { color: var(--text); }
     .card .swipe .yes { background: #f6ecda; border-color: #472610; color: #3d220e; }
@@ -137,7 +137,7 @@
     .stamp {
       position: absolute; top: 26px; right: 18px; transform: rotate(12deg); opacity: 0; pointer-events: none;
       border: 3px solid var(--accent); color: var(--accent-text); border-radius: 8px; padding: 2px 10px;
-      font-family: 'Bungee', 'Arial Black', sans-serif; font-size: 1.05rem; letter-spacing: .04em;
+      font-family: 'National Park', 'Trebuchet MS', sans-serif; font-weight: 800; font-size: 1.05rem; letter-spacing: .01em;
     }
     .stamp.no { right: auto; left: 18px; transform: rotate(-12deg); border-color: var(--no); color: var(--no); }
 
@@ -180,7 +180,7 @@
     .closer { text-align: center; padding: 72px 0; }
     /* the same lettering as the logo, without the board: only the logo gets that */
     .closer .slogan {
-      font-family: 'Bungee', 'Arial Black', Impact, sans-serif; font-weight: 400; line-height: 1; letter-spacing: .03em;
+      font-family: 'National Park', 'Trebuchet MS', sans-serif; font-weight: 800; line-height: 1; letter-spacing: .01em;
       font-size: clamp(1.4rem, 5vw, 2.4rem); margin-bottom: 28px; color: var(--text);
     }
     footer { border-top: 1px solid var(--line); padding: 24px 0 calc(24px + env(safe-area-inset-bottom)); font-size: .9rem; color: var(--muted); }
@@ -203,8 +203,7 @@
     <div class="hero">
       <div>
         <h1>Bored is an app to make life <em>more fun.</em></h1>
-        <p class="lede">Want to do something? Post it. Neighbors who are in say so. Saw something you'd join? Swipe right. When both sides say yes, it's on.</p>
-        <p class="muted">Free. Open source. No ads. No email, phone number, or photos, ever.</p>
+        <p class="lede">Instead of scrolling through ads in a "social" media app, you can swipe through opportunities to actually socialize with other people! Use it for anything: go for walk with a bored neighbor; find another bored parent, and meet up at the park with your bored kids; spend some time with a friend who's doing some boring, monotonous task, like packing or painting; or meet at a cafe, so you can have a nice cup of coffee, and scroll through social media <em>together</em>!</p>
       </div>
       <div class="deck" aria-hidden="true"><!-- filled in by public/about.js; this card shows until then -->
         <div class="card back2"></div>
@@ -282,7 +281,7 @@
       <h2>Bored's promises</h2>
       <ul class="promises">
         <li><span class="check" aria-hidden="true">✓</span><div><h3>Free forever</h3><p>No premium tier. No paywalled features. Starting things and joining things cost nothing.</p></div></li>
-        <li><span class="check" aria-hidden="true">✓</span><div><h3>Free and open source</h3><p>Licensed under the GNU AGPL. Take the code, change it, run your own. Just keep it free for the next person, too.</p></div></li>
+        <li><span class="check" aria-hidden="true">✓</span><div><h3>Free libre open source</h3><p>Licensed under the GNU AGPL. Take the code, change it, run your own. Just keep it free for the next person, too.</p></div></li>
         <li><span class="check" aria-hidden="true">✓</span><div><h3>Ad-free, always</h3><p>Nobody is paying to put things in front of you, and nobody ever will.</p></div></li>
         <li><span class="check" aria-hidden="true">✓</span><div><h3>No investors, ever</h3><p>No one to answer to who wants a return on your attention.</p></div></li>
         <li><span class="check" aria-hidden="true">✓</span><div><h3>Private by design</h3><p>You can't leave personal info, because Bored doesn't collect it. Sign in with a passkey. Names you give contacts are encrypted in your browser, and chats are end-to-end encrypted.</p></div></li>

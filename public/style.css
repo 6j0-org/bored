@@ -78,7 +78,7 @@ header.top {
 }
 /* Title board spans the content width, matching the swipe cards. */
 .board.wide { display: block; width: 100%; text-align: center; transform: rotate(-1.2deg); }
-.logo { font-size: 2rem; margin-top: 4px; }
+.logo { font-size: 2.7rem; margin-top: 4px; }
 main { flex: 1; padding: 8px 16px 96px; display: flex; flex-direction: column; }
 
 nav.tabs {
@@ -198,10 +198,10 @@ input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); ou
 textarea { resize: vertical; min-height: 80px; }
 textarea.details-input { min-height: 160px; } /* the post's Details: twice the usual height */
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-/* Buttons: the title board's wood brown and dark outline, lettered in Bungee like the board (cream, for contrast). */
+/* Buttons: the title board's wood brown and dark outline, lettered in National Park like the board (cream, for contrast). */
 .btn {
   border: 1.5px solid #472610; border-radius: 6px; padding: 12px 16px;
-  font-family: 'Bungee', 'Arial Black', Impact, sans-serif; font-weight: 400; font-size: .9rem; letter-spacing: .04em;
+  font-family: 'National Park', 'Trebuchet MS', sans-serif; font-weight: 800; font-size: 1rem; letter-spacing: .01em;
   background: linear-gradient(180deg, #a05a28, #8a4720); color: #f6ecda; text-shadow: 0 1px 0 rgba(40, 18, 5, .5);
 }
 .btn.ghost { background: transparent; color: var(--text); border-color: var(--wood-line); text-shadow: none; }
@@ -282,19 +282,19 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
 .sheet .note { color: var(--muted); font-size: .85rem; margin: 0; }
 
 /* ---------- title on an oak plank ---------- */
-/* Bungee by David Jonathan Ross, SIL Open Font License 1.1 (public/fonts/Bungee-OFL.txt). Latin subset, bundled locally. */
+/* National Park by the National Park Project Authors, SIL Open Font License 1.1 (public/fonts/NationalPark-OFL.txt). Latin subset, bundled locally. */
 @font-face {
-  font-family: 'Bungee';
+  font-family: 'National Park';
   font-style: normal;
-  font-weight: 400;
+  font-weight: 800;
   font-display: swap;
-  src: url(/fonts/bungee-latin.woff2) format('woff2');
+  src: url(/fonts/national-park-latin.woff2) format('woff2');
 }
 .board {
   position: relative; isolation: isolate; display: inline-block; width: fit-content;
-  padding: .85em 1.2em .8em; /* tall enough that the board image (about 2.4:1) isn't squashed much */
-  font-family: 'Bungee', 'Arial Black', Impact, sans-serif;
-  font-weight: 400; line-height: 1; letter-spacing: .03em;
+  padding: .6em .9em .58em; /* tall enough that the board image (about 2.4:1) isn't squashed much */
+  font-family: 'National Park', 'Trebuchet MS', sans-serif;
+  font-weight: 800; line-height: 1; letter-spacing: .01em;
   /* cream letters, like the buttons, with a dark edge below so they stand off the wood */
   color: #f6ecda;
   text-shadow: 0 .06em 0 rgba(40, 18, 5, .7), 0 0 .15em rgba(40, 18, 5, .35);

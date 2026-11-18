@@ -1,60 +1,73 @@
-// The sample deck on the introduction page: the demo's example posts (public/examples.js), one card at a time.
-// Drag a card (mouse or touch), tap "Nah" or "I'm in", or use the arrow keys. It loops forever and saves nothing.
+// The sample deck on the introduction page: the demo's example posts (public/examples.js), drawn exactly like a
+// Discover card in the app (eventCard in public/app.js). Drag a card (mouse or touch), tap the round buttons, or use
+// the arrow keys. It loops forever and saves nothing.
 import { EXAMPLES, exampleWhen } from './examples.js';
 import { whenLabel, localToday } from './when.js';
 import { costLabel } from './cost.js';
+import { locationHtml } from './location.js';
+import { toSvg as identicon } from './vendor/jdenticon.js';
 
 const deck = document.querySelector('.deck');
-const FLING = 90; // px of drag that counts as a swipe
+const FLING = 100; // px of drag that counts as a swipe, as in the app
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+const attendeesLabel = (max) => (max == null ? 'No limit' : max === 1 ? '1 person' : `Up to ${max} people`);
+// What the demo shows for each host: how many of the examples they post.
+const hosted = EXAMPLES.reduce((n, e) => ({ ...n, [e.host]: (n[e.host] || 0) + 1 }), {});
 let index = 0;
 
 function cardHtml(e) {
-  const free = !e.cost;
-  const tags = [...e.tags, ...(free ? ['free'] : [])].map(t => `<span class="chip">${esc(t)}</span>`).join('');
-  const people = e.max == null ? 'Any number of people' : e.max === 1 ? 'Just 1 person' : `Up to ${e.max} people`;
+  const fact = (label, value) => `<dt>${label}</dt><dd>${value}</dd>`;
   return `
-    <div class="tags">${tags}</div>
-    <h3>${esc(e.title)}</h3>
-    <p class="meta">${esc(whenLabel(exampleWhen(e.when), { today: localToday() }))}</p>
-    <p class="meta">${esc(e.place)}</p>
-    <p class="meta">${esc(people)}${free ? '' : ` · ${esc(costLabel(e.cost, e.currency || 'USD'))}`}</p>
-    <div class="swipe"><button type="button" class="no">Nah</button><button type="button" class="yes">I'm in</button></div>
-    <span class="stamp yes" aria-hidden="true">I'm in!</span><span class="stamp no" aria-hidden="true">Nah</span>`;
+    <div class="stamp yes" aria-hidden="true">I'm in</div><div class="stamp no" aria-hidden="true">Pass</div>
+    <div class="body">
+      <h2>${esc(e.title)}</h2>
+      <dl class="facts">
+        ${fact('When', `<span class="when">${esc(whenLabel(exampleWhen(e.when), { today: localToday() }))}</span>`)}
+        ${fact('Where', locationHtml(e.location, '', { name: e.place }))}
+        ${fact('Cost', esc(costLabel(e.cost || 0, e.currency || 'USD')))}
+        ${fact('Max attendees', attendeesLabel(e.max))}
+        ${fact('Who can see it', 'Public')}
+        ${e.tags.length ? fact('Tags', e.tags.map(x => '#' + esc(x)).join(' ')) : ''}
+      </dl>
+      <div class="details">${esc(e.details)}</div>
+      <div class="who"><div class="avatar icon">${identicon(e.host, 100)}</div>
+        <div><b>Host</b><small>Hosted ${hosted[e.host]} · Attended 0</small></div>
+      </div>
+    </div>`;
 }
 
+let current;
 function show() {
+  const e = EXAMPLES[index % EXAMPLES.length];
   deck.innerHTML = `<div class="card back2"></div><div class="card back1"></div>
     <div class="card front" tabindex="0" aria-roledescription="example post"
-      aria-label="Example post ${index % EXAMPLES.length + 1} of ${EXAMPLES.length}. Swipe, or use the left and right arrow keys.">
-      ${cardHtml(EXAMPLES[index % EXAMPLES.length])}</div>`;
-  const card = deck.querySelector('.front');
-  card.querySelector('.no').onclick = () => swipe(card, -1);
-  card.querySelector('.yes').onclick = () => swipe(card, 1);
-  card.onkeydown = (e) => {
-    if (e.key === 'ArrowLeft') { e.preventDefault(); swipe(card, -1); }
-    if (e.key === 'ArrowRight') { e.preventDefault(); swipe(card, 1); }
+      aria-label="Example post ${index % EXAMPLES.length + 1} of ${EXAMPLES.length}: ${esc(e.title)}. Swipe, or use the left and right arrow keys.">
+      ${cardHtml(e)}</div>`;
+  current = deck.querySelector('.front');
+  current.onkeydown = (ev) => {
+    if (ev.key === 'ArrowLeft') { ev.preventDefault(); swipe(current, -1); }
+    if (ev.key === 'ArrowRight') { ev.preventDefault(); swipe(current, 1); }
   };
-  drag(card);
-  return card;
+  drag(current);
+  return current;
 }
 
-// Show a stamp in proportion to how far the card has moved: right "I'm in!", left "Nah".
+// Show a stamp in proportion to how far the card has moved: right "I'm in", left "Pass".
 function stamps(card, dx) {
   card.querySelector('.stamp.yes').style.opacity = Math.max(0, Math.min(1, dx / FLING));
   card.querySelector('.stamp.no').style.opacity = Math.max(0, Math.min(1, -dx / FLING));
 }
 
 function swipe(card, dir) {
-  if (card.dataset.gone) return;
+  if (!card || card.dataset.gone) return;
   card.dataset.gone = '1';
   stamps(card, dir * FLING);
   const refocus = card.contains(document.activeElement);
   const next = () => { index++; const fresh = show(); if (refocus) fresh.focus(); };
   if (reduceMotion) return void setTimeout(next, 250);
   card.style.transition = 'transform .35s ease-in, opacity .35s ease-in';
-  card.style.transform = `translate(${dir * 140}%, -4%) rotate(${dir * 24}deg)`;
+  card.style.transform = `translate(${dir * 140}%, 40px) rotate(${dir * 30}deg)`;
   card.style.opacity = '0';
   card.addEventListener('transitionend', next, { once: true });
 }
@@ -62,7 +75,7 @@ function swipe(card, dir) {
 function drag(card) {
   let start = null, dx = 0;
   card.addEventListener('pointerdown', (e) => {
-    if (e.button !== 0 || e.target.closest('button')) return;
+    if (e.button !== 0 || e.target.closest('a, button')) return;
     start = { x: e.clientX, y: e.clientY }; dx = 0;
     card.setPointerCapture(e.pointerId);
     card.classList.add('dragging');
@@ -70,7 +83,7 @@ function drag(card) {
   card.addEventListener('pointermove', (e) => {
     if (!start) return;
     dx = e.clientX - start.x;
-    card.style.transform = `translate(${dx}px, ${(e.clientY - start.y) * .2}px) rotate(${dx / 14 - 1.5}deg)`;
+    card.style.transform = `translate(${dx}px, ${(e.clientY - start.y) * .2}px) rotate(${dx / 18 - 1.5}deg)`;
     stamps(card, dx);
   });
   const end = () => {
@@ -83,4 +96,13 @@ function drag(card) {
   card.addEventListener('pointercancel', end);
 }
 
-if (deck) { deck.removeAttribute('aria-hidden'); show(); }
+if (deck) {
+  deck.removeAttribute('aria-hidden');
+  show();
+  const actions = document.querySelector('.deck-actions');
+  if (actions) {
+    actions.hidden = false;
+    actions.querySelector('.round.no').onclick = () => swipe(current, -1);
+    actions.querySelector('.round.yes').onclick = () => swipe(current, 1);
+  }
+}

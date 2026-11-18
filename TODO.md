@@ -163,3 +163,49 @@ about **connections and metadata**, and about the limits of doing end-to-end enc
   Define retention and purge on a schedule.
 - [ ] **P2: Seed data.** `seed.js` creates demo accounts with fixed, recognizable GUIDs (`00000000-0000-4000-8000-…`).
   Never run it against production.
+
+# Sloppy part
+
+Conversely, maybe you want to go out and patronize your local establishments, but you don't want to go alone? Also mutual aid helping people feels good and builds the social bonds that are the glue of civilization.
+
+Bored is free forever. It's free and open source software. If you want to steal our code and modify it, you can. It will always be ad-free. It will never seek investor funding. It is privacy-enforcing, you cannot leave personal info, because we don't collect it: no photos, no e-mail addresses, no phone number - you can't accidentally dox yourself
+
+Production and GA
+
+SQLite is enough. For under 100 users it's not even close to a limit; SQLite comfortably handles thousands of users at this scale. It's already in WAL mode, which is the right setting. Postgres would only be worth it if you needed several app servers at once, and Bored doesn't. The things that matter with SQLite:
+- Backups. This is the real gap. Use Litestream to stream copies to object storage continuously, or at least a nightly sqlite3 data.sqlite ".backup ..." copied off the server. Then actually test a restore.
+- Persistent disk. Keep the database on a real volume, not inside the container's own filesystem.
+- One app process. node:sqlite is synchronous and Bored runs as one process, which is fine. Just don't scale it out to several copies.
+
+Must-haves before GA:
+1. HTTPS, with ORIGIN set. Passkeys won't work without it. Put a reverse proxy like Caddy in front, and decide what it logs, since IP addresses are a P0 privacy item in TODO.md.
+2. Safety features. This app gets strangers to meet in person. I found no block or report feature in the server. You need at least:
+   - block a person;
+   - report a post or person, and a way for you to act on reports (hide posts, ban accounts);
+   - basic safety tips ("meet in public").
+3. Age policy. Some demo posts are by teens. Decide on a minimum age (13+ because of COPPA, or 18+), state it in the terms, and remember the app can't verify ages. Many apps that arrange in-person meetups just choose 18+.
+4. Terms of service and a privacy policy. The policy can be short because you collect so little, but you do store exact meetup locations and the who-met-whom graph.
+5. Account deletion. I didn't find a delete-account route, and GDPR and similar laws expect one.
+6. Rate limiting on sign-up, posting, swiping, and messaging, to stop spam and bots. Right now only place-name lookups are throttled.
+7. Monitoring. An uptime check, error logs, and disk-space alerts.
+8. Tests and CI. There's no test suite in the repo. My demo test script lives only in my scratchpad. A small API test run on every push would catch regressions.
+
+From TODO.md: the P0 items are the plaintext match graph, message metadata, IP addresses, HTTPS, the server delivering the code that holds the keys, and peer keys not being verified. For a 100-user GA you don't need to solve all of them, but the privacy policy should be honest about them. The cheap ones are HTTPS and proxy log settings.
+
+Nice to have: a staging copy of the site, automatic dependency updates, and a status page.
+
+The biggest gaps by far are backups and safety tools (block, report, and moderation). Should I start with Litestream backups, or with block and report?
+
+Should we try to turn it in p2p with relays?
+
+Moderation - default list of words to filter out? Default follow moderators. Filter by social score. Allow pull back the veil to see everything.
+6:41 AM
+
+Federation between instances with activity pub?
+
+Get rid of neighbor verbiage everywhere.
+
+export data
+
+map picker should have search field. good luck. Nominatum is not great.
+

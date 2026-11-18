@@ -104,21 +104,21 @@
     .hero h1 { font-size: clamp(2.2rem, 6vw, 3.4rem); letter-spacing: -.02em; margin-bottom: .4em; }
     .cta { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
 
-    /* A little swipe deck, drawn in CSS */
-    .deck { position: relative; height: 360px; max-width: 340px; width: 100%; margin: 0 auto; }
+    /* The example deck: the same card as Discover in the app (public/style.css), filled in by public/about.js */
+    .deck-col { width: 100%; max-width: 360px; margin: 0 auto; }
+    .deck { position: relative; height: 470px; width: 100%; }
     .card {
       position: absolute; inset: 0;
       /* the same brown and dark outline as the buttons and the title board */
       --text: #f6ecda; --muted: #f0dcc0; --line: rgba(255, 236, 210, .25); --bg: rgba(40, 18, 5, .22);
-      --accent: #d8eebd; --accent-soft: rgba(40, 18, 5, .28); --yes: #cdeab0; --no: #ffc2a8; --wood-line: #f0dcc0;
+      --accent: #d8eebd; --accent-text: #d8eebd; --accent-soft: rgba(40, 18, 5, .28); --yes: #cdeab0; --no: #ffc2a8;
       color: var(--text);
       background: linear-gradient(180deg, #a05a28, #8a4720);
       border: 1.5px solid #472610;
-      --accent-text: #d8eebd;
-      border-radius: 12px; box-shadow: var(--shadow); padding: 22px; display: flex; flex-direction: column;
+      border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; display: flex; flex-direction: column;
     }
-    .card.back2 { transform: rotate(-7deg) translate(-14px, 10px); }
-    .card.back1 { transform: rotate(4deg) translate(10px, 4px); }
+    .card.back2 { transform: rotate(-6deg) translate(-12px, 10px); }
+    .card.back1 { transform: rotate(3.5deg) translate(9px, 4px); }
     .card.front {
       transform: rotate(-1.5deg); cursor: grab; user-select: none;
       touch-action: pan-y; /* horizontal drags swipe the card; vertical ones still scroll the page */
@@ -126,31 +126,42 @@
     }
     .card.front.dragging { transition: none; cursor: grabbing; }
     .card.front:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
-    .card .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
-    .chip { font-size: .78rem; font-weight: 600; background: var(--accent-soft); color: var(--accent-text); padding: 3px 10px; border-radius: 999px; }
-    .card h3 { font-size: 1.35rem; margin-bottom: 8px; }
-    .card .meta { color: var(--muted); font-size: .92rem; margin: 0 0 4px; }
-    .card .swipe { margin-top: auto; display: flex; justify-content: space-between; gap: 10px; }
-    .card .swipe button {
-      cursor: pointer; background: transparent; color: inherit;
-      flex: 1; text-align: center; border-radius: 6px; padding: 10px; border: 1.5px solid var(--wood-line);
-      font-family: 'National Park', 'Trebuchet MS', sans-serif; font-weight: 800; font-size: .9rem; letter-spacing: .01em;
-    }
-    .card .swipe .no { color: var(--text); }
-    .card .swipe .yes { background: #f6ecda; border-color: #472610; color: #3d220e; }
-    .card .swipe button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
-    /* stamps fade in as the card is dragged (public/about.js): "I'm in!" to the right, "Nah" to the left */
+    .card .body { padding: 18px 20px; flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+    /* Long details scroll inside the card, which makes .body its own scroll area: without this, a sideways drag on
+       it is taken by the browser (even as a "back" swipe) instead of swiping the card. Same as the app. */
+    .card.front .body { touch-action: pan-y; }
+    .card h2 { font-size: 1.5rem; letter-spacing: -.01em; margin: 0; }
+    .card .details { opacity: .85; white-space: pre-wrap; font-size: 1rem; }
+    .facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-size: .9rem; }
+    .facts dt { color: var(--muted); }
+    .facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+    .facts .when { color: var(--accent); }
+    .facts a { color: var(--text); text-decoration: underline dotted; text-underline-offset: 3px; }
+    .who { display: flex; align-items: center; gap: 10px; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--line); }
+    .who small { color: var(--muted); display: block; }
+    .avatar { width: 40px; height: 40px; border-radius: 50%; flex: none; display: grid; place-items: center; background: #fff; overflow: hidden; }
+    .avatar svg { width: 82%; height: 82%; }
+    /* stamps fade in as the card is dragged: "I'm in" on the left as it goes right, "Pass" on the right as it goes left */
     .stamp {
-      position: absolute; top: 26px; right: 18px; transform: rotate(12deg); opacity: 0; pointer-events: none;
-      border: 3px solid var(--accent); color: var(--accent-text); border-radius: 8px; padding: 2px 10px;
-      font-family: 'National Park', 'Trebuchet MS', sans-serif; font-weight: 800; font-size: 1.05rem; letter-spacing: .01em;
+      position: absolute; top: 24px; padding: 4px 14px; border: 4px solid; border-radius: 10px; z-index: 1;
+      font-weight: 900; font-size: 1.6rem; letter-spacing: .05em; opacity: 0; text-transform: uppercase; pointer-events: none;
+      color: #f6ecda; /* solid: cream on fir green (yes) or rust (pass) */
     }
-    .stamp.no { right: auto; left: 18px; transform: rotate(-12deg); border-color: var(--no); color: var(--no); }
-
-    /* ---------- who it's for ---------- */
-    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
-    .tile { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 20px; }
-    .tile p { margin: 0; color: var(--muted); font-size: .97rem; }
+    .stamp.yes { left: 20px; background: #2f6b3a; border-color: #2f6b3a; transform: rotate(-14deg); }
+    .stamp.no { right: 20px; background: #a8432c; border-color: #a8432c; transform: rotate(14deg); }
+    /* the round Pass and I'm in buttons under the deck, as in the app */
+    .deck-actions { display: flex; justify-content: center; gap: 28px; margin-top: 24px; }
+    .round {
+      width: 68px; height: 68px; border-radius: 50%; border: 0; background: var(--surface); cursor: pointer;
+      box-shadow: var(--shadow); font-size: 1.8rem; display: grid; place-items: center; transition: transform .15s;
+    }
+    .round:active { transform: scale(.9); }
+    .round.no { color: #a8432c; }
+    .round.yes { color: #2f6b3a; }
+    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .round.no { color: #b4502f; } :root:not([data-theme="light"]) .round.yes { color: #4e9258; } }
+    :root[data-theme="dark"] .round.no { color: #b4502f; }
+    :root[data-theme="dark"] .round.yes { color: #4e9258; }
+    .round:focus-visible { outline: 3px solid var(--accent-text); outline-offset: 3px; }
 
     /* ---------- how it works ---------- */
     ol.steps { list-style: none; padding: 0; margin: 0; counter-reset: step; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
@@ -195,7 +206,7 @@
     @media (max-width: 760px) {
       .hero, .compare { grid-template-columns: 1fr; gap: 32px; }
       .hero { padding-top: 16px; }
-      .deck { height: 330px; max-width: 300px; }
+      .deck-col { padding: 0 12px; } /* room for the tilted cards behind, so the page doesn't get wider than a phone */
       section { padding: 44px 0; }
     }
   </style>
@@ -211,16 +222,11 @@
         <h1>Bored is an app to make life <em>more fun.</em></h1>
         <p class="lede">Instead of scrolling through ads in a "social" media app, you can swipe through opportunities to actually socialize with other people! Use it for anything: go for walk with a bored neighbor; find another bored parent, and meet up at the park with your bored kids; spend some time with a friend who's doing some boring, monotonous task, like packing or painting; or meet at a cafe, so you can have a nice cup of coffee, and scroll through social media <em>together</em>!</p>
       </div>
-      <div class="deck" aria-hidden="true"><!-- filled in by public/about.js; this card shows until then -->
-        <div class="card back2"></div>
-        <div class="card back1"></div>
-        <div class="card front">
-          <div class="tags"><span class="chip">fitness</span><span class="chip">free</span><span class="chip">beginners</span></div>
-          <h3>Ultimate frisbee in the park</h3>
-          <p class="meta">Saturday, 10:00</p>
-          <p class="meta">Riverside Park, east lawn</p>
-          <p class="meta">3 of 10 spots taken</p>
-          <div class="swipe"><button type="button" class="no" tabindex="-1">Nah</button><button type="button" class="yes" tabindex="-1">I'm in</button></div>
+      <div class="deck-col">
+        <div class="deck" aria-hidden="true"></div><!-- filled in by public/about.js -->
+        <div class="deck-actions" hidden>
+          <button type="button" class="round no" aria-label="Pass">✕</button>
+          <button type="button" class="round yes" aria-label="I'm in">♥</button>
         </div>
       </div>
     </div>
@@ -228,14 +234,7 @@
 
   <section>
     <div class="wrap">
-      <h2>Not enough people time?</h2>
-      <div class="grid">
-        <div class="tile"><h3>Remote workers</h3><p>Your coworkers are faces in little boxes. Go meet some people with legs.</p></div>
-        <div class="tile"><h3>New in town</h3><p>You don't know anyone yet. Everyone here was new once.</p></div>
-        <div class="tile"><h3>Stay-at-home parents</h3><p>You love your kids. You'd also love a conversation with an adult.</p></div>
-        <div class="tile"><h3>Don't want to go alone</h3><p>That new ramen place, trivia night, the local show. Support your local spots, with company.</p></div>
-      </div>
-      <p class="muted" style="margin-top:24px">Socializing doesn't have to mean excess calories, booze, or cash. A walk, a board game, a pickup game in the park. Bored helps you find people to do whatever it is you want to do.</p>
+      <p class="muted">Socializing doesn't have to mean excess calories, booze, or cash. A walk, a board game, a pickup game in the park. Bored helps you find people to do whatever it is you want to do.</p>
     </div>
   </section>
 

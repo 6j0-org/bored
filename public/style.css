@@ -125,6 +125,10 @@ nav.tabs button.active { color: var(--accent); font-weight: 700; }
   font-size: 5rem; position: relative; background: linear-gradient(135deg, rgba(40, 18, 5, .2), rgba(40, 18, 5, .55));
 }
 .card .body { padding: 18px 20px; flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+/* Long details scroll inside the card, which makes .body its own scroll area with the browser's default touch
+   handling: a sideways drag there would be taken by the browser (even as a "back" swipe) instead of swiping the card.
+   Let it scroll up and down, and leave sideways drags to the deck. */
+.card .body { touch-action: pan-y; }
 .card h2 { font-size: 1.5rem; letter-spacing: -.01em; }
 .card .details { color: var(--text); opacity: .85; white-space: pre-wrap; }
 .meta { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -152,10 +156,10 @@ nav.tabs button.active { color: var(--accent); font-weight: 700; }
 .stamp {
   position: absolute; top: 24px; padding: 4px 14px; border: 4px solid; border-radius: 10px;
   font-weight: 900; font-size: 1.6rem; letter-spacing: .05em; opacity: 0; text-transform: uppercase;
-  background: rgba(255,255,255,.85);
+  color: #f6ecda; /* solid: cream on fir green (yes) or rust (pass) */
 }
-.stamp.yes { left: 20px; color: var(--yes); transform: rotate(-14deg); }
-.stamp.no  { right: 20px; color: var(--no); transform: rotate(14deg); }
+.stamp.yes { left: 20px; background: #2f6b3a; border-color: #2f6b3a; transform: rotate(-14deg); }
+.stamp.no  { right: 20px; background: #a8432c; border-color: #a8432c; transform: rotate(14deg); }
 
 .actions { display: flex; justify-content: center; gap: 28px; }
 .round {

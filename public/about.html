@@ -176,11 +176,8 @@
 
     /* ---------- why not ---------- */
     .narrow p { max-width: 65ch; } /* comfortable line length for the text-only sections */
-    .compare { display: grid; grid-template-columns: 1fr 1fr; gap: 32px; align-items: start; }
-    .others { list-style: none; padding: 0; margin: 0; display: grid; gap: 10px; }
-    .others li { background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 12px 16px; }
-    .others b { display: block; }
-    .others span { color: var(--muted); font-size: .94rem; }
+    .wrongs { padding-left: 1.2em; margin: 0 0 1em; }
+    .wrongs li { margin: 6px 0; }
 
     /* ---------- promises ---------- */
     .promises { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
@@ -204,7 +201,7 @@
     footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; }
 
     @media (max-width: 760px) {
-      .hero, .compare { grid-template-columns: 1fr; gap: 32px; }
+      .hero { grid-template-columns: 1fr; gap: 32px; }
       .hero { padding-top: 16px; }
       .deck-col { padding: 0 12px; } /* room for the tilted cards behind, so the page doesn't get wider than a phone */
       section { padding: 44px 0; }
@@ -251,25 +248,19 @@
   </section>
 
   <section id="why-not">
-    <div class="wrap compare">
-      <div>
-        <h2>What's wrong with other event sites?</h2>
-        <p>They're businesses. They make money from ads, subscriptions, ticket fees, or investors who expect a return, and most of them want to know who you are: your name, your face, your email, your phone number, your address.</p>
-        <p>Bored doesn't, because Bored isn't a business.</p>
-      </div>
-      <ul class="others">
-        <li><b>Meetup</b><span>Organizers pay a subscription to run a group, members are offered a paid Meetup+ tier, and organizers can make you wait for approval or require a profile photo to join.</span></li>
-        <li><b>Facebook Groups &amp; Events</b><span>Real-name profiles, paid for by ads built on what you do.</span></li>
-        <li><b>Eventbrite</b><span>Built for selling tickets, not for meeting people, with fees added to paid tickets.</span></li>
-        <li><b>Evite</b><span>Free invitations come with ads. Ad-free designs cost extra.</span></li>
-        <li><b>Paperless Post</b><span>Premium designs cost “Coins” you buy, and you need an account to send.</span></li>
-        <li><b>Partiful</b><span>Built around your phone number. Backed by venture capital.</span></li>
-        <li><b>Luma</b><span>Takes 5% of paid tickets unless the host pays for a Luma Plus subscription.</span></li>
-        <li><b>Bumble For Friends</b><span>Profile photos up front, with paid upgrades for more.</span></li>
-        <li><b>Nextdoor</b><span>Wants to verify your home address. Ad-supported.</span></li>
-        <li><b>Peanut</b><span>Photo profiles and selfie verification for moms, with a paid Peanut Plus tier.</span></li>
-        <li><b>Timeleft</b><span>Dinner with strangers, for a membership or ticket fee on top of your meal.</span></li>
+    <div class="wrap narrow">
+      <h2>What's wrong with other event sites?</h2>
+      <p>They're businesses. They make money from ads, subscriptions, ticket fees, or investors who expect a return, and most of them want to know who you are: your name, your face, your email, your phone number, your address.</p>
+      <p>That shows up in what they ask of you:</p>
+      <ul class="wrongs">
+        <li>Organizers pay a subscription to run a group, and everyone else is offered a premium tier, paid upgrades, or in-app coins for the nicer stuff.</li>
+        <li>A cut of every paid ticket, or a membership fee just to show up, on top of what the thing itself costs.</li>
+        <li>Ads built on what you do, unless you pay extra to make them go away.</li>
+        <li>A real-name profile, a profile photo, a selfie to verify your face, your phone number, or your verified home address before you can join, and an account before you can even send an invitation.</li>
+        <li>Organizers who can make you wait for their approval.</li>
+        <li>Tools built for selling tickets, not for meeting people.</li>
       </ul>
+      <p>Bored doesn't do any of that, because Bored isn't a business.</p>
     </div>
   </section>
 
@@ -319,7 +310,7 @@
   <footer>
     <div class="wrap">
       <span>Bored? is free software under the <a href="https://www.gnu.org/licenses/agpl-3.0.html">GNU AGPL v3 or later</a>.</span>
-      <span>Source: <a href="https://codeberg.org/6j0-org/bored">Codeberg</a> · <a href="https://gitlab.com/6j0-org/bored">GitLab</a> · <a href="https://github.com/6j0-org/bored">GitHub</a></span>
+      <span>Source: <a href="https://codeberg.org/6j0-org/bored">Codeberg</a> · <a href="https://gitlab.com/6j0-org/bored">GitLab</a> · <a href="https://github.com/6j0-org/bored">GitHub</a> · <a href="https://app.radicle.xyz/nodes/iris.radicle.network/rad:z2j6Pog3cY6azMjstGj1utmB81kTZ">Radicle</a></span>
     </div>
   </footer>
 </body>

@@ -14,6 +14,9 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 const attendeesLabel = (max) => (max == null ? 'No limit' : max === 1 ? '1 person' : `Up to ${max} people`);
 // What the demo shows for each host: how many of the examples they post.
 const hosted = EXAMPLES.reduce((n, e) => ({ ...n, [e.host]: (n[e.host] || 0) + 1 }), {});
+// A fresh shuffle on every visit (Fisher-Yates), so the deck doesn't always open on the same post.
+const DECK = [...EXAMPLES];
+for (let i = DECK.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [DECK[i], DECK[j]] = [DECK[j], DECK[i]]; }
 let index = 0;
 
 function cardHtml(e) {
@@ -23,8 +26,8 @@ function cardHtml(e) {
     <div class="body">
       <h2>${esc(e.title)}</h2>
       <dl class="facts">
-        ${fact('When', `<span class="when">${esc(whenLabel(exampleWhen(e.when), { today: localToday() }))}</span>`)}
-        ${fact('Where', locationHtml(e.location, '', { name: e.place }))}
+        ${e.when ? fact('When', `<span class="when">${esc(whenLabel(exampleWhen(e.when), { today: localToday() }))}</span>`) : ''}
+        ${e.location || e.place ? fact('Where', locationHtml(e.location, '', { name: e.place })) : ''}
         ${fact('Cost', esc(costLabel(e.cost || 0, e.currency || 'USD')))}
         ${fact('Max attendees', attendeesLabel(e.max))}
         ${fact('Who can see it', 'Public')}
@@ -32,17 +35,17 @@ function cardHtml(e) {
       </dl>
       <div class="details">${esc(e.details)}</div>
       <div class="who"><div class="avatar icon">${identicon(e.host, 100)}</div>
-        <div><b>Host</b><small>Hosted ${hosted[e.host]} · Attended 0</small></div>
+        <div><small>Hosted ${hosted[e.host]} · Attended 0</small></div>
       </div>
     </div>`;
 }
 
 let current;
 function show() {
-  const e = EXAMPLES[index % EXAMPLES.length];
+  const e = DECK[index % DECK.length];
   deck.innerHTML = `<div class="card back2"></div><div class="card back1"></div>
     <div class="card front" tabindex="0" aria-roledescription="example post"
-      aria-label="Example post ${index % EXAMPLES.length + 1} of ${EXAMPLES.length}: ${esc(e.title)}. Swipe, or use the left and right arrow keys.">
+      aria-label="Example post ${index % DECK.length + 1} of ${DECK.length}: ${esc(e.title)}. Swipe, or use the left and right arrow keys.">
       ${cardHtml(e)}</div>`;
   current = deck.querySelector('.front');
   current.onkeydown = (ev) => {

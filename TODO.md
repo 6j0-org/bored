@@ -21,9 +21,6 @@ about **connections and metadata**, and about the limits of doing end-to-end enc
 - [ ] **P1: The "Your circle" stats come from the graph.** `/api/ledger` computes events-together counts per pair on the
   server, so the server must know the pairs. Move this to the client (count from your own encrypted vault) once
   matches are protected.
-- [x] **P1: Posts are linkable to one account.** Fixed: the API only sends a GUID for people you've matched with
-  (`MATCHED` in `server.js`), so Discover, Confirm, and waitlist entries are anonymous, and private posts can only
-  be shared with people you've matched with. The hosted/attended counts on cards can still hint at who it is.
 - [ ] **P1: Avatars link posts to one person.** By design, everyone has one Jdenticon, the same for every viewer
   (the API sends strangers its hash, `iconHash` in `server.js`, not the GUID). So anyone can still tell which posts
   are from the same host. A per-post or per-viewer icon would stop that, at the cost of people having one face.
@@ -183,7 +180,6 @@ Must-haves before GA:
    - block a person;
    - report a post or person, and a way for you to act on reports (hide posts, ban accounts);
    - basic safety tips ("meet in public").
-3. Age policy. Some demo posts are by teens. Decide on a minimum age (13+ because of COPPA, or 18+), state it in the terms, and remember the app can't verify ages. Many apps that arrange in-person meetups just choose 18+.
 4. Terms of service and a privacy policy. The policy can be short because you collect so little, but you do store exact meetup locations and the who-met-whom graph.
 5. Account deletion. I didn't find a delete-account route, and GDPR and similar laws expect one.
 6. Rate limiting on sign-up, posting, swiping, and messaging, to stop spam and bots. Right now only place-name lookups are throttled.

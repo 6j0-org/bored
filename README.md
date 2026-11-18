@@ -141,6 +141,9 @@ A post stays in the deck until it reaches its max attendees. Posts with no limit
 - `public/theme.js`: the automatic / light / dark theme switch, applied before the page draws
 - `public/board.webp`: the wooden board behind the Bored? title
 - `public/when.js`, `public/cost.js`: event time (with repeat rules) and cost formats, shared by server and browser
+- `public/pii.js`: finds contact info and ID numbers in posts and notes, which the server refuses and the post form
+  points out as you type, with [`@devopscoop/eat-the-pii`](https://gitlab.com/devopscoop/eat-the-pii) (installed from
+  its git URL, so `.npmrc` sets `allow-git=root`); `public/libphonenumber.js` loads its phone number data in the browser
 - `public/fonts/`: bundled National Park font, used for all text (SIL OFL 1.1, license alongside). The app loads nothing from outside its own server, except OpenStreetMap tiles while the location picker is open. Suggested place names come from OpenStreetMap's Nominatim, asked by the server (`/api/places/reverse`).
 - `demo.js`: demo accounts and posts, and the ready-made account each visitor gets in demo mode (`DEMO=1`)
 - `seed.js`: adds the demo accounts and posts to a real database (`npm run seed`)
@@ -158,4 +161,4 @@ The AGPL also covers running Bored? as a service: if you run a modified version 
 its source. The app links to the source from the sign-in and Profile screens (`SOURCE_URL` in `public/app.js`); point
 it at your own repository if you change the code.
 
-The bundled National Park font is under the SIL Open Font License 1.1 (`public/fonts/NationalPark-OFL.txt`), and Jdenticon is MIT.
+The bundled National Park font is under the SIL Open Font License 1.1 (`public/fonts/NationalPark-OFL.txt`), and Jdenticon, eat-the-pii, and libphonenumber-js are MIT.

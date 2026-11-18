@@ -5,8 +5,11 @@
 FROM node:24-alpine
 
 WORKDIR /app
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev --ignore-scripts
+COPY package.json package-lock.json .npmrc ./
+# git only while installing: @devopscoop/eat-the-pii comes from its git URL until it's published to npm.
+RUN apk add --no-cache --virtual .install-deps git \
+ && npm ci --omit=dev --ignore-scripts \
+ && apk del .install-deps
 COPY server.js db.js demo.js push.js webauthn.js idtoken.js ./
 COPY public ./public
 

@@ -1,10 +1,12 @@
 import http from 'node:http';
+import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { newChallenge, takeChallenge, verifyRegistration, verifyAssertion, WebAuthnError } from './webauthn.js';
 import { verifyIdToken, IdTokenError } from './idtoken.js';
 import { composeWhen, whenLabel, occursBetween } from './public/when.js';
 import { parseCost, costLabel } from './public/cost.js';
+import { piiProblems } from './public/pii.js';
 import { vapidPublicKey, validEndpoint, sendPush } from './push.js';
 import { db, DEMO, parseTags, setEventTags, MAX_TAGS, MAX_ATTENDEES_LIMIT, MAX_VIEWERS } from './db.js';
 import { seedDemo, seedVisitor, isDemoGuid, demoHostReply, pruneVisitors } from './demo.js';
@@ -80,7 +82,10 @@ function newSession(res, userId) {
 function stats(userId) {
   const hosted = q(`SELECT COUNT(DISTINCT s.event_id) n FROM swipes s JOIN events t ON t.id = s.event_id WHERE t.host_id = ? AND s.status = 'attended'`).get(userId).n;
   const attended = q(`SELECT COUNT(*) n FROM swipes WHERE attendee_id = ? AND status = 'attended'`).get(userId).n;
-  return { hosted, attended };
+  // People helped: different hosts of posts tagged "help" that this person showed up for.
+  const helped = q(`SELECT COUNT(DISTINCT t.host_id) n FROM swipes s JOIN events t ON t.id = s.event_id
+    JOIN event_tags g ON g.event_id = t.id AND g.tag = 'help' WHERE s.attendee_id = ? AND s.status = 'attended'`).get(userId).n;
+  return { hosted, attended, helped };
 }
 
 // What anyone may learn about an account: its GUID and activity counts. Never a name.
@@ -181,10 +186,21 @@ function whenField(start, repeat) {
   return v;
 }
 
+function noteField(v) {
+  const note = str(v, 280, { field: 'Note' });
+  noPii('Note', note);
+  return note;
+}
+
 function costFields(amount, currency) {
   const c = parseCost(amount, currency);
   if (c.error) throw new HttpError(400, c.error);
   return c;
+}
+
+function noPii(field, text, options) {
+  const { error } = piiProblems(field, text, options);
+  if (error) throw new HttpError(400, error);
 }
 
 function eventFields(body) {
@@ -204,6 +220,9 @@ function eventFields(body) {
   };
   // An online-only post has no place.
   if (f.online === 1) { f.location = ''; f.location_name = ''; }
+  // No contact info or ID numbers (public/pii.js): people share contact info in chat after they match.
+  noPii('Title', f.title); noPii('Details', f.details); noPii('Place', f.location_name, { addresses: false });
+  f.tags.forEach(tag => noPii('Tags', tag));
   return f;
 }
 const FIELD_LABELS = { title: 'Title', details: 'Details', tags: 'Tags', location: 'Where', when_text: 'When', cost: 'Cost', visibility: 'Visibility', max_attendees: 'Max attendees' };
@@ -550,6 +569,11 @@ route('GET', '/api/places/reverse', async ({ req, query, res }) => {
   send(res, 200, { name: await reverseGeocode(lat, lon, lang) });
 });
 
+// In demo mode, each visitor gets their own shuffle of the example posts instead of newest first: a hash of the post
+// and the visitor, so the order stays put while they swipe and reload. (Squared, since a linear hash would give every
+// visitor the same order, just rotated.) Values stay under 10^12, well inside SQLite's 64-bit integers.
+const DEMO_ORDER = `((t.id * 7919 + :me * 104729) % 1000003) * ((t.id * 7919 + :me * 104729) % 1000003) % 1000003, t.id`;
+
 // The Discover deck (also shown to signed-out guests). ?tags=a,b keeps events with ANY of those tags;
 // ?cost=free or ?cost=paid keeps only free or paid events (both, or neither, = all); ?from=&to= keeps events that
 // happen (or repeat) on one of those days. Where: ?near=&km= keeps events within that distance, and ?online=1 events
@@ -570,7 +594,7 @@ route('GET', '/api/discover', async ({ user, query, res }) => {
       AND (:costs = '[]' OR (CASE WHEN t.cost_amount > 0 THEN 'paid' ELSE 'free' END) IN (SELECT value FROM json_each(:costs)))
       AND (:dated = 0 OR t.when_text != '')
       AND (:located = 0 OR t.location != '' OR t.online > 0)
-    ORDER BY t.created_at DESC, t.id DESC
+    ORDER BY ${DEMO ? DEMO_ORDER : 't.created_at DESC, t.id DESC'}
     LIMIT :limit`).all({ me: user?.id ?? -1, tags: JSON.stringify(tags), costs: JSON.stringify(costs),
       dated: range ? 1 : 0, located: near || online ? 1 : 0, limit: range || near || online ? -1 : 30 }) // date and place are checked in JS, so those read all, then cut
     .filter(t => !range || occursBetween(t.when_text, range.from, range.to))
@@ -611,7 +635,7 @@ route('POST', '/api/events/:id/swipe', async ({ user, params, body, res }) => {
   const yes = body.yes ? 1 : 0;
   const r = q(`INSERT INTO swipes (event_id, attendee_id, yes, note, status) VALUES (?, ?, ?, ?, ?)
      ON CONFLICT(event_id, attendee_id) DO NOTHING`)
-    .run(event.id, user.id, yes, str(body.note, 280, { field: 'Note' }), yes ? 'pending' : 'declined');
+    .run(event.id, user.id, yes, noteField(body.note), yes ? 'pending' : 'declined');
   if (yes && r.changes) notify(event.host_id, { body: `Someone wants to join ${quoted(event.title)}`, tag: 'confirm', open: 'confirm' });
   // Demo mode: demo accounts say yes right away, so a visitor sees a match happen.
   const host = DEMO && yes && r.changes && q('SELECT guid FROM users WHERE id = ?').get(event.host_id);
@@ -1039,6 +1063,7 @@ route('GET', '/api/ledger', async ({ user, res }) => {
 
 const STATIC = {
   '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/secure.js': 'secure.js', '/style.css': 'style.css', '/location.js': 'location.js', '/when.js': 'when.js', '/cost.js': 'cost.js', '/ics.js': 'ics.js',
+  '/pii.js': 'pii.js', '/libphonenumber.js': 'libphonenumber.js',
   '/about': 'about.html', '/about.html': 'about.html', '/landing.js': 'landing.js', '/about.js': 'about.js', '/examples.js': 'examples.js',
   '/sw.js': 'sw.js', '/theme.js': 'theme.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon.svg': 'icon.svg', '/board.webp': 'board.webp',
   // National Park, SIL OFL 1.1 (see public/fonts/NationalPark-OFL.txt)
@@ -1048,13 +1073,17 @@ const STATIC = {
 // needed to install them, never while the app runs. Paths are relative to this file.
 const VENDOR = {
   '/vendor/jdenticon.js': 'node_modules/jdenticon/dist/jdenticon-module.mjs', // Jdenticon avatars, MIT
+  '/vendor/eat-the-pii.js': 'node_modules/@devopscoop/eat-the-pii/src/index.js', // personal info in posts, MIT
+  '/vendor/libphonenumber-min.js': 'node_modules/libphonenumber-js/bundle/libphonenumber-min.js', // phone numbers, MIT
 };
 const MIME = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', mjs: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8',
   woff2: 'font/woff2', webmanifest: 'application/manifest+json', svg: 'image/svg+xml', webp: 'image/webp' };
 
 // Everything is served from this origin; a strict CSP keeps injected scripts away from the keys in the page.
 // (style-src allows inline style attributes used in the markup; img-src allows OSM tiles for the location picker.)
-const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://tile.openstreetmap.org; " +
+// The one inline script, the import map in index.html, is allowed by its hash, worked out from the file itself.
+const IMPORT_MAP = readFileSync(new URL('./public/index.html', import.meta.url), 'utf8').match(/<script type="importmap">([\s\S]*?)<\/script>/)[1];
+const CSP = `default-src 'self'; script-src 'self' 'sha256-${createHash('sha256').update(IMPORT_MAP).digest('base64')}'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://tile.openstreetmap.org; ` +
   "font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'";
 
 const server = http.createServer(async (req, res) => {

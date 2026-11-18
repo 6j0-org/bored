@@ -14,6 +14,8 @@
     "seed": "node seed.js"
   },
   "dependencies": {
-    "jdenticon": "3.3.0"
+    "@devopscoop/eat-the-pii": "git+https://gitlab.com/devopscoop/eat-the-pii.git#v0.1.0",
+    "jdenticon": "3.3.0",
+    "libphonenumber-js": "1.13.16"
   }
 }

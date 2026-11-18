@@ -11,7 +11,7 @@ import { toSvg as identicon } from './vendor/jdenticon.js';
 import { addToCalendar } from './ics.js';
 
 // Well-known tags, offered as one-tap suggestions. Posts can also use any other tag.
-const TAGS = ['hiking', 'food', 'gardening', 'hauling', 'moving', 'fixing', 'pets', 'tech', 'cooking',
+const TAGS = ['help', 'hiking', 'food', 'gardening', 'hauling', 'moving', 'fixing', 'pets', 'tech', 'cooking',
   'errands', 'fitness', 'board-games', 'video-games', 'movies'];
 const MAX_TAGS = 5;
 const MAX_ATTENDEES_LIMIT = 500; // must match db.js
@@ -62,10 +62,23 @@ const normalizeTag = (raw) => String(raw ?? '').toLowerCase().trim().replace(/^#
 const CONTACT_TAGS = ['family', 'friends', 'neighbors', 'work'];
 
 // Signed-out guests can browse Discover; everything else needs an account.
-// AGPL-3.0 section 13: people using the app over the network must be offered its source.
-const SOURCE_URL = 'https://codeberg.org/6j0-org/bored';
-const ABOUT_LINKS = `<p class="note" style="margin-top:20px;text-align:center"><a href="/about">About Bored?</a> · 
-  <a href="${SOURCE_URL}">Source code</a> (free software, AGPL-3.0)</p>`;
+// AGPL-3.0 section 13: people using the app over the network must be offered its source. The links are in the
+// introduction page's footer (public/about.html), reached from here and from the title board.
+const ABOUT_LINKS = `<p class="note" style="margin-top:20px;text-align:center"><a href="/about">About Bored?</a></p>`;
+
+// Tab icons on the wood buttons: a quest-giver's "?" and "!" for Discover and Confirm, then simple line drawings.
+// All are cream (--wood-text), like the lettering on the other buttons.
+const svgIcon = (body, { fill = false } = {}) => `<svg viewBox="0 0 24 24" aria-hidden="true" ${fill
+  ? 'fill="currentColor"' : 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"'}>${body}</svg>`;
+const PERSON_ICON = svgIcon('<circle cx="12" cy="8" r="4.2"/><path d="M3.8 21.5c0-4.6 3.7-7.3 8.2-7.3s8.2 2.7 8.2 7.3z"/>', { fill: true });
+const TAB_ICONS = {
+  discover: '<span class="tab-mark" aria-hidden="true">?</span>',
+  confirm: '<span class="tab-mark" aria-hidden="true">!</span>',
+  plans: svgIcon('<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>'),
+  post: svgIcon('<path d="M4 20l1.2-4.4L15.8 5a2.1 2.1 0 0 1 3 3L8.4 18.8z"/><path d="M13.8 7l3 3"/>'),
+  profile: PERSON_ICON,
+  account: PERSON_ICON,
+};
 
 const GUEST_TABS = [
   { id: 'discover', label: 'Discover' },
@@ -103,7 +116,7 @@ const POST_IDEAS = [
     template: {
       title: 'Help tending the garden',
       details: "Weeding, watering, and some general tidying. I'll provide gloves, tools, and something cold to drink.",
-      tags: ['gardening'], max_attendees: 1, when: [10, 6],
+      tags: ['gardening', 'help'], max_attendees: 1, when: [10, 6],
     },
   },
   {
@@ -119,7 +132,7 @@ const POST_IDEAS = [
     template: {
       title: 'Help assembling some furniture',
       details: "Got a flat-pack piece that's a two-person job. I have the instructions and an Allen key; a drill would be a bonus. Should take an hour or two.",
-      tags: ['fixing'], max_attendees: 1, when: [14, 0],
+      tags: ['fixing', 'help'], max_attendees: 1, when: [14, 0],
     },
   },
   {
@@ -503,16 +516,19 @@ document.addEventListener('keydown', (e) => mountDeck.keyHandler?.(e));
 function shell(content) {
   const me = state.me, c = me?.counts || {};
   const tabs = me ? TABS : GUEST_TABS;
+  // The page's name under the board. The account screen is "Unlock" for someone signed in without their keys here.
+  const title = state.tab === 'account' ? (me ? 'Unlock' : 'Sign in') : TABS.find(t => t.id === state.tab)?.label || '';
   app.innerHTML = `
     <header class="top">
-      <div class="logo board wide">Bored?</div>
+      <a class="logo board wide" href="/about" title="About Bored?">Bored?</a>
+      <h1 class="page-title">${esc(title)}</h1>
     </header>
     <main id="view"></main>
-    <nav class="tabs">
+    <nav class="tabs" style="grid-template-columns: repeat(${tabs.length}, 1fr)">
       ${tabs.map(t => {
         const n = t.id === 'confirm' ? c.confirm : t.id === 'plans' ? c.plans : 0;
-        return `<button data-tab="${t.id}" class="${state.tab === t.id ? 'active' : ''}">
-          ${t.label}${n ? `<span class="badge">${n}</span>` : ''}</button>`;
+        return `<button data-tab="${t.id}" class="${state.tab === t.id ? 'active' : ''}" aria-label="${t.label}" title="${t.label}"
+          ${state.tab === t.id ? 'aria-current="page"' : ''}>${TAB_ICONS[t.id]}${n ? `<span class="badge">${n}</span>` : ''}</button>`;
       }).join('')}
     </nav>`;
   app.querySelectorAll('nav.tabs button').forEach(b => b.onclick = () => go(b.dataset.tab));
@@ -755,7 +771,7 @@ function eventCard(t) {
       </dl>
       ${t.details ? `<div class="details">${esc(t.details)}</div>` : ''}
       <div class="who">${avatar(t.host.guid || t.host.icon)}
-        <div>${contactName(t.host.guid) ? `<b>${esc(contactName(t.host.guid))}</b>` : '<b>Host</b>'}
+        <div>${contactName(t.host.guid) ? `<b>${esc(contactName(t.host.guid))}</b>` : ''}
           <small>Hosted ${t.host.hosted} · Attended ${t.host.attended}</small></div>
       </div>
     </div>`;
@@ -1220,6 +1236,30 @@ function mountWhenFields(form) {
   });
 }
 
+// While you type a title or details, say if they look like they have contact info or ID numbers (which the server
+// refuses, so the form won't submit) or a street address (just a warning). The checker, public/pii.js with its phone
+// number data, loads the first time it's needed. If it can't load, the server still checks.
+let piiModule;
+function mountPiiCheck(form) {
+  for (const [name, field] of [['title', 'Title'], ['details', 'Details']]) {
+    const input = form.querySelector(`[name=${name}]`);
+    if (!input) continue;
+    const msg = document.createElement('p');
+    msg.className = 'notice warn pii-notice'; msg.hidden = true; msg.setAttribute('aria-live', 'polite');
+    input.closest('label').after(msg);
+    const check = async () => {
+      piiModule ||= import('./pii.js');
+      const { error, warning } = (await piiModule).piiProblems(field, input.value);
+      input.setCustomValidity(error || '');
+      msg.textContent = error || warning || '';
+      msg.hidden = !msg.textContent;
+    };
+    let timer;
+    input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => check().catch(() => {}), 300); });
+    if (input.value) check().catch(() => {}); // editing a post written before the check existed
+  }
+}
+
 // Cost: an amount (blank or 0 = free) and a currency, which defaults to the last one picked.
 function costInputs(t = {}) {
   const cur = t.cost_currency || lastCurrency(), costId = fieldId('cost');
@@ -1391,7 +1431,7 @@ function openPostSheet(t = {}) {
   const sheet = document.createElement('div');
   sheet.className = 'sheet';
   sheet.innerHTML = `
-    <form class="stack panel" id="sheetForm">
+    <form class="stack panel post-form" id="sheetForm">
       <h2>${editing ? 'Edit post' : 'New post'}</h2>
       ${eventFormFields(t)}
       ${editing && t.matched ? `<p class="note">Anyone you've matched with will get a message about what changed and be asked to re-confirm.</p>` : ''}
@@ -1406,6 +1446,7 @@ function openPostSheet(t = {}) {
   mountAudience(sheet.querySelector('form'));
   mountLocationField(sheet.querySelector('form'));
   mountWhenFields(sheet.querySelector('form'));
+  mountPiiCheck(sheet.querySelector('form'));
   mountCostFields(sheet.querySelector('form'));
   const close = () => sheet.remove();
   sheet.querySelector('#cancelSheet').onclick = close;
@@ -1468,7 +1509,7 @@ async function viewPost(v) {
       </button>
       <button type="button" class="idea-next" aria-label="Next idea" title="Next idea">›</button>
     </div>
-    <form class="stack" id="newEvent">
+    <form class="stack post-form" id="newEvent">
       ${eventFormFields()}
       <button class="btn">Post it</button>
     </form>
@@ -1491,6 +1532,7 @@ async function viewPost(v) {
   mountAudience(v.querySelector('#newEvent'));
   mountLocationField(v.querySelector('#newEvent'));
   mountWhenFields(v.querySelector('#newEvent'));
+  mountPiiCheck(v.querySelector('#newEvent'));
   mountCostFields(v.querySelector('#newEvent'));
   v.querySelector('#newEvent').onsubmit = async (e) => {
     e.preventDefault();
@@ -1572,6 +1614,7 @@ async function viewProfile(v) {
     <div class="stats">
       <div class="stat"><b>${me.hosted}</b><span>events hosted</span></div>
       <div class="stat"><b>${me.attended}</b><span>events attended</span></div>
+      <div class="stat"><b>${me.helped ?? 0}</b><span>${me.helped === 1 ? 'person' : 'people'} helped</span></div>
     </div>
 
     <div class="section-title">Notifications</div>
@@ -1634,8 +1677,7 @@ async function viewProfile(v) {
     </div>
     <button class="btn ghost" id="addKey">Add another passkey</button>`}
 
-    <button class="btn danger" id="logout" style="margin-top:24px">${isDemo() ? 'Start over' : 'Sign out'}</button>
-    ${ABOUT_LINKS}`;
+    <button class="btn danger" id="logout" style="margin-top:24px">${isDemo() ? 'Start over' : 'Sign out'}</button>`;
 
   v.querySelector('#newInvite').addEventListener('click', createInvite);
   v.querySelectorAll('[data-share-invite]').forEach(b => b.onclick = () => {

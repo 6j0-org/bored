@@ -10,11 +10,14 @@ const q = (sql) => db.prepare(sql);
 
 // Demo accounts get fixed, recognizable GUIDs (…-00000000000N) so re-running the seed doesn't duplicate them.
 // The names are only used inside this file, and as the nicknames a demo visitor starts with.
-// New accounts go at the end: the GUID is the position in this list.
+// New accounts go at the end: the GUID is the position in this list. Retired accounts stay as null, so the GUIDs
+// after them don't change; seeding deletes them (and their posts) from existing databases.
 const DEMO_USERS = {
   maya: 'Maya', dev: 'Dev', rosa: 'Rosa', sam: 'Sam',
-  // Hosts of the life-stage examples in public/examples.js, from teens to seventies.
-  jaylen: 'Jaylen', priya: 'Priya', hina: 'Hina', marcus: 'Marcus', ellie: 'Ellie', valeria: 'Valeria',
+  // Retired: their posts sounded like they were by people under 18.
+  jaylen: null, priya: null, hina: null,
+  // Hosts of the life-stage examples in public/examples.js, from twenties to seventies.
+  marcus: 'Marcus', ellie: 'Ellie', valeria: 'Valeria',
   nate: 'Nate', aisha: 'Aisha', camille: 'Camille', tom: 'Tom', lena: 'Lena', rodrigo: 'Rodrigo',
   gloria: 'Gloria', craig: 'Craig', jihoon: 'Ji-hoon', hank: 'Hank', linda: 'Linda', wanjiru: 'Wanjiru',
   walt: 'Walt', dottie: 'Dottie', giuseppe: 'Giuseppe',
@@ -49,6 +52,7 @@ function addEvent(hostId, { title, details, tags, location, place = '', when, ma
 export function seedDemo() {
   Object.keys(DEMO_USERS).forEach((handle, i) => {
     const guid = GUID_PREFIX + String(i + 1).padStart(12, '0');
+    if (DEMO_USERS[handle] === null) { q('DELETE FROM users WHERE guid = ?').run(guid); return; }
     const { publicKey, privateKey } = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
     const pub = JSON.stringify(publicKey.export({ format: 'jwk' }));
     chatKeys[handle] = privateKey;
@@ -57,10 +61,12 @@ export function seedDemo() {
     ids[handle] = existing?.id ?? Number(q('INSERT INTO users (guid, chat_pubkey) VALUES (?, ?)').run(guid, pub).lastInsertRowid);
   });
   for (const e of EXAMPLES) {
-    if (q('SELECT 1 FROM events WHERE host_id = ? AND title = ?').get(ids[e.host], e.title)) continue;
+    // Already there: keep it, but pick up tag changes (e.g. "help").
+    const existing = q('SELECT id FROM events WHERE host_id = ? AND title = ?').get(ids[e.host], e.title);
+    if (existing) { setEventTags(existing.id, e.tags); continue; }
     addEvent(ids[e.host], { ...e, when: exampleWhen(e.when) });
   }
-  return { users: Object.keys(DEMO_USERS).length, events: EXAMPLES.length };
+  return { users: Object.values(DEMO_USERS).filter(Boolean).length, events: EXAMPLES.length };
 }
 
 // A chat message between demo account `handle` and the person with chat public key `peerJwk`, encrypted the same
@@ -124,6 +130,11 @@ export function seedVisitor(visitorId) {
     tags: ['volunteering'], location: '32.749500,-117.252100', place: 'Ocean Beach', when: at(-9, 9), max: 6 }, { visibility: 'private', status: 'past' });
   q('INSERT INTO event_viewers (event_id, user_id) VALUES (?, ?)').run(cleanup, visitorId);
   swipe(cleanup, visitorId, 'attended');
+  // …and a hand the visitor gave Sam, so Profile counts one person helped.
+  const shelves = addEvent(ids.sam, { title: 'Hang some shelves', details: 'I have the shelves, the brackets, and the anchors. I do not have a level.',
+    tags: ['fixing', 'help'], location: '32.768300,-117.149800', place: 'Mission Valley', when: at(-4, 11), max: 1 }, { visibility: 'private', status: 'past' });
+  q('INSERT INTO event_viewers (event_id, user_id) VALUES (?, ?)').run(shelves, visitorId);
+  swipe(shelves, visitorId, 'attended');
 
   return Object.fromEntries(['maya', 'dev', 'sam'].map(h => [q('SELECT guid FROM users WHERE id = ?').get(ids[h]).guid, DEMO_USERS[h]]));
 }

@@ -13,8 +13,19 @@
 //   instead. Everything from the vault key down is the same.
 // - After sign-in the vault key and chat key are kept in IndexedDB as non-extractable CryptoKeys, so a page
 //   reload doesn't need the passkey again. Signing out deletes them.
+// - Each account also has an ECDSA P-256 *signing key*, encrypted with the vault key like the chat key, which signs
+//   public posts and tells people who sent a message when that should be known.
 //
 // Every encrypted value is "iv.ciphertext" in base64url (12-byte IV, AES-GCM).
+//
+// Mail (see "mail" below): everything people send each other is a sealed envelope or a channel message dropped in an
+// inbox on the server, which stores only the inbox and the ciphertext, never the sender.
+// - Sealed envelope: HPKE (RFC 9180, public/hpke.js) to the recipient's chat key, the way Nostr's gift wrap works:
+//   HPKE's one-time key hides the sender, and a sender who wants to be known signs the message inside.
+// - Channel: every sealed envelope also gives sender and recipient a shared secret (HPKE's secret export). A request
+//   to join opens one; everything after it about that request goes over it, to two inboxes worked out from it.
+
+import { setupS, setupR, importPublicKey } from './hpke.js';
 
 const subtle = crypto.subtle;
 const te = new TextEncoder(), td = new TextDecoder();
@@ -132,7 +143,11 @@ async function idbDo(mode, fn) {
   });
 }
 
-let keys = null; // { guid, vaultKey, chatKey }
+// { guid, vaultKey, chatKey, chatPub, signKey, signPub, inboxId }: the private keys are non-extractable CryptoKeys,
+// the public ones JWKs ({ kty, crv, x, y }). signKey, signPub, and inboxId are filled in by ensureKeys().
+let keys = null;
+const saveKeys = async () => { try { await idbDo('readwrite', s => s.put(keys, 'session')); } catch {} };
+const publicJwk = ({ x, y }) => ({ kty: 'EC', crv: 'P-256', x, y });
 
 export async function loadKeys(guid) {
   try {
@@ -142,7 +157,7 @@ export async function loadKeys(guid) {
   return Boolean(keys);
 }
 export async function clearKeys() {
-  keys = null; chatKeys.clear();
+  keys = null; chatKeys.clear(); channelCache.clear();
   try { await idbDo('readwrite', s => s.delete('session')); } catch {}
 }
 
@@ -152,8 +167,8 @@ async function installKeys(guid, kek, wrappedKey, chatPrivkey) {
   const vaultKey = await subtle.importKey('raw', raw, 'AES-GCM', false, ['encrypt', 'decrypt']);
   const jwk = JSON.parse(await openText(vaultKey, chatPrivkey));
   const chatKey = await subtle.importKey('jwk', jwk, { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
-  keys = { guid, vaultKey, chatKey };
-  try { await idbDo('readwrite', s => s.put(keys, 'session')); } catch {}
+  keys = { guid, vaultKey, chatKey, chatPub: publicJwk(jwk) };
+  await saveKeys();
 }
 
 // ---------- account flows ----------
@@ -175,9 +190,44 @@ async function registerAccount(api, path, kek, extra) {
   raw.fill(0);
   const chatKey = await subtle.importKey('jwk', await subtle.exportKey('jwk', pair.privateKey),
     { name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);
-  keys = { guid: res.user.guid, vaultKey, chatKey };
-  try { await idbDo('readwrite', s => s.put(keys, 'session')); } catch {}
+  keys = { guid: res.user.guid, vaultKey, chatKey, chatPub: { kty, crv, x, y } };
+  await saveKeys();
   return res;
+}
+
+// After any sign-in or reload, once the vault is loaded: make sure this browser has the signing key, its own chat
+// public key, and a main inbox. Accounts made before these existed get them here, once: the server keeps the first
+// signing key and inbox any device uploads, and the vault keeps the first inbox token.
+const ECDSA = { name: 'ECDSA', namedCurve: 'P-256' };
+export async function ensureKeys(api) {
+  if (keys.chatPub && keys.signKey && keys.inboxId && vault.data.inbox) return;
+  let mine = await api('/api/me/keys');
+  const put = async (body) => {
+    try { await api('/api/me/keys', { method: 'PUT', body }); }
+    catch (e) { if (e.status !== 409) throw e; } // another device was first
+    mine = await api('/api/me/keys');
+  };
+  if (!mine.signPrivkey) {
+    const pair = await subtle.generateKey(ECDSA, true, ['sign', 'verify']);
+    await put({
+      signPubkey: publicJwk(await subtle.exportKey('jwk', pair.publicKey)),
+      signPrivkey: await seal(keys.vaultKey, JSON.stringify(await subtle.exportKey('jwk', pair.privateKey))),
+    });
+  }
+  const jwk = JSON.parse(await openText(keys.vaultKey, mine.signPrivkey));
+  keys.signKey = await subtle.importKey('jwk', jwk, ECDSA, false, ['sign']);
+  keys.signPub = publicJwk(jwk);
+  keys.chatPub ||= publicJwk(mine.chatPubkey);
+
+  // The token goes into the vault before its ID goes to the server, so it can't be lost in between.
+  if (!vault.data.inbox) await vault.update(api, (d) => { d.inbox ||= newInboxToken(); });
+  const inboxId = await inboxIdOf(vault.data.inbox);
+  if (mine.inboxId !== inboxId) {
+    if (mine.inboxId) throw new Error("This account's inbox doesn't match this device. Please sign out and in again.");
+    await put({ inboxId });
+  }
+  keys.inboxId = inboxId;
+  await saveKeys();
 }
 
 export async function createAccount(api, nextStep) {
@@ -281,7 +331,8 @@ export async function addPasskey(api, nextStep) {
 //   prefs: { distanceUnit: 'km' | 'mi' },  (settings from Profile)
 //   invites: { [inviteId]: { token, key, name } },  (my invitation links, so I can share them again; the server has
 //     only hashes. name is the nickname I suggested; key decrypts the nicknames people suggest when they ask)
-//   pendingNames: { [iconHash]: nickname } }  (nicknames for inviters I've asked to connect with, applied once they confirm)
+//   pendingNames: { [iconHash]: nickname },  (nicknames for inviters I've asked to connect with, applied once they confirm)
+//   inbox: token }  (my main inbox's read token; its SHA-256 is public, see "mail" below)
 const emptyVault = () => ({ v: 1, contacts: {}, audiences: {} });
 
 export const vault = {
@@ -349,4 +400,97 @@ export async function encryptMessage(matchId, peerJwk, text) {
 export async function decryptMessage(matchId, peerJwk, sealedStr) {
   try { return await openText(await chatKeyFor(matchId, peerJwk), sealedStr); }
   catch { return null; } // unreadable (e.g. corrupted); caller shows a placeholder
+}
+
+// ---------- signatures ----------
+// ECDSA P-256 with SHA-256 over "bored-v1 <kind>\n<text>", so a signature for one kind of thing can't be passed off
+// as another. Signatures are the 64-byte r || s form WebCrypto uses, in base64url.
+const signedBytes = (kind, text) => te.encode(`bored-v1 ${kind}\n${text}`);
+export const myPublicKeys = () => ({ guid: keys.guid, chat: keys.chatPub, sign: keys.signPub, inbox: keys.inboxId });
+
+export async function sign(kind, text) {
+  return b64u.enc(await subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, keys.signKey, signedBytes(kind, text)));
+}
+export async function verify(signerJwk, kind, text, sig) {
+  try {
+    const key = await subtle.importKey('jwk', publicJwk(signerJwk), ECDSA, false, ['verify']);
+    return await subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, b64u.dec(sig), signedBytes(kind, text));
+  } catch { return false; }
+}
+
+// A signed public record, e.g. a public post: { body: JSON text, sig, signer: signing public key }.
+export async function signRecord(kind, obj) {
+  const body = JSON.stringify(obj);
+  return { body, sig: await sign(kind, body), signer: keys.signPub };
+}
+// The record's object if the signature is good (and, given expectedSigner, made by that key), otherwise null.
+export async function openRecord(kind, record, expectedSigner) {
+  if (!record || typeof record.body !== 'string') return null;
+  if (expectedSigner && (expectedSigner.x !== record.signer?.x || expectedSigner.y !== record.signer?.y)) return null;
+  if (!(await verify(record.signer, kind, record.body, record.sig))) return null;
+  try { return JSON.parse(record.body); } catch { return null; }
+}
+
+// ---------- mail ----------
+// An inbox is a random token only its reader knows; the server files mail under SHA-256(token) and hands it out to
+// whoever shows the token. Everyone's main inbox ID is public (to their contacts); channel inboxes are known only to
+// the two people on the channel.
+export const newInboxToken = () => b64u.enc(crypto.getRandomValues(new Uint8Array(32)));
+export const inboxIdOf = async (token) => b64u.enc(await subtle.digest('SHA-256', te.encode(token)));
+
+const SEAL_INFO = 'bored-v1 seal', CHANNEL_EXPORT = 'bored-v1 channel';
+// What a known sender signs: the message and the recipient's chat key, so it can't be sent on to someone else.
+const senderText = (msgText, to) => `${to.x}.${to.y}\n${msgText}`;
+
+// Seal msg (an object) to the person with chat public key `to` (JWK), for their inbox `inboxId`.
+// identify: true adds who it's from (GUID and public keys) with a signature; otherwise the recipient can't tell.
+// Returns { body: "enc.ciphertext" for the mail, channel: the secret this opens, for channelOf() }.
+export async function sealTo(to, inboxId, msg, { identify = false } = {}) {
+  const text = JSON.stringify(msg);
+  const inner = { msg: text };
+  if (identify) inner.sender = { ...myPublicKeys(), sig: await sign('sender', senderText(text, to)) };
+  const s = await setupS(await importPublicKey(to), SEAL_INFO);
+  const ct = await s.seal(te.encode(inboxId), te.encode(JSON.stringify(inner)));
+  return { body: `${b64u.enc(s.enc)}.${b64u.enc(ct)}`, channel: b64u.enc(await s.export(te.encode(CHANNEL_EXPORT), 32)) };
+}
+
+// Open a sealed envelope from my inbox `inboxId`: { msg, sender (null if anonymous), channel }, or null if it isn't
+// for me, was changed, or names a sender whose signature doesn't check out.
+export async function openSealed(body, inboxId) {
+  try {
+    const [enc, ct] = String(body).split('.');
+    const pk = await importPublicKey(keys.chatPub);
+    const r = await setupR(b64u.dec(enc), { privateKey: keys.chatKey, publicKey: pk }, SEAL_INFO);
+    const inner = JSON.parse(td.decode(await r.open(te.encode(inboxId), b64u.dec(ct))));
+    const msg = JSON.parse(inner.msg);
+    let sender = null;
+    if (inner.sender) {
+      const { guid, chat, sign: signer, sig } = inner.sender;
+      if (typeof guid !== 'string' || !(await verify(signer, 'sender', senderText(inner.msg, keys.chatPub), sig))) return null;
+      sender = { guid, chat: publicJwk(chat), sign: publicJwk(signer) };
+    }
+    return { msg, sender, channel: b64u.enc(await r.export(te.encode(CHANNEL_EXPORT), 32)) };
+  } catch { return null; }
+}
+
+// A channel's AES key and its two inbox tokens: the one who sealed the envelope that opened it (the opener, e.g.
+// the person asking to join) reads `openerInbox`, the recipient (e.g. the host) reads `recipientInbox`.
+// All three come from the channel secret with HKDF, so neither side has to send or store anything else.
+const channelCache = new Map();
+export async function channelOf(secret) {
+  if (channelCache.has(secret)) return channelCache.get(secret);
+  const base = await subtle.importKey('raw', b64u.dec(secret), 'HKDF', false, ['deriveKey', 'deriveBits']);
+  const bits = async (info) => b64u.enc(await subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: te.encode(info) }, base, 256));
+  const ch = {
+    key: await subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: te.encode('bored-v1 channel key') },
+      base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']),
+    openerInbox: await bits('bored-v1 channel opener inbox'),
+    recipientInbox: await bits('bored-v1 channel recipient inbox'),
+  };
+  channelCache.set(secret, ch);
+  return ch;
+}
+export const sealChannel = async (secret, msg) => seal((await channelOf(secret)).key, JSON.stringify(msg));
+export async function openChannel(secret, body) {
+  try { return JSON.parse(await openText((await channelOf(secret)).key, body)); } catch { return null; }
 }

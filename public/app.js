@@ -2,7 +2,7 @@
 import {
   prfSupport, createAccount, signIn, addPasskey, loadKeys, clearKeys, hasKeys, vault,
   encryptMessage, decryptMessage, PrfUnsupportedError, startIdSignIn, finishIdSignIn, hasIdCallback, createDemoAccount,
-  newInviteKey, sealForInvite, openForInvite, sha1Hex, b64u,
+  newInviteKey, sealForInvite, openForInvite, sha1Hex, b64u, ensureKeys,
 } from './secure.js';
 import { locationHtml, mountLocationField, pickLocation, PIN_SVG } from './location.js';
 import { parseWhen, repeatOptions, whenLabel as fmtWhen, localToday } from './when.js';
@@ -231,7 +231,7 @@ async function api(path, { method = 'GET', body } = {}) {
   });
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && state.me && !path.startsWith('/api/passkey/') && !path.startsWith('/api/id/')) { state.me = null; await clearKeys(); render(); }
-  if (!res.ok) throw new Error(data.error || 'Request failed');
+  if (!res.ok) throw Object.assign(new Error(data.error || 'Request failed'), { status: res.status });
   return data;
 }
 
@@ -556,6 +556,7 @@ async function render() {
 async function enterApp(tab = 'discover') {
   await refreshMe();
   await vault.load(api);
+  await ensureKeys(api);
   await syncConnections();
   state.tab = tab; state.chat = null;
   render();
@@ -1751,7 +1752,7 @@ if (state.config.authMode === '6j0' && hasIdCallback()) {
 } else {
   await refreshMe();
   if (state.me && await loadKeys(state.me.guid)) {
-    try { await vault.load(api); await syncConnections(); } catch { await clearKeys(); }
+    try { await vault.load(api); await ensureKeys(api); await syncConnections(); } catch { await clearKeys(); }
   }
   // Demo mode: nobody signs in. Without a usable account in this browser, make a new one.
   if (isDemo() && !(state.me && hasKeys())) {

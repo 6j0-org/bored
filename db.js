@@ -177,6 +177,30 @@ const MIGRATIONS = [
    UPDATE OR IGNORE event_tags SET tag = 'gardening' WHERE tag = 'garden';
    UPDATE OR IGNORE event_tags SET tag = 'fixing' WHERE tag = 'repair';
    DELETE FROM event_tags WHERE tag IN ('outdoors', 'garden', 'repair', 'events');`,
+  // 7: encrypted mail (see "mail" in public/secure.js). Each account gets an ECDSA P-256 signing key (the private
+  //    half encrypted with the vault key, like chat_privkey) and a main inbox, published as the SHA-256 of a read
+  //    token only the account's vault holds. Mail rows have the inbox and the ciphertext, and no sender.
+  //    public_posts holds hosts' signed public posts: readable by anyone, but only the host can make or change them.
+  `ALTER TABLE users ADD COLUMN sign_pubkey TEXT;   -- ECDSA P-256 public key (JWK JSON)
+   ALTER TABLE users ADD COLUMN sign_privkey TEXT;  -- matching private key, encrypted with the vault key
+   ALTER TABLE users ADD COLUMN inbox_id TEXT;      -- main inbox: SHA-256 of its read token, base64url
+   CREATE UNIQUE INDEX idx_users_inbox ON users(inbox_id);
+   CREATE TABLE mail (
+     id         INTEGER PRIMARY KEY,
+     inbox      TEXT NOT NULL,  -- inbox ID (SHA-256 of the read token), base64url
+     body       TEXT NOT NULL,  -- ciphertext
+     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+   );
+   CREATE INDEX idx_mail_inbox ON mail(inbox, id);
+   CREATE TABLE public_posts (
+     pid        TEXT PRIMARY KEY,  -- random ID the host's browser picks
+     host_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     v          INTEGER NOT NULL,  -- version: each update must be higher
+     body       TEXT NOT NULL,     -- the signed record, JSON: { body, sig, signer }
+     live       INTEGER NOT NULL DEFAULT 1,
+     updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+   );
+   CREATE INDEX idx_public_posts_live ON public_posts(live, updated_at);`,
 ];
 
 export function migrate() {

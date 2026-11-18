@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, createPublicKey, randomBytes, randomUUID, verify as verifySignature } from 'node:crypto';
 import { newChallenge, takeChallenge, verifyRegistration, verifyAssertion, WebAuthnError } from './webauthn.js';
 import { verifyIdToken, IdTokenError } from './idtoken.js';
 import { composeWhen, whenLabel, occursBetween } from './public/when.js';
@@ -98,9 +98,24 @@ function sealed(v, field, max = MAX_SEALED) {
   if (typeof v !== 'string' || v.length > max || !/^[A-Za-z0-9_-]{16}\.[A-Za-z0-9_-]+$/.test(v)) throw new HttpError(400, `Bad ${field}`);
   return v;
 }
-function chatPubkey(v) {
-  if (!v || v.kty !== 'EC' || v.crv !== 'P-256' || typeof v.x !== 'string' || typeof v.y !== 'string' || v.d) throw new HttpError(400, 'Bad chat key');
+function chatPubkey(v, field = 'chat key') {
+  if (!v || v.kty !== 'EC' || v.crv !== 'P-256' || typeof v.x !== 'string' || typeof v.y !== 'string' || v.d) throw new HttpError(400, `Bad ${field}`);
+  try { createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: v.x, y: v.y }, format: 'jwk' }); } catch { throw new HttpError(400, `Bad ${field}`); }
   return JSON.stringify({ kty: 'EC', crv: 'P-256', x: v.x, y: v.y });
+}
+// An inbox ID or read token: 32 bytes in base64url.
+function inboxField(v, field = 'inbox') {
+  if (typeof v !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(v)) throw new HttpError(400, `Bad ${field}`);
+  return v;
+}
+const inboxIdOf = (token) => createHash('sha256').update(token).digest('base64url');
+
+// Check a signature made by public/secure.js sign(): ECDSA P-256, SHA-256, r || s, over "bored-v1 <kind>\n<text>".
+function signedBy(jwkJson, kind, text, sig) {
+  try {
+    const key = createPublicKey({ key: JSON.parse(jwkJson), format: 'jwk' });
+    return verifySignature('sha256', Buffer.from(`bored-v1 ${kind}\n${text}`), { key, dsaEncoding: 'ieee-p1363' }, Buffer.from(String(sig), 'base64url'));
+  } catch { return false; }
 }
 
 // A "match" is an accepted/attended yes-swipe. Only the attendee and the event host may see it.
@@ -553,6 +568,93 @@ route('GET', '/api/me', async ({ user, res }) => {
   };
   send(res, 200, { ...publicUser(user), counts });
 });
+
+// ---------- keys and mail ----------
+// See "mail" in public/secure.js. The server stores mail by inbox ID and never learns who sent it. It does see which
+// account sends each message as it arrives, for rate limits, which are kept in memory only.
+
+// My keys, for this browser's ensureKeys(): the public ones, the encrypted signing key, and my main inbox ID.
+route('GET', '/api/me/keys', async ({ user, res }) => {
+  send(res, 200, {
+    chatPubkey: user.chat_pubkey && JSON.parse(user.chat_pubkey),
+    signPubkey: user.sign_pubkey && JSON.parse(user.sign_pubkey),
+    signPrivkey: user.sign_privkey, inboxId: user.inbox_id,
+  });
+});
+
+// Set my signing key and main inbox, once each: 409 if they're already set (another device was first).
+route('PUT', '/api/me/keys', async ({ user, body, res }) => {
+  if (body.signPubkey !== undefined) {
+    const pub = chatPubkey(body.signPubkey, 'signing key'), priv = sealed(body.signPrivkey, 'signing key');
+    if (!q('UPDATE users SET sign_pubkey = ?, sign_privkey = ? WHERE id = ? AND sign_pubkey IS NULL').run(pub, priv, user.id).changes)
+      throw new HttpError(409, 'This account already has a signing key');
+  }
+  if (body.inboxId !== undefined) {
+    const inbox = inboxField(body.inboxId);
+    if (!q('UPDATE users SET inbox_id = ? WHERE id = ? AND inbox_id IS NULL').run(inbox, user.id).changes)
+      throw new HttpError(409, 'This account already has an inbox');
+  }
+  send(res, 200, { ok: true });
+});
+
+// Public keys and main inboxes for GUIDs I know (my contacts). GUIDs can't be guessed. { guids } → { guid: keys }
+const MAX_KEY_LOOKUPS = 200;
+route('POST', '/api/keys', async ({ body, res }) => {
+  const guids = Array.isArray(body.guids) ? [...new Set(body.guids.map(String))] : [];
+  if (guids.length > MAX_KEY_LOOKUPS) throw new HttpError(400, `Up to ${MAX_KEY_LOOKUPS} at a time, please`);
+  const out = {};
+  for (const guid of guids) {
+    const u = q('SELECT chat_pubkey, sign_pubkey, inbox_id FROM users WHERE guid = ?').get(guid);
+    if (u?.chat_pubkey && u.sign_pubkey && u.inbox_id)
+      out[guid] = { chat: JSON.parse(u.chat_pubkey), sign: JSON.parse(u.sign_pubkey), inbox: u.inbox_id };
+  }
+  send(res, 200, out);
+});
+
+// Send mail: { inbox, body } or { batch: [{ inbox, body }, …] }. Bodies are ciphertext: base64url parts and dots.
+// Limits per sending account, in memory: so many messages an hour, and fewer to any one inbox. Someone's main inbox
+// gets a "New activity" push (at most one a minute), unless it's the sender's own.
+const MAX_MAIL = 64 * 1024, MAIL_PER_HOUR = 600, MAIL_PER_INBOX_HOUR = 60, MAX_BATCH = 100;
+const mailCounts = new Map(); // `${userId}` or `${userId}:${inbox}` → { n, until }
+function countMail(key, max) {
+  const now = Date.now();
+  let c = mailCounts.get(key);
+  if (!c || c.until < now) { c = { n: 0, until: now + 3600_000 }; mailCounts.set(key, c); }
+  if (++c.n > max) throw new HttpError(429, "You're sending a lot right now. Please wait a while and try again.");
+  if (mailCounts.size > 100_000) for (const [k, v] of mailCounts) if (v.until < now) mailCounts.delete(k);
+}
+route('POST', '/api/mail', async ({ user, body, res }) => {
+  const items = (body.batch !== undefined ? (Array.isArray(body.batch) ? body.batch : []) : [body]).map(m => {
+    const b = m?.body;
+    if (typeof b !== 'string' || b.length > MAX_MAIL || !/^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)+$/.test(b)) throw new HttpError(400, 'Bad mail');
+    return { inbox: inboxField(m.inbox), body: b };
+  });
+  if (!items.length || items.length > MAX_BATCH) throw new HttpError(400, `Send 1 to ${MAX_BATCH} messages at a time`);
+  for (const m of items) { countMail(String(user.id), MAIL_PER_HOUR); countMail(`${user.id}:${m.inbox}`, MAIL_PER_INBOX_HOUR); }
+  const ids = tx(() => items.map(m => Number(q('INSERT INTO mail (inbox, body) VALUES (?, ?)').run(m.inbox, m.body).lastInsertRowid)));
+  for (const inbox of new Set(items.map(m => m.inbox))) {
+    const owner = q('SELECT id FROM users WHERE inbox_id = ?').get(inbox);
+    if (owner && owner.id !== user.id) notify(owner.id, { body: 'New activity', tag: 'mail', open: '', throttle: true });
+  }
+  send(res, 200, { ids });
+});
+
+// Read mail: { inboxes: [{ token, after }] } → { mail: [[{ id, body, at }, …], …] } in the same order, up to
+// MAIL_PAGE per inbox after the given mail ID (more: true if there's more). No sign-in: the browser calls this
+// without cookies, so reading a channel inbox can't be tied to an account by the session.
+const MAX_READ_INBOXES = 500, MAIL_PAGE = 200;
+route('POST', '/api/mail/read', async ({ body, res }) => {
+  const list = Array.isArray(body.inboxes) ? body.inboxes : [];
+  if (list.length > MAX_READ_INBOXES) throw new HttpError(400, `Up to ${MAX_READ_INBOXES} inboxes at a time`);
+  let more = false;
+  const mail = list.map(({ token, after } = {}) => {
+    const rows = q('SELECT id, body, created_at AS at FROM mail WHERE inbox = ? AND id > ? ORDER BY id LIMIT ?')
+      .all(inboxIdOf(inboxField(token, 'inbox token')), Math.max(0, Number(after) || 0), MAIL_PAGE + 1);
+    if (rows.length > MAIL_PAGE) { more = true; rows.pop(); }
+    return rows;
+  });
+  send(res, 200, { mail, more });
+}, { auth: false });
 
 const COST_FILTERS = ['free', 'paid'];
 
@@ -1102,7 +1204,7 @@ route('GET', '/api/ledger', async ({ user, res }) => {
 // ---------- server ----------
 
 const STATIC = {
-  '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/secure.js': 'secure.js', '/style.css': 'style.css', '/location.js': 'location.js', '/when.js': 'when.js', '/cost.js': 'cost.js', '/ics.js': 'ics.js',
+  '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/secure.js': 'secure.js', '/hpke.js': 'hpke.js', '/style.css': 'style.css', '/location.js': 'location.js', '/when.js': 'when.js', '/cost.js': 'cost.js', '/ics.js': 'ics.js',
   '/pii.js': 'pii.js', '/libphonenumber.js': 'libphonenumber.js',
   '/about': 'about.html', '/about.html': 'about.html', '/landing.js': 'landing.js', '/about.js': 'about.js', '/examples.js': 'examples.js',
   '/sw.js': 'sw.js', '/theme.js': 'theme.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon.svg': 'icon.svg', '/board.webp': 'board.webp',

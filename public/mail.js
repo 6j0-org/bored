@@ -9,6 +9,8 @@
 //   the whole conversation. The person who asked keeps the channel secret in their vault (requests); the host gets
 //   it again from the join in their main inbox.
 // - My own posts are in my vault (posts), with who each is shared with.
+// - Public posts are signed records the server keeps (/api/public). Everyone reads them, guests too, and checks
+//   each signature here. Requests to join them go to the host's main inbox like any other.
 //
 // Vault entries (public/secure.js has the rest):
 //   posts:    { [pid]: { record, audience: { groups, contacts }, sharedWith: [guid] } }  posts I host
@@ -17,7 +19,7 @@
 //   contacts[guid].keys: { chat, sign, inbox }  a contact's keys, saved the first time they're used (so the server
 //                                               can't swap them later)
 import {
-  vault, myPublicKeys, signRecord, openRecord, sealTo, openSealed, channelOf, sealChannel, openChannel, inboxIdOf,
+  vault, hasKeys, myPublicKeys, signRecord, openRecord, sealTo, openSealed, channelOf, sealChannel, openChannel, inboxIdOf,
   sign, verify, b64u,
 } from './secure.js';
 import { derive, nextMessage, LIVE } from './posts.js';
@@ -38,6 +40,10 @@ export function resetMail() {
     posts: [],               // derive() posts entries from my main inbox
     channels: new Map(),     // channel secret → { id, role, opened, messages: Map(id → message) }
     helloChecked: new Map(), // message id → verified hello fields, or null if it didn't check out
+    publicSeq: 0,            // where the last public post read stopped
+    publicPosts: [],         // derive() posts entries for public posts
+    publicAsked: new Set(),  // pids of public posts asked for by ID (ones I've asked to join)
+    publicChecked: new Map(),// record signature → the post, or null if it didn't check out
   };
   view = null;
 }
@@ -127,14 +133,39 @@ async function checkHellos() {
 let loading = null;
 export function loadMail({ act = true } = {}) {
   loading ||= (async () => {
-    try { await read(); view = replay(); if (act && await act_()) view = replay(); }
+    try { await read(); view = replay(); if (act && hasKeys() && await act_()) view = replay(); }
     finally { loading = null; }
     return view;
   })();
   return loading;
 }
 
+// Public posts that changed since the last read, plus the ones I've asked to join (which may have ended).
+async function readPublic() {
+  const pids = hasKeys() ? Object.values(vault.data.requests || {}).map(r => r.pid).filter(p => !box.publicAsked.has(p)) : [];
+  for (let page = 0; page < 20; page++) {
+    const res = await fetch('/api/public/read', {
+      method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ after: box.publicSeq, pids: page ? [] : pids }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || "Couldn't load public posts");
+    pids.forEach(p => box.publicAsked.add(p));
+    for (const record of data.posts || []) {
+      if (!box.publicChecked.has(record.sig)) {
+        const post = await openRecord('post', record);
+        box.publicChecked.set(record.sig, post?.kind === 'public' ? post : null);
+        if (post?.kind === 'public') box.publicPosts.push({ post, signer: record.signer });
+      }
+    }
+    box.publicSeq = Math.max(box.publicSeq, Number(data.seq) || 0);
+    if (!data.more) break;
+  }
+}
+
 async function read() {
+  await readPublic();
+  if (!hasKeys()) return;
   const me = myPublicKeys();
   if (!me.inbox || !vault.data.inbox) return;
   for (const [ch, r] of Object.entries(vault.data.requests || {})) addChannel(ch, 'attendee', r.at || 0, r.join);
@@ -158,18 +189,21 @@ async function read() {
 }
 
 function myPostEntries() {
+  if (!hasKeys()) return [];
   const me = myPublicKeys();
   return Object.values(vault.data.posts || {}).map(p => {
     try { return { post: JSON.parse(p.record.body), signer: me.sign }; } catch { return null; }
   }).filter(Boolean);
 }
 
+// Mine first, then shares, then public posts: the first signer seen for a pid owns it, so a public post can't take
+// over the ID of a post someone shared with me.
 function replay() {
   return derive({
-    me: myPublicKeys(),
-    posts: [...myPostEntries(), ...box.posts],
+    me: hasKeys() ? myPublicKeys() : null,
+    posts: [...myPostEntries(), ...box.posts, ...box.publicPosts],
     channels: [...box.channels.values()].map(c => ({ ...c, messages: [...c.messages.values()] })),
-    passed: vault.data.passed || [],
+    passed: hasKeys() ? vault.data.passed || [] : [],
   });
 }
 
@@ -258,31 +292,39 @@ export async function requestJoin(post, note = '') {
 export const pass = (pid) => vault.update(api, (d) => { d.passed = [...(d.passed || []).filter(p => p !== pid), pid].slice(-MAX_PASSED); }).then(() => { view = replay(); });
 export const unpass = (pid) => vault.update(api, (d) => { d.passed = (d.passed || []).filter(p => p !== pid); }).then(() => { view = replay(); });
 
-// Create or change a private post I host, and share it with `guids` (my contacts in its audience). Each save is a
-// new version, shared with everyone in the audience; people taken out of it get an unshare. When fields people
-// care about changed, everyone already matched is asked to re-confirm. Returns { post, shared, missing, notified }:
-// missing counts people who couldn't be reached (their account hasn't been opened since encryption arrived).
-export async function savePrivatePost({ pid, fields, audience, guids, status }) {
+// Create or change a post I host. Each save is a new, signed version.
+// - kind 'public': published to /api/public for everyone.
+// - kind 'private': shared with `guids` (my contacts in its audience); people taken out of it get an unshare.
+// A post keeps its kind: an edit can't turn a private post public or the other way round.
+// When fields people care about changed, everyone already matched is asked to re-confirm. Returns { post, shared,
+// missing, notified }: missing counts people who couldn't be reached (their account hasn't been opened since
+// encryption arrived).
+export async function savePost({ pid, kind, fields, audience, guids = [], status }) {
   const prev = pid && vault.data.posts?.[pid];
   const before = prev ? JSON.parse(prev.record.body) : null;
+  kind = before?.kind || kind;
+  if (kind !== 'public' && kind !== 'private') throw new Error('Pick who can see it');
+  if (kind === 'public') guids = [];
   const me = myPublicKeys();
   const post = {
-    ...(before || {}), ...fields, pid: pid || randomId(), v: (before?.v || 0) + 1, kind: 'private',
+    ...(before || {}), ...fields, pid: pid || randomId(), v: (before?.v || 0) + 1, kind,
     status: status || before?.status || 'open', reply: { chat: me.chat, inbox: me.inbox },
   };
   const record = await signRecord('post', post);
+  // Publishing goes first for a public post: the server checks it, and nothing is saved if it says no.
+  if (kind === 'public') await api('/api/public', { method: 'PUT', body: { record } });
   const keys = await keysFor(guids);
   const reach = guids.filter(g => keys[g]);
   const removed = (prev?.sharedWith || []).filter(g => !reach.includes(g));
   await vault.update(api, (d) => {
     d.posts ||= {};
-    d.posts[post.pid] = { record, audience: audience || d.posts[post.pid]?.audience || { groups: [], contacts: [] }, sharedWith: reach };
+    d.posts[post.pid] = { record, audience: kind === 'public' ? null : audience || d.posts[post.pid]?.audience || { groups: [], contacts: [] }, sharedWith: reach };
   });
   const items = [];
   for (const g of reach) items.push({ inbox: keys[g].inbox, body: (await sealTo(keys[g].chat, keys[g].inbox, { type: 'share', record }, { identify: true })).body });
   const gone = await keysFor(removed);
   for (const g of removed) if (gone[g]) items.push({ inbox: gone[g].inbox, body: (await sealTo(gone[g].chat, gone[g].inbox, { type: 'unshare', pid: post.pid, v: post.v }, { identify: true })).body });
-  await postMail(items);
+  if (items.length) await postMail(items);
 
   let notified = 0;
   const changes = before ? changedFields(before, post) : [];
@@ -301,15 +343,15 @@ export async function savePrivatePost({ pid, fields, audience, guids, status }) 
 export async function setPostStatus(pid, status) {
   const p = vault.data.posts?.[pid];
   if (!p) return;
-  return savePrivatePost({ pid, fields: {}, audience: p.audience, guids: p.sharedWith, status });
+  return savePost({ pid, fields: {}, audience: p.audience, guids: p.sharedWith, status });
 }
 
 // Re-share a post after its audience changed (e.g. contacts were added to a group it's shared with).
 export async function reshare(pid, guids) {
   const p = vault.data.posts?.[pid];
   const post = p && JSON.parse(p.record.body);
-  if (!post || !LIVE.includes(post.status)) return;
+  if (!post || post.kind !== 'private' || !LIVE.includes(post.status)) return;
   const keys = await keysFor(guids), reach = guids.filter(g => keys[g]);
   const same = reach.length === p.sharedWith.length && reach.every(g => p.sharedWith.includes(g));
-  if (!same) await savePrivatePost({ pid, fields: {}, audience: p.audience, guids });
+  if (!same) await savePost({ pid, fields: {}, audience: p.audience, guids });
 }

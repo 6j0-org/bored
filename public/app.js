@@ -7,7 +7,7 @@ import {
 import { locationHtml, mountLocationField, pickLocation, PIN_SVG } from './location.js';
 import { parseWhen, repeatOptions, whenLabel as fmtWhen, localToday, occursBetween } from './when.js';
 import {
-  initMail, resetMail, loadMail, mailView, requestJoin, sendOn, pass, unpass, savePrivatePost, setPostStatus, reshare,
+  initMail, resetMail, loadMail, mailView, requestJoin, sendOn, pass, unpass, savePost, setPostStatus, reshare,
 } from './mail.js';
 import { LIVE } from './posts.js';
 import { postFields, FIELD_LABELS } from './postfields.js';
@@ -792,9 +792,15 @@ function eventCard(t) {
     </div>`;
 }
 
-// Encrypted posts (public/mail.js) as Discover cards, and the Discover filters for them. Only this browser can read
-// them, so it filters them itself, with the same rules the server uses for the posts it stores (/api/discover).
-const mailCard = (p) => ({ ...p, id: `m:${p.pid}`, mail: true, post: p, visibility: 'private', tags: p.tags || [], host: { guid: p.host } });
+// Posts from public/mail.js (encrypted private posts and signed public ones) as Discover cards, and the Discover
+// filters for them. The browser filters them itself, with the same rules the server uses for the posts it still
+// stores (/api/discover). The host shows by name when they're a contact (a share says who it's from; a public post
+// is matched by its signing key), otherwise as an icon made from their signing key.
+const contactBySign = (key) => key && Object.keys(vault.data.contacts).find(g => vault.data.contacts[g].keys?.sign?.x === key.x && vault.data.contacts[g].keys?.sign?.y === key.y);
+const mailCard = (p) => ({
+  ...p, id: `m:${p.pid}`, mail: true, post: p, visibility: p.kind, tags: p.tags || [],
+  host: { guid: p.host || contactBySign(p.signer) || null, icon: p.signer ? `${p.signer.x}.${p.signer.y}` : null },
+});
 function distanceKm({ lat, lon }, location) {
   const m = /^(-?[\d.]+),(-?[\d.]+)$/.exec(location || '');
   if (!m) return Infinity;
@@ -880,7 +886,7 @@ async function viewDiscover(v) {
     let opts;
     let mail;
     [events, opts, mail] = await Promise.all([api('/api/discover' + (params.size ? `?${params}` : '')), api(`/api/discover/filters?${fp}`),
-      state.me && hasKeys() ? loadMail().catch(() => mailView()) : null]);
+      loadMail().catch(err => { console.warn(err); return mailView(); })]);
     const mailPosts = mail?.deck || [];
     events = [...mailPosts.filter(mailPostMatches).map(mailCard), ...events];
     options = addMailCounts(opts, mailPosts);
@@ -1525,19 +1531,20 @@ const contactGroups = () => {
 
 // Private posts need contacts to share with (the server checks this too). Without any, new posts are public; a post
 // that's already private can stay that way.
-// Encrypted posts (t.mail) are private only, until public posts move to encryption too.
+// Posts from public/mail.js (t.mail) keep the kind they were posted with: a private post was only ever sent to its
+// audience, and a public one may already be on anyone's device.
 function audienceInputs(t = {}) {
   const noContacts = !Object.keys(vault.data.contacts).length;
   const vis = t.visibility || (noContacts ? 'public' : 'private');
-  const lockPrivate = noContacts && vis !== 'private';
-  const lockPublic = Boolean(t.mail);
+  const lockPrivate = (noContacts && vis !== 'private') || (t.mail && vis === 'public');
+  const lockPublic = Boolean(t.mail) && vis === 'private';
   return `
       <fieldset class="seg-pick"><legend>Who can see it?</legend><div class="seg">
         <label><input type="radio" name="visibility" value="private" ${vis === 'private' ? 'checked' : ''} ${lockPrivate ? 'disabled' : ''}><span>Private</span></label>
         <label><input type="radio" name="visibility" value="public" ${vis === 'public' ? 'checked' : ''} ${lockPublic ? 'disabled' : ''}><span>Public</span></label>
       </div></fieldset>
-      ${lockPublic ? `<p class="note">This post is encrypted, so it stays private.</p>` : ''}
-      ${lockPrivate ? `<p class="note">Private posts are shared with your contacts. You'll have some once you match with
+      ${t.mail ? `<p class="note">A post stays ${vis} once it's posted. To change who can see it, remove it and post it again.</p>`
+      : lockPrivate ? `<p class="note">Private posts are shared with your contacts. You'll have some once you match with
         someone on a post, or connect through an invitation from Profile.</p>` : ''}
       <div class="audience" ${vis === 'public' ? 'hidden' : ''} data-audience="${esc(JSON.stringify(t.audience || (t.id ? audienceOf(t.id) : emptyAudience())))}"></div>`;
 }
@@ -1577,17 +1584,19 @@ function mountAudience(form) {
   draw();
 }
 
-// Create or update a post from its form, including who can see it, and remember the pick in the vault.
-// New private posts, and edits to them, are encrypted (public/mail.js): id "m:<pid>". Public posts, and private
-// posts made before encryption, are still stored by the server.
+// Create or update a post from its form, including who can see it.
+// New posts, and edits to them, go through public/mail.js (id "m:<pid>"): private ones encrypted for their audience,
+// public ones signed. Posts made before encryption are still stored by the server, and edited there.
 async function saveEvent(form, id) {
   const pick = form.audience?.() ?? null;
   const pid = typeof id === 'string' && id.startsWith('m:') ? id.slice(2) : null;
-  if (pid || (!id && pick)) {
-    if (!pick) throw new Error('This post is encrypted, so it stays private.');
-    const h = mailView()?.hosting.find(x => x.post.pid === pid);
+  if (pid || !id) {
+    const h = pid && mailView()?.hosting.find(x => x.post.pid === pid);
     const fields = await postFields(formData(form), { matched: h ? h.counts.accepted + h.counts.attended : 0 });
-    return savePrivatePost({ pid, fields, audience: { groups: [...pick.groups], contacts: [...pick.contacts] }, guids: audienceGuids(pick) });
+    return savePost({
+      pid, kind: pick ? 'private' : 'public', fields,
+      audience: pick ? { groups: [...pick.groups], contacts: [...pick.contacts] } : null, guids: pick ? audienceGuids(pick) : [],
+    });
   }
   const body = { ...formData(form), viewers: pick ? audienceGuids(pick) : [] };
   const r = id ? await api(`/api/events/${id}`, { method: 'PATCH', body }) : await api('/api/events', { method: 'POST', body });
@@ -1735,7 +1744,7 @@ function rotatePostIdeas(el) {
 async function viewPost(v) {
   const [old, mail] = await Promise.all([api('/api/events'), loadMail().catch(() => mailView())]);
   const mine = (mail?.hosting || []).filter(h => h.post.status !== 'cancelled').map(h => ({
-    ...h.post, id: `m:${h.post.pid}`, mail: true, visibility: 'private', tags: h.post.tags || [], status: h.status,
+    ...h.post, id: `m:${h.post.pid}`, mail: true, visibility: h.post.kind, tags: h.post.tags || [], status: h.status,
     pending: h.counts.pending, matched: h.counts.accepted + h.counts.attended, waitlisted: h.counts.waitlisted, awaiting: h.counts.reconfirm,
     viewers: vault.data.posts?.[h.post.pid]?.sharedWith.length || 0, audience: vault.data.posts?.[h.post.pid]?.audience,
   }));

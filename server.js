@@ -656,6 +656,69 @@ route('POST', '/api/mail/read', async ({ body, res }) => {
   send(res, 200, { mail, more });
 }, { auth: false });
 
+// ---------- public posts ----------
+// A public post is a record signed by its host (public/secure.js signRecord): { body, sig, signer }, where body is
+// the post's JSON (public/posts.js). Anyone can read them, guests too. Only the host can publish one or change it,
+// and the server checks the signature, so it can't forge or change one itself; it can still take one down.
+
+const MAX_PUBLIC_POST = 16 * 1024, PUBLIC_PER_HOUR = 120, PUBLIC_PAGE = 1000, MAX_PUBLIC_PIDS = 500;
+const PID_RE = /^[A-Za-z0-9_-]{16,43}$/;
+const POST_STATUSES = ['open', 'full', 'past', 'cancelled'];
+const sameJwk = (json, jwk) => { try { const k = JSON.parse(json); return k.x === jwk?.x && k.y === jwk?.y; } catch { return false; } };
+
+// Publish or update one of my public posts: { record }. The record must be signed with my signing key, say it's
+// public, have a newer version than the one stored, and send requests to join to my own inbox and chat key. Its
+// fields go through the same checks as any post (eventFields, including the personal info check).
+route('PUT', '/api/public', async ({ user, body, res }) => {
+  const record = body.record;
+  if (!user.sign_pubkey || !user.inbox_id) throw new HttpError(400, 'Open Bored? again to finish setting up encryption first');
+  if (!record || typeof record.body !== 'string' || record.body.length > MAX_PUBLIC_POST || typeof record.sig !== 'string')
+    throw new HttpError(400, 'Bad post');
+  if (!sameJwk(user.sign_pubkey, record.signer) || !signedBy(user.sign_pubkey, 'post', record.body, record.sig))
+    throw new HttpError(400, "That post isn't signed with your key");
+  let post;
+  try { post = JSON.parse(record.body); } catch { throw new HttpError(400, 'Bad post'); }
+  if (post?.kind !== 'public' || !PID_RE.test(post.pid || '') || !Number.isInteger(post.v) || post.v < 1 || !POST_STATUSES.includes(post.status))
+    throw new HttpError(400, 'Bad post');
+  if (post.reply?.inbox !== user.inbox_id || !sameJwk(user.chat_pubkey, post.reply?.chat))
+    throw new HttpError(400, 'Requests to join must go to your own inbox');
+  const [start, ...rule] = String(post.when_text ?? '').split(';');
+  eventFields({ ...post, when_text: start, when_repeat: rule.join(';') }); // throws on anything a post can't have
+  countMail(`public:${user.id}`, PUBLIC_PER_HOUR);
+  const live = ['open', 'full'].includes(post.status) ? 1 : 0;
+  tx(() => {
+    const cur = q('SELECT host_id, v FROM public_posts WHERE pid = ?').get(post.pid);
+    if (cur && cur.host_id !== user.id) throw new HttpError(409, 'That post ID is taken');
+    if (cur && cur.v >= post.v) throw new HttpError(409, 'A newer version of this post is already published');
+    const seq = q('SELECT COALESCE(MAX(seq), 0) + 1 n FROM public_posts').get().n;
+    q(`INSERT INTO public_posts (pid, host_id, v, body, live, seq) VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT (pid) DO UPDATE SET v = excluded.v, body = excluded.body, live = excluded.live, seq = excluded.seq,
+         updated_at = datetime('now')`)
+      .run(post.pid, user.id, post.v, JSON.stringify({ body: record.body, sig: record.sig, signer: record.signer }), live, seq);
+  });
+  send(res, 200, { ok: true });
+});
+
+// Read public posts: { after, pids } → { posts: [record], seq, more }. after: the seq from the last read; 0 (the
+// first read) gets every live post, later reads get everything that changed since, including posts that ended. pids
+// also gets those posts whatever their state (the ones I've asked to join). The browser calls this without cookies.
+route('POST', '/api/public/read', async ({ body, res }) => {
+  const after = Math.max(0, Number(body.after) || 0);
+  const pids = Array.isArray(body.pids) ? [...new Set(body.pids.map(String))].filter(p => PID_RE.test(p)) : [];
+  if (pids.length > MAX_PUBLIC_PIDS) throw new HttpError(400, `Up to ${MAX_PUBLIC_PIDS} posts at a time`);
+  const rows = q(`SELECT seq, body FROM public_posts WHERE seq > ? AND (live = 1 OR ? > 0) ORDER BY seq LIMIT ?`)
+    .all(after, after, PUBLIC_PAGE + 1);
+  const more = rows.length > PUBLIC_PAGE;
+  if (more) rows.pop();
+  const seen = new Set(rows.map(r => r.seq));
+  for (const pid of pids) {
+    const r = q('SELECT seq, body FROM public_posts WHERE pid = ?').get(pid);
+    if (r && !seen.has(r.seq)) { rows.push({ seq: 0, body: r.body }); seen.add(r.seq); }
+  }
+  const seq = rows.reduce((n, r) => Math.max(n, r.seq), after);
+  send(res, 200, { posts: rows.map(r => JSON.parse(r.body)), seq, more });
+}, { auth: false });
+
 const COST_FILTERS = ['free', 'paid'];
 
 // Open events from other people that I haven't swiped on yet.

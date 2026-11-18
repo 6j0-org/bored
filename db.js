@@ -201,6 +201,11 @@ const MIGRATIONS = [
      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
    );
    CREATE INDEX idx_public_posts_live ON public_posts(live, updated_at);`,
+
+  // 8: public posts get a change counter, so browsers can ask for what changed since they last looked: every
+  //    publish or update sets seq to one more than the highest so far.
+  `ALTER TABLE public_posts ADD COLUMN seq INTEGER NOT NULL DEFAULT 0;
+   CREATE INDEX idx_public_posts_seq ON public_posts(seq);`,
 ];
 
 export function migrate() {

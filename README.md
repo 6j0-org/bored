@@ -2,7 +2,7 @@
 
 A local event board that works like a dating app.
 Host an event. Users swipe through posts in **Discover**, and **right = "I'm in"**.
-In **Confirm**, the host swipes through the people who want to join, and **right = "Let's do it"**. When both sides say yes, it's on:
+In **Confirm**, the host swipes through the anonymous requests to join, and **right = "Let's do it"**. When both sides say yes, it's on:
 it shows up in **Plans**, where you chat and sort out details. Afterwards the host marks it as happened.
 
 Accounts are anonymous: a random GUID and a passkey. No usernames, passwords, or email. Anyone can browse **Discover** without an account.
@@ -14,7 +14,6 @@ Needs Node ≥ 24 (uses the built-in `node:sqlite`). npm packages are only for t
 
 ```sh
 npm ci         # install the exact versions in package-lock.json
-npm run seed   # optional: demo posts from demo accounts (they have no passkeys, so nobody can sign in as them)
 npm start      # http://localhost:3000
 ```
 
@@ -22,8 +21,12 @@ npm start      # http://localhost:3000
 
 `DEMO=1 npm start` runs a throwaway demo with no sign-in. Each browser automatically gets its own account,
 already filled in: demo posts in **Discover**, two requests to join a hike in **Confirm**, two plans with chats in
-**Plans**, and a past event in **Profile**. Demo hosts say yes as soon as you swipe right on their posts. "Start
+**Plans**, and two past events in **Profile**. Demo hosts say yes as soon as you swipe right on their posts. "Start
 over" in Profile gives a fresh account. No passkey or PRF support is needed.
+
+The demo accounts have real keys, kept only in the server's memory, and a small bot in `demo.js` reads and answers
+their mail with the same code the browser uses. A new visitor's browser makes its own posts (only it can sign them)
+and the bot fills in the rest: requests, matches, and chats.
 
 Everything is kept in memory (`DB_PATH` and `AUTH_MODE` are ignored), so it all resets when the server stops, and
 visitor accounts are deleted after a day. It's for trying the app out and showing it to people, never for real use.
@@ -83,27 +86,57 @@ the schema, append a migration (never edit or reorder old ones). Back up `data.s
 | Step | Who | Where |
 |---|---|---|
 | Post an event (title, details, up to 5 tags, where (map pin), when (date, time, optional repeat), cost and currency, max attendees or no limit, public or shared with chosen contacts/groups) | Host | **Post** |
-| Swipe right on events you're in for (filter by tags and/or free/paid) | Attendee | **Discover** |
-| Swipe right on people who want to join | Host | **Confirm** |
-| Match → chat to sort out details | Both | **Plans** |
+| Swipe right on events you're in for (filter by date, distance, tags, and free/paid) | Attendee | **Discover** |
+| Swipe right on the (anonymous) people who want to join | Host | **Confirm** |
+| Match → you learn who each other are, become contacts, and chat to sort out details | Both | **Plans** |
 | "It happened" to close it out | Host | Plan chat |
 
-A post stays in the deck until it reaches its max attendees. Posts with no limit stay open until the host removes them. Posts are **private** by default: only the contacts and groups (contact tags) the host picks can see them. Private posts need contacts, so until someone has matched or connected with at least one person, their posts are public (the server enforces this). **Public** posts show for everyone, including signed-out guests.
+A post stays in the deck until it reaches its max attendees; after that, saying yes joins its waitlist, and people
+move off the waitlist in order as spots open. Posts with no limit stay open until the host removes them. Posts are
+**private** by default: only the contacts and groups (contact tags) the host picks can see them. Until someone has a
+contact (from matching or an invitation), new posts are public. **Public** posts show for everyone, including
+signed-out guests. A post stays public or private once it's posted.
 
 ## Privacy model
 
+The server is a mailbox. It stores signed public posts, and encrypted mail it can't read and can't tell the sender
+of. Everything else happens in the browser: filtering Discover, who's in, the waitlist, and contacts.
+
 - **Accounts** are a server-assigned GUID plus one or more passkeys. The server stores each passkey's public key,
-  never a name, email, or password. Lose every passkey and the account is gone: the app nudges people to keep their
-  add a second passkey (another device or a security key) (Profile → Passkeys).
-- **Names are private.** You see only the nicknames *you* gave people, and only once you've matched with them;
-  everyone else has no name.
-- **GUIDs are only shared with matches.** The API sends someone's GUID only to people they've matched with, so
-  strangers can't link one person's posts or requests together. Everyone's avatar is the [Jdenticon](https://jdenticon.com) of
-  their GUID (the `jdenticon` npm package, served by this server). For people you haven't matched with, the server sends the SHA-1 of
-  the GUID instead, which draws the same icon but doesn't reveal the GUID. The icon does follow a person across
-  their posts.
-- **The vault** (nickname + tags for each contact, and who each of your private posts is shared with) is encrypted in the browser with a random
-  vault key. That key is wrapped by a key derived from each passkey's PRF output, so the server only stores ciphertext.
+  never a name, email, or password. Lose every passkey and the account is gone: the app nudges people to add a
+  second passkey (another device or a security key) (Profile → Passkeys).
+- **Keys.** Each account has an ECDH P-256 *chat key* and an ECDSA P-256 *signing key*. The private halves are
+  encrypted with the vault key, so any of your passkeys can unlock them on a new device, and the browser keeps them as
+  non-extractable WebCrypto keys. Each account also has a *main inbox*: a random token only its vault holds; the
+  server files mail under the token's SHA-256.
+- **Mail** (`public/envelope.js`) is built from standard parts, with nothing invented at the crypto layer:
+  - *Sealed envelope:* HPKE (RFC 9180; DHKEM(P-256), HKDF-SHA256, AES-128-GCM, in `public/hpke.js`, checked against
+    the RFC's test vectors) to the recipient's chat key, the way Nostr's gift wrap (NIP-59) works. HPKE's one-time
+    key hides the sender. When the sender should be known (sharing a private post), they sign the message and the
+    recipient's key inside the envelope.
+  - *Channel:* every envelope also gives both sides a shared secret (HPKE's secret export). A request to join opens
+    one; every later message about it (the answer, the waitlist, re-confirming, "it happened", and chat) is AES-GCM
+    under a key from that secret, to two inboxes worked out from it, so the server can't link them to anyone.
+  - *Signed record:* public posts, signed with ECDSA P-256. The server checks the signature before storing one, and
+    every browser checks it again.
+- **Requests to join are anonymous.** The host sees the note, not who sent it. When the host says yes, both browsers
+  send a signed `hello` with their GUID and keys over the channel, and each adds the other to its contacts.
+- **What the server sees:**
+  - Public posts: readable, as they must be, and signed, so it can't forge or change them. It can still take one down.
+  - Mail: which inbox each message went to, when, and how big it was. Main inboxes belong to known accounts; channel
+    inboxes don't. It never stores who sent a message. It does see which signed-in session sends each message as it
+    arrives (for rate limits, kept in memory) and every request's IP address, though it doesn't store either. Mail is
+    read without cookies.
+  - Not readable: private posts and who they're shared with, who asked to join anything, answers, matches,
+    waitlists, attendance, and chats.
+  - Unchanged: accounts, passkeys, sessions, push subscriptions, the encrypted vault, and invitation connections.
+- **Names are private.** You see only the nicknames *you* gave people. Everyone's avatar is the
+  [Jdenticon](https://jdenticon.com) of their GUID (for a public post's host you don't know, of their signing key),
+  which follows a person across their posts.
+- **The vault** (nickname, tags, and saved keys for each contact; your posts and who each is shared with; your
+  requests to join and their channel secrets) is encrypted in the browser with a random vault key. That key is
+  wrapped by a key derived from each passkey's PRF output, so the server only stores ciphertext. A contact's keys are
+  saved the first time they're used, so the server can't swap them later.
 - **With a 6j0.org identity** (`AUTH_MODE=6j0`) the passkeys (and the optional password) live on the identity server instead. After sign-in it
   sends the browser back with a signed token and Bored?'s own *app key*, encrypted to a one-time key the page made
   and carried in the URL fragment (which never reaches a server). The vault key is wrapped by a key derived from the
@@ -114,39 +147,58 @@ A post stays in the deck until it reaches its max attendees. Posts with no limit
   again. Connecting makes two people contacts, the same as matching (the server records the pair in `connections`).
 - **Notifications** go through the browser vendor's push service (Google, Mozilla, Apple, or Microsoft). They're
   encrypted for the device, so the service can't read them, but it does see when they're sent and to which device.
-  The text stays generic ("New message about “Picnic”"): no names, and never message contents.
-- **Your location for the distance filter** stays in your browser (`localStorage`). Discover sends the server only a
-  rough spot, rounded to 2 decimals (about a kilometre), and only while a distance is picked.
-- **Chat is end-to-end encrypted** (ECDH P-256 → HKDF per match → AES-GCM). Your chat private key is stored
-  encrypted under the vault key, so any of your passkeys can read your chats on a new device. Prototype caveat:
-  static keys, so no forward secrecy.
-- **What the server still knows:** which GUIDs swiped on, matched, and messaged which other GUIDs, and when;
-  post contents; who each private post is shared with (the browser expands your picked contacts and groups into
-  GUIDs, and re-sends them when your groups change); IP addresses. See `TODO.md` for the full list of open security and privacy issues. Match records are kept for now.
-- `public/secure.js` holds all client-side crypto; `webauthn.js` verifies passkeys on the server with `node:crypto` only.
+  The text is always "New activity": the server doesn't know what the mail says.
+- **Your location for the distance filter** stays in your browser (`localStorage`). Discover filters right there,
+  so the server never learns it.
+- **Before encryption:** plans, chats, and posts from before the move to mail stay readable in a read-only archive
+  (Plans and Post). Old chats were end-to-end encrypted too (ECDH → HKDF per match → AES-GCM), but the server knew
+  who matched with whom. Old posts can be posted again, which removes the old copy.
+- `public/secure.js` holds the account's keys and the vault; `webauthn.js` verifies passkeys on the server with
+  `node:crypto` only.
 - Pages are served with a strict Content-Security-Policy (same-origin scripts only) to keep injected code away from keys.
+
+### Known limits
+
+- **No forward secrecy.** Neither HPKE base mode nor the channel keys have it. Anyone who later gets someone's chat
+  key or vault can read their past messages. Fixing this would take a double ratchet or MLS.
+- **The server can drop or delay mail.** Each side numbers its messages, so a dropped one shows as a gap, but it
+  can't be recovered.
+- **Timing and IP addresses** can still link things, e.g. a message sent soon before a channel inbox is read.
+- **No push before a match.** Answers go to channel inboxes, which aren't tied to an account, so the person who asked
+  sees the answer the next time the app checks.
+- **The waitlist only moves while the host's browser is open**, since only it can send the answers.
+- **Each browser downloads every live public post.** Fine at this size; splitting by region would come later.
+- **Two devices sending on the same request at the same instant** can lose one of the two messages.
+- **Spam:** anyone can send a request to a public post's host. Rate limits on the server, plus the browser ignoring
+  anything the rules don't allow, are the only defense.
+
+See `TODO.md` for the full list of open security and privacy issues.
 
 ## Files
 
-- `server.js`: HTTP server + JSON API (routing, passkey auth, matching logic)
+- `server.js`: HTTP server + JSON API (passkey auth, mail, public posts, invitations, push, and the read-only archive)
 - `webauthn.js`: passkey registration/sign-in verification (no dependencies)
 - `idtoken.js`: verifies sign-in tokens from a 6j0.org identity server (`AUTH_MODE=6j0`)
-- `db.js`: SQLite schema, tag helpers
+- `db.js`: SQLite schema and migrations, tag helpers
 - `public/about.html`, `public/landing.js`, `public/about.js`: the introduction page, shown at `/` on a first visit, with a
   swipeable deck of example posts
 - `public/examples.js`: the example posts, shared by that deck and the demo (`demo.js`)
 - `public/app.js`: single-page front-end (vanilla JS, swipe deck with pointer/touch/keyboard)
-- `public/secure.js`: passkeys + PRF, 6j0.org identity handoff, encrypted vault, key storage, E2E chat crypto
+- `public/secure.js`: passkeys + PRF, 6j0.org identity handoff, encrypted vault, key storage, the old E2E chat crypto
+- `public/hpke.js`: HPKE (RFC 9180) on WebCrypto, one cipher suite
+- `public/envelope.js`: the mail formats: signatures, signed records, sealed envelopes, and channels
+- `public/posts.js`: the rules for posts, requests, matches, and chat as messages, and `derive()`, which replays them
+- `public/mail.js`: the mail loop (read, check, replay) and everything the app sends
+- `public/postfields.js`: checks a post's fields in the browser, with the server's rules
 - `public/location.js`: "lat,lon" locations, links to the viewer's maps app, and a small OpenStreetMap pin picker
 - `public/theme.js`: the automatic / light / dark theme switch, applied before the page draws
 - `public/board.webp`: the wooden board behind the Bored? title
 - `public/when.js`, `public/cost.js`: event time (with repeat rules) and cost formats, shared by server and browser
-- `public/pii.js`: finds contact info and ID numbers in posts and notes, which the server refuses and the post form
-  points out as you type, with [`@devopscoop/eat-the-pii`](https://gitlab.com/devopscoop/eat-the-pii) (installed from
+- `public/pii.js`: finds contact info and ID numbers in posts and notes, which the post form points out as you type
+  and refuses (and the server refuses in public posts), with [`@devopscoop/eat-the-pii`](https://gitlab.com/devopscoop/eat-the-pii) (installed from
   its git URL, so `.npmrc` sets `allow-git=root`); `public/libphonenumber.js` loads its phone number data in the browser
 - `public/fonts/`: bundled National Park font, used for all text (SIL OFL 1.1, license alongside). The app loads nothing from outside its own server, except OpenStreetMap tiles while the location picker is open. Suggested place names come from OpenStreetMap's Nominatim, asked by the server (`/api/places/reverse`).
-- `demo.js`: demo accounts and posts, and the ready-made account each visitor gets in demo mode (`DEMO=1`)
-- `seed.js`: adds the demo accounts and posts to a real database (`npm run seed`)
+- `demo.js`: demo mode (`DEMO=1`): demo accounts with keys, their signed public posts, and the bot that answers them
 - `TODO.md`: open security and privacy issues, by priority
 
 ## License

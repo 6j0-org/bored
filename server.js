@@ -8,8 +8,8 @@ import { composeWhen, whenLabel, occursBetween } from './public/when.js';
 import { parseCost, costLabel } from './public/cost.js';
 import { piiProblems } from './public/pii.js';
 import { vapidPublicKey, validEndpoint, sendPush } from './push.js';
-import { db, DEMO, parseTags, setEventTags, MAX_TAGS, MAX_ATTENDEES_LIMIT, MAX_VIEWERS } from './db.js';
-import { seedDemo, seedVisitor, isDemoGuid, demoHostReply, pruneVisitors } from './demo.js';
+import { db, DEMO, parseTags, MAX_TAGS, MAX_ATTENDEES_LIMIT } from './db.js';
+import { seedDemo, demoNames, demoSeed, demoBot, pruneVisitors } from './demo.js';
 
 const PORT = Number(process.env.PORT || 3000);
 // Passkeys are bound to an origin. Defaults to whatever host the browser used (fine for localhost);
@@ -79,18 +79,10 @@ function newSession(res, userId) {
   return { 'Set-Cookie': `sid=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${60 * 60 * 24 * 30}${secure}` };
 }
 
-function stats(userId) {
-  const hosted = q(`SELECT COUNT(DISTINCT s.event_id) n FROM swipes s JOIN events t ON t.id = s.event_id WHERE t.host_id = ? AND s.status = 'attended'`).get(userId).n;
-  const attended = q(`SELECT COUNT(*) n FROM swipes WHERE attendee_id = ? AND status = 'attended'`).get(userId).n;
-  // People helped: different hosts of posts tagged "help" that this person showed up for.
-  const helped = q(`SELECT COUNT(DISTINCT t.host_id) n FROM swipes s JOIN events t ON t.id = s.event_id
-    JOIN event_tags g ON g.event_id = t.id AND g.tag = 'help' WHERE s.attendee_id = ? AND s.status = 'attended'`).get(userId).n;
-  return { hosted, attended, helped };
-}
-
-// What anyone may learn about an account: its GUID and activity counts. Never a name.
+// What anyone may learn about an account: its GUID. Never a name, and no activity counts: the server no longer
+// knows who did what.
 function publicUser(u) {
-  return { guid: u.guid, ...stats(u.id) };
+  return { guid: u.guid };
 }
 
 // Encrypted values from the browser look like "iv.ciphertext" in base64url. The server never decrypts them.
@@ -228,12 +220,6 @@ function whenField(start, repeat) {
   return v;
 }
 
-function noteField(v) {
-  const note = str(v, 280, { field: 'Note' });
-  noPii('Note', note);
-  return note;
-}
-
 function costFields(amount, currency) {
   const c = parseCost(amount, currency);
   if (c.error) throw new HttpError(400, c.error);
@@ -267,80 +253,9 @@ function eventFields(body) {
   f.tags.forEach(tag => noPii('Tags', tag));
   return f;
 }
-const FIELD_LABELS = { title: 'Title', details: 'Details', tags: 'Tags', location: 'Where', when_text: 'When', cost: 'Cost', visibility: 'Visibility', max_attendees: 'Max attendees' };
-
-// GUIDs are only ever sent for people you've matched with (now or before, on either side) or connected with through
-// an invitation. Those are your contacts, which your browser keys by GUID. Anyone else stays anonymous, so nobody can
-// link someone's posts or requests together, or share private posts with strangers by GUID.
-// SQL: true when users `a` and `b` have matched or are connected.
-const MATCHED = (a, b) => `(EXISTS (SELECT 1 FROM swipes ms JOIN events mt ON mt.id = ms.event_id
-  WHERE ms.status IN ('accepted', 'attended', 'withdrawn')
-    AND ((ms.attendee_id = ${a} AND mt.host_id = ${b}) OR (mt.host_id = ${a} AND ms.attendee_id = ${b})))
-  OR EXISTS (SELECT 1 FROM connections mc WHERE (mc.a = ${a} AND mc.b = ${b}) OR (mc.a = ${b} AND mc.b = ${a})))`;
-
 // Everyone's avatar is the Jdenticon of their GUID. Jdenticon draws from the SHA-1 of its input, so sending that hash
 // lets any browser draw the same icon without learning the GUID (which a SHA-1 of 122 random bits doesn't reveal).
 const iconHash = (guid) => createHash('sha1').update(guid).digest('hex');
-
-// Taken spots on an event: matched attendees, including ones who already went.
-const filledSpots = (eventId) =>
-  q(`SELECT COUNT(*) n FROM swipes WHERE event_id = ? AND status IN ('accepted', 'attended')`).get(eventId).n;
-const isFull = (t) => t.max_attendees !== null && filledSpots(t.id) >= t.max_attendees;
-
-// Recompute open/full/past for a live event from its matched attendees, first moving people up from the waitlist
-// (first come, first served) into any open spots. Call inside a transaction.
-function syncEventStatus(eventId) {
-  const t = q('SELECT id, host_id, title, status, max_attendees FROM events WHERE id = ?').get(eventId);
-  if (!t || !['open', 'full'].includes(t.status)) return;
-  const room = t.max_attendees === null ? -1 : t.max_attendees - filledSpots(eventId); // -1 = no limit (SQLite LIMIT)
-  if (room !== 0) {
-    for (const { id, attendee_id } of q(`SELECT id, attendee_id FROM swipes WHERE event_id = ? AND status = 'waitlisted' ORDER BY id LIMIT ?`).all(eventId, room)) {
-      q(`UPDATE swipes SET status = 'accepted', reconfirm = 0 WHERE id = ?`).run(id);
-      systemMessage(id, t.host_id, "A spot opened up, so you're off the waitlist and in!");
-      notify(attendee_id, { body: `A spot opened up for ${quoted(t.title)}. You're in!`, tag: `chat-${id}`, open: `chat:${id}` });
-    }
-  }
-  const { accepted, attended } = q(`
-    SELECT COALESCE(SUM(status = 'accepted'), 0) accepted, COALESCE(SUM(status = 'attended'), 0) attended
-    FROM swipes WHERE event_id = ?`).get(eventId);
-  // No limit → stays open for more people until the host removes it.
-  const status = t.max_attendees === null || accepted + attended < t.max_attendees ? 'open' : accepted === 0 ? 'past' : 'full';
-  if (status !== t.status) q('UPDATE events SET status = ? WHERE id = ?').run(status, eventId);
-}
-
-// Private events: replace who may see one. guids come from the host's browser (contacts and groups expanded);
-// unknown GUIDs, the host, and anyone the host hasn't matched with are skipped. Call inside a transaction.
-function viewerIds(guids, hostId) {
-  if (guids === undefined) return undefined;
-  if (!Array.isArray(guids) || guids.length > MAX_VIEWERS || !guids.every(g => typeof g === 'string' && g.length <= 64))
-    throw new HttpError(400, `Share with up to ${MAX_VIEWERS} people`);
-  const find = q(`SELECT id FROM users u WHERE u.guid = :guid AND u.id != :host AND ${MATCHED(':host', 'u.id')}`);
-  return [...new Set(guids.map(guid => find.get({ guid, host: hostId })?.id).filter(Boolean))];
-}
-// Private posts are for sharing with contacts, so they need at least one: someone matched (on either side) or
-// connected through an invitation. Same relationships as MATCHED.
-const hasContacts = (userId) => Boolean(q(`
-  SELECT 1 FROM swipes s JOIN events t ON t.id = s.event_id
-    WHERE s.status IN ('accepted', 'attended', 'withdrawn') AND (s.attendee_id = :me OR t.host_id = :me)
-  UNION ALL SELECT 1 FROM connections WHERE a = :me OR b = :me
-  LIMIT 1`).get({ me: userId }));
-const NO_CONTACTS = "Private posts are shared with your contacts, and you don't have any yet. Make this one public, " +
-  'or connect with someone first (match on a post, or send an invitation from Profile).';
-
-function setViewers(eventId, ids) {
-  if (ids === undefined) return;
-  q('DELETE FROM event_viewers WHERE event_id = ?').run(eventId);
-  const ins = q('INSERT INTO event_viewers (event_id, user_id) VALUES (?, ?)');
-  for (const id of ids) ins.run(eventId, id);
-}
-
-function loadEvent(id) {
-  const row = q(`SELECT t.*, ${TAGS_COL} FROM events t WHERE t.id = ?`).get(id);
-  return row && withTags(row);
-}
-
-const systemMessage = (swipeId, senderId, body) =>
-  q(`INSERT INTO messages (swipe_id, sender_id, body, kind) VALUES (?, ?, ?, 'system')`).run(swipeId, senderId, body);
 
 // Runs fn in a transaction. Notifications sent inside it wait for the commit, so a rolled-back change never notifies.
 let afterCommit = null;
@@ -378,7 +293,6 @@ function notify(userId, { body, tag, open = '', throttle = false }) {
     }, (err) => console.warn(`Push to subscription ${s.id} failed: ${err.message}`));
   }
 }
-const quoted = (title) => `“${String(title).slice(0, 60)}”`;
 
 // ---------- routes ----------
 
@@ -524,20 +438,23 @@ route('POST', '/api/id/register', async ({ body, res }) => {
 }, { auth: false, mode: '6j0' });
 
 // ---------- demo mode (DEMO=1) ----------
-// No sign-in: the browser makes its keys and vault as usual (public/secure.js), and gets a fresh account already
-// filled with demo content, plus nicknames for the demo accounts to save in its vault.
+// No sign-in: the browser makes its keys and vault as usual (public/secure.js), and gets a fresh account plus
+// nicknames for the demo accounts to save in its vault. Then, with its keys set up, it asks for /api/demo/seed to
+// fill the account with demo posts, requests, plans, and chats (see demo.js).
 const MAX_DEMO_VISITORS = 5000;
 route('POST', '/api/demo/register', async ({ body, res }) => {
   const fields = { pub: chatPubkey(body.chatPubkey), priv: sealed(body.chatPrivkey, 'chat key'), vault: sealed(body.vault, 'vault') };
   if (q('SELECT COUNT(*) n FROM users').get().n > MAX_DEMO_VISITORS) throw new HttpError(503, 'The demo is full right now. Please try again later.');
-  const { userId, names } = tx(() => {
-    const userId = Number(q('INSERT INTO users (guid, chat_pubkey, chat_privkey, vault) VALUES (?, ?, ?, ?)')
-      .run(randomUUID(), fields.pub, fields.priv, fields.vault).lastInsertRowid);
-    return { userId, names: seedVisitor(userId) };
-  });
+  const userId = Number(q('INSERT INTO users (guid, chat_pubkey, chat_privkey, vault) VALUES (?, ?, ?, ?)')
+    .run(randomUUID(), fields.pub, fields.priv, fields.vault).lastInsertRowid);
   const user = q('SELECT * FROM users WHERE id = ?').get(userId);
-  send(res, 200, { user: publicUser(user), names }, newSession(res, userId));
+  send(res, 200, { user: publicUser(user), names: demoNames() }, newSession(res, userId));
 }, { auth: false, mode: 'demo' });
+
+route('POST', '/api/demo/seed', async ({ user, res }) => {
+  if (!user.inbox_id || !user.chat_pubkey) throw new HttpError(400, 'Set up encryption first');
+  send(res, 200, await demoSeed(user));
+}, { mode: 'demo' });
 
 // ---------- encrypted vault (contacts, nicknames) ----------
 route('GET', '/api/vault', async ({ user, res }) => {
@@ -559,13 +476,8 @@ route('POST', '/api/logout', async ({ req, res }) => {
 }, { auth: false });
 
 route('GET', '/api/me', async ({ user, res }) => {
-  const counts = {
-    confirm: q(`SELECT COUNT(*) n FROM swipes s JOIN events t ON t.id = s.event_id
-               WHERE t.host_id = ? AND s.yes = 1 AND s.status = 'pending' AND t.status IN ('open', 'full')`).get(user.id).n
-      + q(`SELECT COUNT(*) n FROM connection_requests WHERE owner_id = ? AND status = 'pending'`).get(user.id).n,
-    plans: q(`SELECT COUNT(*) n FROM swipes s JOIN events t ON t.id = s.event_id
-                WHERE s.status = 'accepted' AND (s.attendee_id = ? OR t.host_id = ?)`).get(user.id, user.id).n,
-  };
+  // Only connection requests: everything about posts is in encrypted mail, which the browser counts itself.
+  const counts = { confirm: q(`SELECT COUNT(*) n FROM connection_requests WHERE owner_id = ? AND status = 'pending'`).get(user.id).n };
   send(res, 200, { ...publicUser(user), counts });
 });
 
@@ -632,6 +544,8 @@ route('POST', '/api/mail', async ({ user, body, res }) => {
   if (!items.length || items.length > MAX_BATCH) throw new HttpError(400, `Send 1 to ${MAX_BATCH} messages at a time`);
   for (const m of items) { countMail(String(user.id), MAIL_PER_HOUR); countMail(`${user.id}:${m.inbox}`, MAIL_PER_INBOX_HOUR); }
   const ids = tx(() => items.map(m => Number(q('INSERT INTO mail (inbox, body) VALUES (?, ?)').run(m.inbox, m.body).lastInsertRowid)));
+  // Demo mode: the demo people answer before this returns, so the sender sees their replies on its next read.
+  if (DEMO) await demoBot(items).catch(e => console.warn('demo bot:', e));
   for (const inbox of new Set(items.map(m => m.inbox))) {
     const owner = q('SELECT id FROM users WHERE inbox_id = ?').get(inbox);
     if (owner && owner.id !== user.id) notify(owner.id, { body: 'New activity', tag: 'mail', open: '', throttle: true });
@@ -719,39 +633,6 @@ route('POST', '/api/public/read', async ({ body, res }) => {
   send(res, 200, { posts: rows.map(r => JSON.parse(r.body)), seq, more });
 }, { auth: false });
 
-const COST_FILTERS = ['free', 'paid'];
-
-// Open events from other people that I haven't swiped on yet.
-// Who may see an event (alias t) at all: anyone if it's public, otherwise its host and chosen viewers.
-const VISIBLE = `(t.visibility = 'public' OR t.host_id = :me
-  OR EXISTS (SELECT 1 FROM event_viewers v WHERE v.event_id = t.id AND v.user_id = :me))`;
-// Full events stay in the deck: saying yes asks to join the waitlist.
-const DISCOVERABLE = `t.status IN ('open', 'full') AND t.host_id != :me AND ${VISIBLE}
-  AND NOT EXISTS (SELECT 1 FROM swipes s WHERE s.event_id = t.id AND s.attendee_id = :me)`;
-
-// A date range from the query, "YYYY-MM-DD" days in the viewer's own calendar (only they know what "today" is):
-// ?from=…&to=… → { from, to }, or null if not given or malformed.
-const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
-function dateRange(from, to) {
-  return DAY_RE.test(from || '') && DAY_RE.test(to || '') && from <= to ? { from, to } : null;
-}
-
-// Distance filter: ?near=lat,lon&km=N, the viewer's spot (the browser rounds it to about a kilometre) and a radius.
-const MAX_RADIUS_KM = 1000;
-function nearFilter(near, km) {
-  const m = /^(-?\d{1,3}(?:\.\d+)?),(-?\d{1,3}(?:\.\d+)?)$/.exec(near || '');
-  const lat = m && Number(m[1]), lon = m && Number(m[2]), r = Number(km);
-  return m && Math.abs(lat) <= 90 && Math.abs(lon) <= 180 && r > 0 && r <= MAX_RADIUS_KM ? { lat, lon, km: r } : null;
-}
-// Great-circle distance in km from { lat, lon } to an event's "lat,lon" location (Infinity without one).
-function distanceKm({ lat, lon }, location) {
-  const m = /^(-?[\d.]+),(-?[\d.]+)$/.exec(location || '');
-  if (!m) return Infinity;
-  const rad = Math.PI / 180, dLat = (m[1] - lat) * rad, dLon = (m[2] - lon) * rad;
-  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat * rad) * Math.cos(m[1] * rad) * Math.sin(dLon / 2) ** 2;
-  return 12742 * Math.asin(Math.sqrt(a)); // Earth's mean diameter, km
-}
-
 const placesLang = (req) => String(req.headers['accept-language'] || '').split(',')[0].trim().slice(0, 20).replace(/[^\w-]/g, '');
 
 // Location picker: a friendly name for a spot (signed-in users only). ?lat=&lon=
@@ -774,155 +655,6 @@ route('GET', '/api/places/search', async ({ req, query, res }) => {
   send(res, 200, { places: await searchPlaces(q, view, placesLang(req)) });
 });
 
-// In demo mode, each visitor gets their own shuffle of the example posts instead of newest first: a hash of the post
-// and the visitor, so the order stays put while they swipe and reload. (Squared, since a linear hash would give every
-// visitor the same order, just rotated.) Values stay under 10^12, well inside SQLite's 64-bit integers.
-const DEMO_ORDER = `((t.id * 7919 + :me * 104729) % 1000003) * ((t.id * 7919 + :me * 104729) % 1000003) % 1000003, t.id`;
-
-// The Discover deck (also shown to signed-out guests). ?tags=a,b keeps events with ANY of those tags;
-// ?cost=free or ?cost=paid keeps only free or paid events (both, or neither, = all); ?from=&to= keeps events that
-// happen (or repeat) on one of those days. Where: ?near=&km= keeps events within that distance, and ?online=1 events
-// you can join online (online only, or both); given both, either one will do (e.g. "within 10 miles, or online").
-// Every filter given must match.
-route('GET', '/api/discover', async ({ user, query, res }) => {
-  const tags = parseTags(query.get('tags'));
-  const costs = String(query.get('cost') || '').split(',').filter(c => COST_FILTERS.includes(c));
-  const range = dateRange(query.get('from'), query.get('to'));
-  const near = nearFilter(query.get('near'), query.get('km'));
-  const online = query.get('online') === '1';
-  const placed = (t) => (near && distanceKm(near, t.location) <= near.km) || (online && t.online > 0);
-  const rows = q(`
-    SELECT t.*, u.guid AS host_raw, CASE WHEN ${MATCHED(':me', 't.host_id')} THEN u.guid END AS host_guid, ${TAGS_COL}
-    FROM events t JOIN users u ON u.id = t.host_id
-    WHERE ${DISCOVERABLE}
-      AND (:tags = '[]' OR EXISTS (SELECT 1 FROM event_tags tt WHERE tt.event_id = t.id AND tt.tag IN (SELECT value FROM json_each(:tags))))
-      AND (:costs = '[]' OR (CASE WHEN t.cost_amount > 0 THEN 'paid' ELSE 'free' END) IN (SELECT value FROM json_each(:costs)))
-      AND (:dated = 0 OR t.when_text != '')
-      AND (:located = 0 OR t.location != '' OR t.online > 0)
-    ORDER BY ${DEMO ? DEMO_ORDER : 't.created_at DESC, t.id DESC'}
-    LIMIT :limit`).all({ me: user?.id ?? -1, tags: JSON.stringify(tags), costs: JSON.stringify(costs),
-      dated: range ? 1 : 0, located: near || online ? 1 : 0, limit: range || near || online ? -1 : 30 }) // date and place are checked in JS, so those read all, then cut
-    .filter(t => !range || occursBetween(t.when_text, range.from, range.to))
-    .filter(t => !(near || online) || placed(t)).slice(0, 30);
-  send(res, 200, rows.map(({ host_id, host_raw, host_guid, ...t }) =>
-    withTags({ ...t, host: { ...(host_guid ? { guid: host_guid } : {}), icon: iconHash(host_raw), ...stats(host_id) } })));
-}, { auth: 'optional' });
-
-// Filter options for Discover: tags and costs, each with how many discoverable events match. ?dates=key:from:to,…
-// (the browser's own day ranges, e.g. today:2026-11-15:2026-11-15) adds a count for each of those ranges, and
-// ?near=lat,lon&radii=km,km,… a count for each of those distances.
-route('GET', '/api/discover/filters', async ({ user, query, res }) => {
-  const me = user?.id ?? -1;
-  const center = nearFilter(query.get('near'), 1);
-  const radii = center ? String(query.get('radii') || '').split(',').slice(0, 10).map(Number).filter(k => k > 0 && k <= MAX_RADIUS_KM) : [];
-  const located = radii.length ? q(`SELECT t.location FROM events t WHERE ${DISCOVERABLE} AND t.location != ''`).all({ me })
-    .map(t => distanceKm(center, t.location)) : [];
-  const distances = radii.map(km => ({ km, count: located.filter(d => d <= km).length }));
-  const online = q(`SELECT COUNT(*) n FROM events t WHERE ${DISCOVERABLE} AND t.online > 0`).get({ me }).n;
-  const ranges = String(query.get('dates') || '').split(',').slice(0, 10).map(x => x.split(':'))
-    .map(([key, from, to]) => ({ key, range: dateRange(from, to) })).filter(x => /^[a-z]{1,20}$/.test(x.key || '') && x.range);
-  const dated = ranges.length ? q(`SELECT t.when_text FROM events t WHERE ${DISCOVERABLE} AND t.when_text != ''`).all({ me }) : [];
-  const dates = ranges.map(({ key, range }) => ({ key, count: dated.filter(t => occursBetween(t.when_text, range.from, range.to)).length }));
-  const tags = q(`
-    SELECT tt.tag, COUNT(*) AS count FROM event_tags tt JOIN events t ON t.id = tt.event_id
-    WHERE ${DISCOVERABLE}
-    GROUP BY tt.tag ORDER BY count DESC, tt.tag LIMIT 40`).all({ me });
-  const byCost = Object.fromEntries(q(`
-    SELECT CASE WHEN t.cost_amount > 0 THEN 'paid' ELSE 'free' END AS cost, COUNT(*) AS count
-    FROM events t WHERE ${DISCOVERABLE} GROUP BY 1`).all({ me }).map(r => [r.cost, r.count]));
-  send(res, 200, { tags, costs: COST_FILTERS.map(cost => ({ cost, count: byCost[cost] || 0 })), dates, distances, online });
-}, { auth: 'optional' });
-
-route('POST', '/api/events/:id/swipe', async ({ user, params, body, res }) => {
-  const event = q(`SELECT * FROM events t WHERE t.id = :id AND ${VISIBLE}`).get({ id: params.id, me: user.id });
-  if (!event || !['open', 'full'].includes(event.status)) throw new HttpError(404, 'That event is no longer open');
-  if (event.host_id === user.id) throw new HttpError(400, "You can't swipe on your own event");
-  const yes = body.yes ? 1 : 0;
-  const r = q(`INSERT INTO swipes (event_id, attendee_id, yes, note, status) VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(event_id, attendee_id) DO NOTHING`)
-    .run(event.id, user.id, yes, noteField(body.note), yes ? 'pending' : 'declined');
-  if (yes && r.changes) notify(event.host_id, { body: `Someone wants to join ${quoted(event.title)}`, tag: 'confirm', open: 'confirm' });
-  // Demo mode: demo accounts say yes right away, so a visitor sees a match happen.
-  const host = DEMO && yes && r.changes && q('SELECT guid FROM users WHERE id = ?').get(event.host_id);
-  if (host && isDemoGuid(host.guid)) {
-    const swipeId = Number(r.lastInsertRowid);
-    const accepted = tx(() => {
-      const full = isFull(event);
-      q('UPDATE swipes SET status = ? WHERE id = ?').run(full ? 'waitlisted' : 'accepted', swipeId);
-      syncEventStatus(event.id);
-      return !full;
-    });
-    if (accepted) demoHostReply(swipeId, user, host.guid);
-  }
-  send(res, 200, { ok: true });
-});
-
-// Undo my swipe on an event, as long as the host hasn't matched with me yet. Also how I leave its waitlist.
-route('DELETE', '/api/events/:id/swipe', async ({ user, params, res }) => {
-  const sw = q('SELECT * FROM swipes WHERE event_id = ? AND attendee_id = ?').get(params.id, user.id);
-  if (!sw) throw new HttpError(404, 'Nothing to undo');
-  if (sw.yes && !['pending', 'waitlisted'].includes(sw.status))
-    throw new HttpError(409, sw.status === 'accepted' || sw.status === 'attended'
-      ? "They've already matched with you. Message them in Plans if you need to back out."
-      : 'They already responded');
-  q('DELETE FROM swipes WHERE id = ?').run(sw.id);
-  send(res, 200, { ok: true });
-});
-
-// Confirm tab: people who swiped "yes" on my open events, waiting for me to swipe back.
-route('GET', '/api/confirm', async ({ user, res }) => {
-  const rows = q(`
-    SELECT s.id, s.note, s.created_at, t.id AS event_id, t.title, ${TAGS_COL}, t.max_attendees, t.status = 'full' AS full,
-           u.id AS attendee_id, u.guid AS raw, CASE WHEN ${MATCHED(':me', 'u.id')} THEN u.guid END AS guid
-    FROM swipes s JOIN events t ON t.id = s.event_id JOIN users u ON u.id = s.attendee_id
-    WHERE t.host_id = :me AND s.yes = 1 AND s.status = 'pending' AND t.status IN ('open', 'full')
-    ORDER BY s.created_at, s.id`).all({ me: user.id });
-  send(res, 200, rows.map(({ attendee_id, raw, guid, full, ...r }) =>
-    withTags({ ...r, full: Boolean(full), attendee: { ...(guid ? { guid } : {}), icon: iconHash(raw), ...stats(attendee_id) } })));
-});
-
-route('POST', '/api/confirm/:id/respond', async ({ user, params, body, res }) => {
-  const interest = q(`
-    SELECT s.*, t.host_id, t.status AS event_status
-    FROM swipes s JOIN events t ON t.id = s.event_id WHERE s.id = ?`).get(params.id);
-  if (!interest || interest.host_id !== user.id || interest.status !== 'pending' || !['open', 'full'].includes(interest.event_status))
-    throw new HttpError(404, 'Request not found');
-  if (!body.yes) {
-    q(`UPDATE swipes SET status = 'declined' WHERE id = ?`).run(interest.id);
-    return send(res, 200, { match: false });
-  }
-  // A yes on a full event puts them on the waitlist; they're matched automatically when a spot opens.
-  const waitlisted = tx(() => {
-    const ev = q('SELECT id, title, max_attendees FROM events WHERE id = ?').get(interest.event_id);
-    const full = isFull(ev);
-    q(`UPDATE swipes SET status = ? WHERE id = ?`).run(full ? 'waitlisted' : 'accepted', interest.id);
-    notify(interest.attendee_id, full
-      ? { body: `${quoted(ev.title)} is full, so you're on the waitlist. You'll get the next spot.`, tag: `wait-${interest.id}`, open: 'plans' }
-      : { body: `It's on! The host said yes to you for ${quoted(ev.title)}`, tag: `chat-${interest.id}`, open: `chat:${interest.id}` });
-    syncEventStatus(interest.event_id);
-    return full;
-  });
-  if (waitlisted) return send(res, 200, { match: false, waitlisted: true });
-  // Now that they've matched, the host's browser may know who it is (to add them to contacts).
-  send(res, 200, { match: true, matchId: interest.id, other: q('SELECT guid FROM users WHERE id = ?').get(interest.attendee_id).guid });
-});
-
-// Undo my response to someone interested: a "no thanks", or a fresh match nobody has messaged on yet.
-route('POST', '/api/confirm/:id/undo', async ({ user, params, res }) => {
-  const interest = q(`
-    SELECT s.*, t.host_id, t.status AS event_status
-    FROM swipes s JOIN events t ON t.id = s.event_id WHERE s.id = ?`).get(params.id);
-  if (!interest || interest.host_id !== user.id || !interest.yes) throw new HttpError(404, 'Request not found');
-  if (!['declined', 'accepted', 'waitlisted'].includes(interest.status) || !['open', 'full'].includes(interest.event_status))
-    throw new HttpError(409, 'That can no longer be undone');
-  if (interest.status === 'accepted' && q('SELECT 1 FROM messages WHERE swipe_id = ? LIMIT 1').get(interest.id))
-    throw new HttpError(409, "You've already started chatting, so this match can't be undone");
-  tx(() => {
-    q(`UPDATE swipes SET status = 'pending', reconfirm = 0 WHERE id = ?`).run(interest.id);
-    syncEventStatus(interest.event_id);
-  });
-  send(res, 200, { ok: true });
-});
 
 route('GET', '/api/matches', async ({ user, res }) => {
   const rows = q(`
@@ -930,26 +662,19 @@ route('GET', '/api/matches', async ({ user, res }) => {
            t.host_id, s.attendee_id, cu.guid AS host_guid, hu.guid AS attendee_guid,
            cu.chat_pubkey AS host_pubkey, hu.chat_pubkey AS attendee_pubkey,
            (SELECT body FROM messages m WHERE m.swipe_id = s.id ORDER BY m.id DESC LIMIT 1) AS last_message,
-           (SELECT kind FROM messages m WHERE m.swipe_id = s.id ORDER BY m.id DESC LIMIT 1) AS last_kind,
-           CASE WHEN s.status = 'waitlisted' THEN (SELECT COUNT(*) FROM swipes w
-             WHERE w.event_id = s.event_id AND w.status = 'waitlisted' AND w.id <= s.id) END AS waitlist_pos,
-           s.status = 'waitlisted' AND ${MATCHED(':me', 't.host_id')} AS known_host
+           (SELECT kind FROM messages m WHERE m.swipe_id = s.id ORDER BY m.id DESC LIMIT 1) AS last_kind
     FROM swipes s JOIN events t ON t.id = s.event_id
     JOIN users cu ON cu.id = t.host_id JOIN users hu ON hu.id = s.attendee_id
-    WHERE (s.status IN ('accepted', 'attended', 'withdrawn') AND (s.attendee_id = :me OR t.host_id = :me))
-       OR (s.status = 'waitlisted' AND s.attendee_id = :me AND t.status IN ('open', 'full'))
+    WHERE s.status IN ('accepted', 'attended', 'withdrawn') AND (s.attendee_id = :me OR t.host_id = :me)
     ORDER BY s.status != 'accepted', s.id DESC`).all({ me: user.id });
   // "other" is the GUID of the person on the other side; the browser turns it into the nickname *you* gave them.
   send(res, 200, rows.map(({ host_id, attendee_id, host_guid, attendee_guid, host_pubkey, attendee_pubkey, ...r }) => {
     const mine = host_id === user.id;
-    // On a waitlist you haven't matched yet, so the host stays anonymous (unless you matched before).
-    const known = r.status !== 'waitlisted' || r.known_host;
-    delete r.known_host;
     return withTags({
       ...r,
       role: mine ? 'host' : 'attendee',
-      other: known ? (mine ? attendee_guid : host_guid) : null,
-      other_pubkey: known ? JSON.parse((mine ? attendee_pubkey : host_pubkey) || 'null') : null,
+      other: mine ? attendee_guid : host_guid,
+      other_pubkey: JSON.parse((mine ? attendee_pubkey : host_pubkey) || 'null'),
     });
   }));
 });
@@ -962,61 +687,6 @@ route('GET', '/api/matches/:id/messages', async ({ user, params, res }) => {
     .map(({ sender_id, ...m }) => ({ ...m, mine: sender_id === user.id })));
 });
 
-route('POST', '/api/matches/:id/messages', async ({ user, params, body, res }) => {
-  const m = loadMatch(params.id, user.id);
-  if (m.status === 'withdrawn') throw new HttpError(409, 'This match has ended');
-  q('INSERT INTO messages (swipe_id, sender_id, body) VALUES (?, ?, ?)')
-    .run(params.id, user.id, sealed(body.body, 'message', 8000)); // E2E ciphertext; the server can't read it
-  notify(m.host_id === user.id ? m.attendee_id : m.host_id,
-    { body: `New message about ${quoted(m.title)}`, tag: `chat-${m.id}`, open: `chat:${m.id}`, throttle: true });
-  send(res, 200, { ok: true });
-});
-
-// Host marks that the event happened with this attendee. A full event becomes past once nobody is still accepted-but-not-attended.
-route('POST', '/api/matches/:id/happened', async ({ user, params, res }) => {
-  const m = loadMatch(params.id, user.id);
-  if (m.host_id !== user.id) throw new HttpError(403, 'Only the host can mark this as happened');
-  if (m.status === 'attended') return send(res, 200, { ok: true });
-  if (m.status !== 'accepted') throw new HttpError(409, 'This match has ended');
-  tx(() => {
-    q(`UPDATE swipes SET status = 'attended', reconfirm = 0 WHERE id = ?`).run(m.id);
-    syncEventStatus(m.event_id);
-  });
-  send(res, 200, { ok: true });
-});
-
-// Attendee answers "still in?" after the host edited the event.
-route('POST', '/api/matches/:id/reconfirm', async ({ user, params, body, res }) => {
-  const m = loadMatch(params.id, user.id);
-  if (m.attendee_id !== user.id) throw new HttpError(403, 'Only the attendee can re-confirm');
-  if (m.status !== 'accepted' || !m.reconfirm) throw new HttpError(409, 'Nothing to re-confirm');
-  tx(() => {
-    if (body.yes) {
-      q('UPDATE swipes SET reconfirm = 0 WHERE id = ?').run(m.id);
-      systemMessage(m.id, user.id, 'Re-confirmed: still in!');
-    } else {
-      q(`UPDATE swipes SET status = 'withdrawn', reconfirm = 0 WHERE id = ?`).run(m.id);
-      systemMessage(m.id, user.id, "Can't make it after the change, so dropped out.");
-      notify(m.host_id, { body: `Someone can't make ${quoted(m.title)} after your change`, tag: `chat-${m.id}`, open: `chat:${m.id}` });
-      syncEventStatus(m.event_id);
-    }
-  });
-  send(res, 200, { ok: true, withdrawn: !body.yes });
-});
-
-// Attendee can't make it anymore. Frees their spot, which goes to the first person on the waitlist.
-route('POST', '/api/matches/:id/leave', async ({ user, params, res }) => {
-  const m = loadMatch(params.id, user.id);
-  if (m.attendee_id !== user.id) throw new HttpError(403, 'Only the attendee can drop out');
-  if (m.status !== 'accepted') throw new HttpError(409, 'This match has ended');
-  tx(() => {
-    q(`UPDATE swipes SET status = 'withdrawn', reconfirm = 0 WHERE id = ?`).run(m.id);
-    systemMessage(m.id, user.id, "Can't make it anymore, so dropped out.");
-    notify(m.host_id, { body: `Someone dropped out of ${quoted(m.title)}`, tag: `chat-${m.id}`, open: `chat:${m.id}` });
-    syncEventStatus(m.event_id);
-  });
-  send(res, 200, { ok: true });
-});
 
 route('GET', '/api/events', async ({ user, res }) => {
   send(res, 200, q(`
@@ -1030,75 +700,6 @@ route('GET', '/api/events', async ({ user, res }) => {
     ORDER BY t.status = 'past', t.id DESC`).all(user.id).map(withTags));
 });
 
-route('POST', '/api/events', async ({ user, body, res }) => {
-  const f = eventFields(body);
-  if (f.visibility === 'private' && !hasContacts(user.id)) throw new HttpError(400, NO_CONTACTS);
-  const id = tx(() => {
-    const { lastInsertRowid } = q(`
-      INSERT INTO events (host_id, title, details, location, location_name, online, when_text, cost_amount, cost_currency, visibility, max_attendees)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(user.id, f.title, f.details, f.location, f.location_name, f.online, f.when_text, f.cost_amount, f.cost_currency, f.visibility, f.max_attendees);
-    setEventTags(lastInsertRowid, f.tags);
-    setViewers(lastInsertRowid, viewerIds(body.viewers ?? [], user.id));
-    return lastInsertRowid;
-  });
-  send(res, 200, loadEvent(id));
-});
-
-// Edit my event. Every matched attendee gets a chat message listing the changes and must re-confirm.
-route('PATCH', '/api/events/:id', async ({ user, params, body, res }) => {
-  const event = loadEvent(params.id);
-  if (!event || event.host_id !== user.id) throw new HttpError(404, 'Event not found');
-  if (!['open', 'full'].includes(event.status)) throw new HttpError(409, 'Finished posts can no longer be edited');
-  const f = eventFields(body);
-  // A post that's already private can stay private; turning a public one private needs contacts.
-  if (f.visibility === 'private' && event.visibility !== 'private' && !hasContacts(user.id)) throw new HttpError(400, NO_CONTACTS);
-  const filled = filledSpots(event.id);
-  if (f.max_attendees !== null && f.max_attendees < filled)
-    throw new HttpError(400, `${filled} ${filled > 1 ? 'people are' : 'person is'} already matched, so max attendees must be at least ${filled} (or blank for no limit)`);
-
-  const cost = (e) => costLabel(e.cost_amount, e.cost_currency, 'en-US');
-  const place = (e) => e.location_name || e.location;
-  const where = (e) => (e.online === 1 ? 'Online' : e.online === 2 ? `${place(e) || 'In person'} and online` : place(e));
-  const value = (e, k) => (k === 'cost' ? cost(e) : k === 'location' ? `${e.online}|${e.location_name}|${e.location}` : e[k]);
-  const changed = Object.keys(FIELD_LABELS).filter(k => JSON.stringify(value(f, k)) !== JSON.stringify(value(event, k)));
-  // Who can see it isn't something attendees are told about or asked to re-confirm.
-  const viewers = viewerIds(body.viewers, user.id);
-  if (!changed.length) { tx(() => setViewers(event.id, viewers)); return send(res, 200, { event, notified: 0 }); }
-  const show = (v) => (Array.isArray(v) ? (v.length ? v.join(', ') : '(none)') : v === null ? 'No limit' : v === '' ? '(none)' : String(v));
-  const notice = 'The post was updated:\n' +
-    changed.map(k => k === 'details' ? '• Details were changed'
-      : k === 'cost' ? `• Cost: ${cost(event)} → ${cost(f)}`
-      : k === 'visibility' ? (f.visibility === 'public' ? '• Now public' : '• Now private')
-      : k === 'location' ? `• Where: ${show(where(event))} → ${show(where(f))}`
-      : k === 'when_text' ? `• When: ${show(whenLabel(event.when_text, { locale: 'en-US' }))} → ${show(whenLabel(f.when_text, { locale: 'en-US' }))}`
-      : `• ${FIELD_LABELS[k]}: ${show(event[k])} → ${show(f[k])}`).join('\n') +
-    '\nPlease re-confirm you can still make it.';
-
-  const notified = tx(() => {
-    q(`UPDATE events SET title = ?, details = ?, location = ?, location_name = ?, online = ?, when_text = ?, cost_amount = ?, cost_currency = ?, visibility = ?, max_attendees = ? WHERE id = ?`)
-      .run(f.title, f.details, f.location, f.location_name, f.online, f.when_text, f.cost_amount, f.cost_currency, f.visibility, f.max_attendees, event.id);
-    setEventTags(event.id, f.tags);
-    setViewers(event.id, viewers);
-    const attendees = q(`SELECT id, attendee_id FROM swipes WHERE event_id = ? AND status = 'accepted'`).all(event.id);
-    for (const a of attendees) {
-      q('UPDATE swipes SET reconfirm = 1 WHERE id = ?').run(a.id);
-      systemMessage(a.id, user.id, notice);
-      notify(a.attendee_id, { body: `${quoted(f.title)} changed. Can you still make it?`, tag: `chat-${a.id}`, open: `chat:${a.id}` });
-    }
-    syncEventStatus(event.id);
-    return attendees.length;
-  });
-  send(res, 200, { event: loadEvent(event.id), notified });
-});
-
-// Replace who may see my private event. The browser calls this when the contacts in a group it was shared with change.
-route('PUT', '/api/events/:id/viewers', async ({ user, params, body, res }) => {
-  const event = q('SELECT id, host_id FROM events WHERE id = ?').get(params.id);
-  if (!event || event.host_id !== user.id) throw new HttpError(404, 'Event not found');
-  const ids = viewerIds(body.viewers, user.id) ?? [];
-  tx(() => setViewers(event.id, ids));
-  send(res, 200, { viewers: ids.length });
-});
 
 route('DELETE', '/api/events/:id', async ({ user, params, res }) => {
   const r = q(`UPDATE events SET status = 'cancelled' WHERE id = ? AND host_id = ? AND status != 'past'`).run(params.id, user.id);
@@ -1176,7 +777,7 @@ route('GET', '/api/connection-requests', async ({ user, res }) => {
     SELECT r.id, r.created_at, r.requester_id, r.invite_id, r.note, u.guid
     FROM connection_requests r JOIN users u ON u.id = r.requester_id
     WHERE r.owner_id = ? AND r.status = 'pending' ORDER BY r.id`).all(user.id);
-  send(res, 200, rows.map(({ requester_id, guid, ...r }) => ({ ...r, requester: { icon: iconHash(guid), ...stats(requester_id) } })));
+  send(res, 200, rows.map(({ requester_id: _, guid, ...r }) => ({ ...r, requester: { icon: iconHash(guid) } })));
 });
 
 function loadRequest(id, userId) {
@@ -1253,21 +854,11 @@ route('POST', '/api/push/test', async ({ user, res }) => {
   send(res, 200, { ok: true });
 });
 
-route('GET', '/api/ledger', async ({ user, res }) => {
-  const rows = q(`
-    SELECT u.guid, COUNT(*) AS together
-    FROM swipes s JOIN events t ON t.id = s.event_id
-    JOIN users u ON u.id = CASE WHEN s.attendee_id = ? THEN t.host_id ELSE s.attendee_id END
-    WHERE s.status = 'attended' AND (s.attendee_id = ? OR t.host_id = ?)
-    GROUP BY u.id ORDER BY together DESC`).all(user.id, user.id, user.id);
-  send(res, 200, rows);
-});
-
 
 // ---------- server ----------
 
 const STATIC = {
-  '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/secure.js': 'secure.js', '/hpke.js': 'hpke.js', '/posts.js': 'posts.js', '/mail.js': 'mail.js', '/postfields.js': 'postfields.js', '/style.css': 'style.css', '/location.js': 'location.js', '/when.js': 'when.js', '/cost.js': 'cost.js', '/ics.js': 'ics.js',
+  '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/secure.js': 'secure.js', '/hpke.js': 'hpke.js', '/envelope.js': 'envelope.js', '/posts.js': 'posts.js', '/mail.js': 'mail.js', '/postfields.js': 'postfields.js', '/style.css': 'style.css', '/location.js': 'location.js', '/when.js': 'when.js', '/cost.js': 'cost.js', '/ics.js': 'ics.js',
   '/pii.js': 'pii.js', '/libphonenumber.js': 'libphonenumber.js',
   '/about': 'about.html', '/about.html': 'about.html', '/landing.js': 'landing.js', '/about.js': 'about.js', '/examples.js': 'examples.js',
   '/sw.js': 'sw.js', '/theme.js': 'theme.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon.svg': 'icon.svg', '/board.webp': 'board.webp',
@@ -1343,7 +934,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 if (DEMO) {
-  seedDemo();
+  await seedDemo();
   setInterval(pruneVisitors, 60 * 60 * 1000).unref();
 }
 server.listen(PORT, () => console.log(`Bored? → http://localhost:${PORT}${DEMO ? ' (demo: no sign-in, nothing is saved)' : ''}`));

@@ -4,33 +4,36 @@ Open security and privacy issues in the Bored? prototype, grouped by area.
 Priority: **P0** = must fix before real users, **P1** = should fix before launch, **P2** = later / hardening.
 
 Goal (from the product brief): the server admin should not learn any user's real name or social connections.
-Names are already handled (no names stored; nicknames live in each user's encrypted vault). Most items below are
-about **connections and metadata**, and about the limits of doing end-to-end encryption in a web app.
+Names are already handled (no names stored; nicknames live in each user's encrypted vault). Since the move to
+encrypted mail (see "Privacy model" in the README), the server no longer sees who asks to join what, matches,
+waitlists, attendance, or chats, and private posts are encrypted. Most items below are about the **metadata that's
+left**, and about the limits of doing end-to-end encryption in a web app.
 
 ---
 
 ## 1. Social graph and metadata the server still sees
 
-- [ ] **P0: The match graph is in plaintext.** `swipes` (who asked to join whose event, accepted/declined/attended) links
-  host and attendee GUIDs, with timestamps. So does `connections` (people who connected through an invitation). That *is* the social graph. Match records are intentionally kept for
-  now; we need another way to protect them. Ideas: per-match pseudonymous IDs instead of account GUIDs, private set
-  intersection / blind matching, sealed-sender-style message routing, or client-encrypted match records the server
-  can't attribute.
-- [ ] **P0: Message metadata.** Even with E2E chat, the server sees which match a message belongs to (so both GUIDs),
-  who sent it, when, and its length. Consider padding message sizes and decoupling sender identity from storage.
-- [ ] **P1: The "Your circle" stats come from the graph.** `/api/ledger` computes events-together counts per pair on the
-  server, so the server must know the pairs. Move this to the client (count from your own encrypted vault) once
-  matches are protected.
-- [ ] **P1: Avatars link posts to one person.** By design, everyone has one Jdenticon, the same for every viewer
-  (the API sends strangers its hash, `iconHash` in `server.js`, not the GUID). So anyone can still tell which posts
-  are from the same host. A per-post or per-viewer icon would stop that, at the cost of people having one face.
-- [ ] **P1: Public activity counts.** Hosted/attended counts per GUID (`stats()` in `server.js`) are public on every
-  card and reveal how active someone is. Consider coarse buckets, or hide them.
+- [x] **The match graph was in plaintext.** Fixed by the move to encrypted mail: requests to join are anonymous
+  sealed envelopes, and everything after them goes over channels to inboxes the server can't link to anyone.
+  Remaining: the old `swipes`, `events`, `event_viewers`, and `messages` rows stay for the read-only archive; a later
+  migration should drop them once people have had time to post again. And `connections` (people who connected
+  through an invitation) is still plaintext: move invitations to mail too.
+- [ ] **P1: Mail metadata.** The server stores, for each message, the inbox it went to, when, and its size. Main
+  inboxes belong to known accounts, so it sees when someone gets a share, a request to join, or a poke. It also sees
+  which session sends each message as it arrives (for rate limits, in memory only). Consider padding message sizes,
+  sending pokes from a delay queue, and sending without a session (e.g. Privacy Pass-style tokens for rate limits).
+- [x] **The "Your circle" stats came from the graph.** Now counted in the browser from the mail (`derive()` in
+  `public/posts.js`), and `/api/ledger` is gone.
+- [ ] **P1: Public posts link to one host.** A public post carries its host's signing key and main inbox, and the
+  card's icon is drawn from the signing key, so anyone can tell which public posts are from the same host. A
+  per-post signing key and reply inbox would stop that (the host's browser would keep them in the vault), at the cost
+  of people having one face.
+- [x] **Public activity counts.** The hosted and attended counts are gone from cards and Confirm; Profile counts
+  your own in the browser.
 - [ ] **P1: Post contents are identifying.** Public posts are visible to anyone, and "Where" is exact coordinates
   (the picker warns about this). Consider rounding coordinates or coarse neighborhoods.
-- [ ] **P1: Private posts reveal who they're shared with.** The server stores the viewer GUIDs for each private
-  post (`event_viewers`), which exposes part of the host's contact graph. Post contents are also plaintext on the
-  server. Consider encrypting private posts per viewer.
+- [x] **Private posts revealed who they were shared with.** Private posts are now sealed to each person they're
+  shared with; the server sees only that each of those main inboxes got a message.
 - [ ] **P2: The location picker contacts OpenStreetMap.** While it's open, the browser fetches tiles from
   tile.openstreetmap.org, which sees the viewer's IP, the area they look at, and (via Referer) this site's origin.
   Consider self-hosting tiles or proxying them.
@@ -41,8 +44,11 @@ about **connections and metadata**, and about the limits of doing end-to-end enc
   nominatim.openstreetmap.org for a suggested name (`reverseGeocode()` in `server.js`). The server makes the request,
   so OSM sees the server's IP, not the host's, but it does see the spot. Nominatim also allows only one request a
   second; at real volume, run our own Nominatim or use a paid geocoder.
-- [ ] **P2: Timestamps everywhere** (`created_at` on users, passkeys, posts, swipes, messages; `last_used_at` on
-  passkeys) enable timing correlation. Reduce precision or drop where not needed.
+- [ ] **P2: Timestamps everywhere** (`created_at` on users, passkeys, and mail; `updated_at` on public posts;
+  `last_used_at` on passkeys) enable timing correlation. Reduce precision or drop where not needed.
+- [ ] **P2: Mail is kept forever, and read from the start.** Each app load reads the main inbox from the beginning,
+  and nothing is ever deleted (outside demo mode). Let readers delete mail they've read, or expire channel mail some
+  time after a post has happened.
 
 ## 2. Network and hosting
 
@@ -62,22 +68,26 @@ about **connections and metadata**, and about the limits of doing end-to-end enc
   JavaScript that exfiltrates the vault key, chat key, or plaintext. This is the core weakness of web E2E. Options:
   a reproducible, signed build plus a verification browser extension, Subresource Integrity with pinned hashes
   published elsewhere, or native/PWA apps with signed updates.
-- [ ] **P0: Peer public keys aren't verified.** Chat keys come from the server (`other_pubkey` in `/api/matches`),
-  so a malicious server could swap keys and read or alter chats (man in the middle). Add safety numbers / key
-  fingerprints users can compare in person, and/or key transparency.
-- [ ] **P1: No forward secrecy.** Each user has one static ECDH key (`public/secure.js`), so leaking it exposes all
-  past and future chats. Move to a ratcheting protocol (Signal-style double ratchet) or at least periodic key rotation.
-- [ ] **P1: No sender authentication inside a match.** Both parties share one symmetric key per match, so either side
-  could forge a message as the other, and the server can drop, reorder, or replay ciphertexts. Add per-message
-  signatures and sequence numbers.
-- [ ] **P1: The server injects system messages.** Edit notices and re-confirm replies are plaintext rows the server
-  writes (`systemMessage()` in `server.js`). A malicious server can fake them. Mark them clearly as server-generated,
-  or have clients generate/sign them.
+- [ ] **P0: Peer public keys aren't verified.** A contact's keys come from the server (`/api/keys`) the first time
+  they're needed, and are saved in the vault after that, so the server can't swap them later. But it could hand out
+  wrong keys that first time (man in the middle), and a public post's keys come from the post itself. Add safety
+  numbers / key fingerprints users can compare in person, and/or key transparency.
+- [ ] **P1: No forward secrecy.** Sealed envelopes are HPKE base mode to each user's one static chat key, and a
+  channel's key comes from the envelope that opened it, so leaking a chat key (or the vault) exposes every past and
+  future message to that person. Move to a ratcheting protocol (Signal-style double ratchet, or MLS) or at least
+  periodic key rotation.
+- [ ] **P1: No sender authentication inside a channel.** Both sides share one symmetric key per channel, so either
+  side could write a message as the other (the demo bot does exactly that to fill in conversations). Messages carry a
+  role, a counter, and a random ID, so the server can't reflect, reorder, or replay them unnoticed, and a dropped one
+  shows as a gap; but it can still drop them. Add per-message signatures (or per-side keys from the channel secret).
+- [x] **The server injected system messages.** Edit notices, re-confirms, and the rest are now channel messages
+  from the people involved, and the browser draws the notice. Only the read-only archive still shows the old
+  server-written ones.
 - [ ] **P1: Vault rollback.** The server could serve an old vault version (`/api/vault`) to hide contact changes.
   Keep a signed or MACed monotonic version on the client and detect rollbacks.
-- [ ] **P1: No AES-GCM additional data.** Encrypted blobs aren't bound to their purpose or owner, so the server could
-  swap ciphertexts between fields (e.g. serve one message's ciphertext as another). Bind each blob with AAD such as
-  `guid | purpose | match id | message id`.
+- [ ] **P1: Not enough AES-GCM additional data.** Sealed envelopes are bound to their inbox (the inbox ID is HPKE's
+  AAD), but the vault, the encrypted private keys, and channel messages aren't bound to their purpose or owner, so
+  the server could swap ciphertexts between fields. Bind each blob with AAD such as `guid | purpose | id`.
 - [ ] **P2: Removing a passkey doesn't rotate the vault key.** `DELETE /api/passkeys/:id` deletes the wrapped key, but
   anyone who already captured that passkey's PRF output and wrapped key can still unwrap the same vault key.
   Rotate the vault key (and re-encrypt the vault and chat key) when a passkey is removed.
@@ -142,9 +152,13 @@ about **connections and metadata**, and about the limits of doing end-to-end enc
 
 ## 6. Abuse, rate limiting, and safety
 
-- [ ] **P0: No rate limiting anywhere.** Account creation, sign-in, posting, swiping, messaging, and the public Discover
-  endpoints are all unthrottled. That allows spam, Sybil accounts, scraping, and denial of service. Add per-IP and
-  per-account limits (privacy-preserving where possible, e.g. Privacy Pass-style tokens).
+- [ ] **P0: Not enough rate limiting.** Sending mail (600 an hour per account, 60 to any one inbox) and publishing
+  public posts (120 an hour) are limited, in memory. Account creation, sign-in, and reading mail and public posts
+  aren't. That allows Sybil accounts, scraping, and denial of service. Add per-IP and per-account limits
+  (privacy-preserving where possible, e.g. Privacy Pass-style tokens).
+- [ ] **P1: Spam requests to join.** Anyone can send requests to a public post's host, anonymously by design. Beyond
+  the rate limits, the browser only ignores what the rules don't allow. Consider a way for hosts to stop requests on
+  a post, or proof-of-work on requests.
 - [ ] **P0: In-person safety.** Users meet anonymous strangers in real life. Add blocking, reporting, safety tips, and
   a way to unmatch and hide your posts from someone. Design reporting so it doesn't break the privacy model
   (e.g. the reporter voluntarily reveals specific decrypted messages).
@@ -154,12 +168,13 @@ about **connections and metadata**, and about the limits of doing end-to-end enc
 
 ## 7. Data retention and deletion
 
-- [ ] **P1: No account deletion.** Add "delete my account", which removes the user, passkeys, sessions, vault, posts,
-  swipes, and messages. Decide what happens to the other person's view of shared matches.
-- [ ] **P1: No retention policy.** Cancelled posts, declined swipes, finished matches, and messages are kept forever.
-  Define retention and purge on a schedule.
-- [ ] **P2: Seed data.** `seed.js` creates demo accounts with fixed, recognizable GUIDs (`00000000-0000-4000-8000-…`).
-  Never run it against production.
+- [ ] **P1: No account deletion.** Add "delete my account", which removes the user, passkeys, sessions, vault, public
+  posts, main inbox mail, and the old archive rows. Channel mail can't be tied to the account, so the browser would
+  have to delete it (it knows the channels). Decide what happens to the other person's view of shared matches.
+- [ ] **P1: No retention policy.** Ended public posts and all mail are kept forever. Define retention and purge on
+  a schedule.
+- [ ] **P2: The waitlist only moves while the host's browser is open,** since only the host can send answers.
+- [x] **Seed data.** `seed.js` is gone; demo accounts exist only in demo mode, in memory.
 
 # Sloppy part
 

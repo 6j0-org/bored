@@ -10,8 +10,7 @@
   },
   "scripts": {
     "start": "node server.js",
-    "dev": "node --watch server.js",
-    "seed": "node seed.js"
+    "dev": "node --watch server.js"
   },
   "dependencies": {
     "@devopscoop/eat-the-pii": "git+https://gitlab.com/devopscoop/eat-the-pii.git#v0.1.0",

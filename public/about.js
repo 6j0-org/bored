@@ -12,8 +12,6 @@ const FLING = 100; // px of drag that counts as a swipe, as in the app
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const attendeesLabel = (max) => (max == null ? 'No limit' : max === 1 ? '1 person' : `Up to ${max} people`);
-// What the demo shows for each host: how many of the examples they post.
-const hosted = EXAMPLES.reduce((n, e) => ({ ...n, [e.host]: (n[e.host] || 0) + 1 }), {});
 // A fresh shuffle on every visit (Fisher-Yates), so the deck doesn't always open on the same post.
 const DECK = [...EXAMPLES];
 for (let i = DECK.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [DECK[i], DECK[j]] = [DECK[j], DECK[i]]; }
@@ -34,9 +32,7 @@ function cardHtml(e) {
         ${e.tags.length ? fact('Tags', e.tags.map(x => '#' + esc(x)).join(' ')) : ''}
       </dl>
       <div class="details">${esc(e.details)}</div>
-      <div class="who"><div class="avatar icon">${identicon(e.host, 100)}</div>
-        <div><small>Hosted ${hosted[e.host]} · Attended 0</small></div>
-      </div>
+      <div class="who"><div class="avatar icon">${identicon(e.host, 100)}</div></div>
     </div>`;
 }
 

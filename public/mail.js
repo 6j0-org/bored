@@ -20,7 +20,7 @@
 //                                               can't swap them later)
 import {
   vault, hasKeys, myPublicKeys, signRecord, openRecord, sealTo, openSealed, channelOf, sealChannel, openChannel, inboxIdOf,
-  sign, verify, b64u,
+  sign, verify, b64u, helloText,
 } from './secure.js';
 import { derive, nextMessage, LIVE } from './posts.js';
 import { changedFields } from './postfields.js';
@@ -28,7 +28,6 @@ import { changedFields } from './postfields.js';
 let api = null;
 export const initMail = (apiFn) => { api = apiFn; };
 
-const te = new TextEncoder();
 const randomId = () => b64u.enc(crypto.getRandomValues(new Uint8Array(16)));
 const MAIL_BATCH = 100, MAX_PASSED = 1000;
 
@@ -106,8 +105,6 @@ async function readMainInbox(rows) {
   }
 }
 
-// What a hello signs: the GUID it claims and the channel, so it can't be replayed on another channel.
-const helloText = async (ch, guid) => `${guid}\n${b64u.enc(await crypto.subtle.digest('SHA-256', te.encode(ch)))}`;
 
 // Hellos say who someone is: check the signature with the keys saved for (or the server has for) that GUID, and
 // hand derive() those keys. A hello that doesn't check out is dropped.
@@ -197,11 +194,12 @@ function myPostEntries() {
 }
 
 // Mine first, then shares, then public posts: the first signer seen for a pid owns it, so a public post can't take
-// over the ID of a post someone shared with me.
+// over the ID of a post someone shared with me. This is also the deck's order: shares, then public posts, the most
+// recently published or changed first.
 function replay() {
   return derive({
     me: hasKeys() ? myPublicKeys() : null,
-    posts: [...myPostEntries(), ...box.posts, ...box.publicPosts],
+    posts: [...myPostEntries(), ...box.posts, ...box.publicPosts.toReversed()],
     channels: [...box.channels.values()].map(c => ({ ...c, messages: [...c.messages.values()] })),
     passed: hasKeys() ? vault.data.passed || [] : [],
   });

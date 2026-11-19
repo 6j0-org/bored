@@ -167,6 +167,8 @@ export function nextMessage(channelMessages, role, fields) {
 //   todo:     what the host's browser should send: { type: 'promote', ch } and { type: 'status', pid, status }
 //   badges:   { confirm: requests waiting for my answer, plans: accepted matches on either side }
 //   together: { guid: times we've done something together } (attended, either side)
+//   stats:    { hosted: my posts that happened with someone, attended: posts I went to, helped: different hosts of
+//             posts tagged "help" I went to }
 export function derive({ me, posts = [], channels = [], passed = [] }) {
   // Posts: per pid, the first signer seen owns it (mine always wins), and the newest version counts.
   const owner = new Map(), latest = new Map(), unshared = new Map();
@@ -233,5 +235,11 @@ export function derive({ me, posts = [], channels = [], passed = [] }) {
     confirm: hosting.filter(h => LIVE.includes(h.post.status)).reduce((n, h) => n + h.counts.pending, 0),
     plans: requests.filter(r => r.status === 'accepted').length + hosting.reduce((n, h) => n + h.counts.accepted, 0),
   };
-  return { posts: latest, deck, requests, hosting, todo, badges, together };
+  const went = requests.filter(r => r.status === 'attended');
+  const stats = {
+    hosted: hosting.filter(h => h.counts.attended > 0).length,
+    attended: went.length,
+    helped: new Set(went.filter(r => (r.post?.tags || []).includes('help')).map(r => r.hello.host?.guid || r.post.signer?.x)).size,
+  };
+  return { posts: latest, deck, requests, hosting, todo, badges, together, stats };
 }

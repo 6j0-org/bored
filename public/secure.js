@@ -25,7 +25,9 @@
 // - Channel: every sealed envelope also gives sender and recipient a shared secret (HPKE's secret export). A request
 //   to join opens one; everything after it about that request goes over it, to two inboxes worked out from it.
 
-import { setupS, setupR, importPublicKey } from './hpke.js';
+import * as env from './envelope.js';
+import { b64u, publicJwk, seal, openBytes, openText, newInboxToken, inboxIdOf } from './envelope.js';
+export { b64u, newInboxToken, inboxIdOf, channelOf, sealChannel, openChannel, openRecord, verify, helloText } from './envelope.js';
 
 const subtle = crypto.subtle;
 const te = new TextEncoder(), td = new TextDecoder();
@@ -34,30 +36,7 @@ export class PrfUnsupportedError extends Error {
   constructor() { super("This browser or passkey manager can't create the encryption key Bored? needs."); }
 }
 
-// ---------- encoding ----------
-export const b64u = {
-  enc: (buf) => {
-    const bytes = buf instanceof ArrayBuffer ? new Uint8Array(buf) : new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
-    let s = ''; for (const b of bytes) s += String.fromCharCode(b);
-    return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-  },
-  dec: (str) => {
-    const s = atob(str.replace(/-/g, '+').replace(/_/g, '/') + '==='.slice((str.length + 3) % 4));
-    return Uint8Array.from(s, c => c.charCodeAt(0));
-  },
-};
-
-// ---------- AES-GCM helpers ----------
-async function seal(key, bytesOrString) {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const data = typeof bytesOrString === 'string' ? te.encode(bytesOrString) : bytesOrString;
-  return `${b64u.enc(iv)}.${b64u.enc(await subtle.encrypt({ name: 'AES-GCM', iv }, key, data))}`;
-}
-async function openBytes(key, sealedStr) {
-  const [iv, ct] = String(sealedStr).split('.');
-  return new Uint8Array(await subtle.decrypt({ name: 'AES-GCM', iv: b64u.dec(iv) }, key, b64u.dec(ct)));
-}
-const openText = async (key, s) => td.decode(await openBytes(key, s));
+// Encoding (b64u) and the AES-GCM helpers (seal, openBytes, openText) are in public/envelope.js.
 
 async function hkdfKey(secret, salt, info, extractable = false) {
   const base = await subtle.importKey('raw', secret, 'HKDF', false, ['deriveKey']);
@@ -147,7 +126,6 @@ async function idbDo(mode, fn) {
 // the public ones JWKs ({ kty, crv, x, y }). signKey, signPub, and inboxId are filled in by ensureKeys().
 let keys = null;
 const saveKeys = async () => { try { await idbDo('readwrite', s => s.put(keys, 'session')); } catch {} };
-const publicJwk = ({ x, y }) => ({ kty: 'EC', crv: 'P-256', x, y });
 
 export async function loadKeys(guid) {
   try {
@@ -157,7 +135,7 @@ export async function loadKeys(guid) {
   return Boolean(keys);
 }
 export async function clearKeys() {
-  keys = null; chatKeys.clear(); channelCache.clear();
+  keys = null; chatKeys.clear(); env.clearChannelCache();
   try { await idbDo('readwrite', s => s.delete('session')); } catch {}
 }
 
@@ -326,8 +304,12 @@ export async function addPasskey(api, nextStep) {
 }
 
 // ---------- vault: your private names for yourself and your contacts ----------
-// { v: 1, contacts: { [guid]: { nickname, tags: [], added } },
-//   audiences: { [eventId]: { groups: [tag], contacts: [guid] } },  (who each of my private posts is shared with)
+// { v: 1, contacts: { [guid]: { nickname, tags: [], added, keys?: { chat, sign, inbox } } },  (keys: saved the first
+//     time they're used, so the server can't swap them later)
+//   posts, requests, passed: my posts, my requests to join (with their channel secrets), and posts I passed on (see
+//     public/mail.js)
+//   audiences: { [eventId]: { groups: [tag], contacts: [guid] } },  (who each of my posts from before encryption was
+//     shared with, for posting one again)
 //   prefs: { distanceUnit: 'km' | 'mi' },  (settings from Profile)
 //   invites: { [inviteId]: { token, key, name } },  (my invitation links, so I can share them again; the server has
 //     only hashes. name is the nickname I suggested; key decrypts the nicknames people suggest when they ask)
@@ -402,95 +384,12 @@ export async function decryptMessage(matchId, peerJwk, sealedStr) {
   catch { return null; } // unreadable (e.g. corrupted); caller shows a placeholder
 }
 
-// ---------- signatures ----------
-// ECDSA P-256 with SHA-256 over "bored-v1 <kind>\n<text>", so a signature for one kind of thing can't be passed off
-// as another. Signatures are the 64-byte r || s form WebCrypto uses, in base64url.
-const signedBytes = (kind, text) => te.encode(`bored-v1 ${kind}\n${text}`);
+// ---------- signatures and mail ----------
+// The formats are in public/envelope.js; these bind them to the signed-in account.
 export const myPublicKeys = () => ({ guid: keys.guid, chat: keys.chatPub, sign: keys.signPub, inbox: keys.inboxId });
-
-export async function sign(kind, text) {
-  return b64u.enc(await subtle.sign({ name: 'ECDSA', hash: 'SHA-256' }, keys.signKey, signedBytes(kind, text)));
-}
-export async function verify(signerJwk, kind, text, sig) {
-  try {
-    const key = await subtle.importKey('jwk', publicJwk(signerJwk), ECDSA, false, ['verify']);
-    return await subtle.verify({ name: 'ECDSA', hash: 'SHA-256' }, key, b64u.dec(sig), signedBytes(kind, text));
-  } catch { return false; }
-}
-
-// A signed public record, e.g. a public post: { body: JSON text, sig, signer: signing public key }.
-export async function signRecord(kind, obj) {
-  const body = JSON.stringify(obj);
-  return { body, sig: await sign(kind, body), signer: keys.signPub };
-}
-// The record's object if the signature is good (and, given expectedSigner, made by that key), otherwise null.
-export async function openRecord(kind, record, expectedSigner) {
-  if (!record || typeof record.body !== 'string') return null;
-  if (expectedSigner && (expectedSigner.x !== record.signer?.x || expectedSigner.y !== record.signer?.y)) return null;
-  if (!(await verify(record.signer, kind, record.body, record.sig))) return null;
-  try { return JSON.parse(record.body); } catch { return null; }
-}
-
-// ---------- mail ----------
-// An inbox is a random token only its reader knows; the server files mail under SHA-256(token) and hands it out to
-// whoever shows the token. Everyone's main inbox ID is public (to their contacts); channel inboxes are known only to
-// the two people on the channel.
-export const newInboxToken = () => b64u.enc(crypto.getRandomValues(new Uint8Array(32)));
-export const inboxIdOf = async (token) => b64u.enc(await subtle.digest('SHA-256', te.encode(token)));
-
-const SEAL_INFO = 'bored-v1 seal', CHANNEL_EXPORT = 'bored-v1 channel';
-// What a known sender signs: the message and the recipient's chat key, so it can't be sent on to someone else.
-const senderText = (msgText, to) => `${to.x}.${to.y}\n${msgText}`;
-
-// Seal msg (an object) to the person with chat public key `to` (JWK), for their inbox `inboxId`.
-// identify: true adds who it's from (GUID and public keys) with a signature; otherwise the recipient can't tell.
-// Returns { body: "enc.ciphertext" for the mail, channel: the secret this opens, for channelOf() }.
-export async function sealTo(to, inboxId, msg, { identify = false } = {}) {
-  const text = JSON.stringify(msg);
-  const inner = { msg: text };
-  if (identify) inner.sender = { ...myPublicKeys(), sig: await sign('sender', senderText(text, to)) };
-  const s = await setupS(await importPublicKey(to), SEAL_INFO);
-  const ct = await s.seal(te.encode(inboxId), te.encode(JSON.stringify(inner)));
-  return { body: `${b64u.enc(s.enc)}.${b64u.enc(ct)}`, channel: b64u.enc(await s.export(te.encode(CHANNEL_EXPORT), 32)) };
-}
-
-// Open a sealed envelope from my inbox `inboxId`: { msg, sender (null if anonymous), channel }, or null if it isn't
-// for me, was changed, or names a sender whose signature doesn't check out.
-export async function openSealed(body, inboxId) {
-  try {
-    const [enc, ct] = String(body).split('.');
-    const pk = await importPublicKey(keys.chatPub);
-    const r = await setupR(b64u.dec(enc), { privateKey: keys.chatKey, publicKey: pk }, SEAL_INFO);
-    const inner = JSON.parse(td.decode(await r.open(te.encode(inboxId), b64u.dec(ct))));
-    const msg = JSON.parse(inner.msg);
-    let sender = null;
-    if (inner.sender) {
-      const { guid, chat, sign: signer, sig } = inner.sender;
-      if (typeof guid !== 'string' || !(await verify(signer, 'sender', senderText(inner.msg, keys.chatPub), sig))) return null;
-      sender = { guid, chat: publicJwk(chat), sign: publicJwk(signer) };
-    }
-    return { msg, sender, channel: b64u.enc(await r.export(te.encode(CHANNEL_EXPORT), 32)) };
-  } catch { return null; }
-}
-
-// A channel's AES key and its two inbox tokens: the one who sealed the envelope that opened it (the opener, e.g.
-// the person asking to join) reads `openerInbox`, the recipient (e.g. the host) reads `recipientInbox`.
-// All three come from the channel secret with HKDF, so neither side has to send or store anything else.
-const channelCache = new Map();
-export async function channelOf(secret) {
-  if (channelCache.has(secret)) return channelCache.get(secret);
-  const base = await subtle.importKey('raw', b64u.dec(secret), 'HKDF', false, ['deriveKey', 'deriveBits']);
-  const bits = async (info) => b64u.enc(await subtle.deriveBits({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: te.encode(info) }, base, 256));
-  const ch = {
-    key: await subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(0), info: te.encode('bored-v1 channel key') },
-      base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']),
-    openerInbox: await bits('bored-v1 channel opener inbox'),
-    recipientInbox: await bits('bored-v1 channel recipient inbox'),
-  };
-  channelCache.set(secret, ch);
-  return ch;
-}
-export const sealChannel = async (secret, msg) => seal((await channelOf(secret)).key, JSON.stringify(msg));
-export async function openChannel(secret, body) {
-  try { return JSON.parse(await openText((await channelOf(secret)).key, body)); } catch { return null; }
-}
+const me = () => ({ ...myPublicKeys(), chatKey: keys.chatKey, signKey: keys.signKey });
+export const sign = (kind, text) => env.sign(keys.signKey, kind, text);
+export const signRecord = (kind, obj) => env.signRecord(me(), kind, obj);
+// identify: true says who it's from (with a signature); otherwise the recipient can't tell.
+export const sealTo = (to, inboxId, msg, { identify = false } = {}) => env.sealTo(to, inboxId, msg, identify ? me() : null);
+export const openSealed = (body, inboxId) => env.openSealed(body, inboxId, me());

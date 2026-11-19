@@ -2,7 +2,7 @@
 
 A local event board that works like a dating app.
 Host an event. Users swipe through posts in **Discover**, and **right = "I'm in"**.
-In **Confirm**, the host swipes through the anonymous requests to join, and **right = "Let's do it"**. When both sides say yes, it's on:
+In **Confirm**, the host swipes through the requests to join (anonymous, unless they're from one of the host's contacts), and **right = "Let's do it"**. When both sides say yes, it's on:
 it shows up in **Plans**, where you chat and sort out details. Afterwards the host marks it as happened.
 
 Accounts are anonymous: a random GUID and a passkey. No usernames, passwords, or email. Anyone can browse **Discover** without an account.
@@ -102,10 +102,19 @@ the server says so on startup, and you delete it to start fresh.
 | Step | Who | Where |
 |---|---|---|
 | Post an event (title, details, up to 5 tags, where (map pin), when (date, time, optional repeat), cost and currency, max attendees or no limit, public or shared with chosen contacts/groups) | Host | **Post** |
-| Swipe right on events you're in for (filter by date, distance, tags, and free/paid) | Attendee | **Discover** |
-| Swipe right on the (anonymous) people who want to join | Host | **Confirm** |
+| Swipe right on events you're in for (filter by date, distance, tags, and free/paid); scroll down to the discard pile to change a swipe | Attendee | **Discover** |
+| Swipe right on the people who want to join (anonymous, except your contacts) | Host | **Confirm** |
 | Match → you learn who each other are, become contacts, and chat to sort out details | Both | **Plans** |
 | "It happened" to close it out | Host | Plan chat |
+
+Discover, Confirm, and Plans refresh when you scroll back up to the top of the page, or pull down (or scroll up)
+while you're already there; the page gives a little bump when it does. Refreshing never resets a deck, and swiped
+cards stay gone from it, so the decks have no undo button. Under the Discover deck, the **discard pile** shows the full cards you passed on or are still
+waiting to hear back about, newest first, labelled "I'm in" or "Pass". Swipe one again (or use its button) to change
+your mind: a pass becomes a request to join, and a request the host hasn't answered yet is taken back. **Confirm** has
+a discard pile too: requests to join you said no to, waitlisted, or said yes to (until you've chatted), and connection
+requests and invitations you said no to. Swipe one again to change your answer. **Plans** shows the full card for each
+match; click one to open its chat, which is also where a match is changed once you've chatted.
 
 A post stays in the deck until it reaches its max attendees; after that, saying yes joins its waitlist, and people
 move off the waitlist in order as spots open. Posts with no limit stay open until the host removes them. Posts are
@@ -136,8 +145,11 @@ of. Everything else happens in the browser: filtering Discover, who's in, the wa
     under a key from that secret, to two inboxes worked out from it, so the server can't link them to anyone.
   - *Signed record:* public posts, signed with ECDSA P-256. The server checks the signature before storing one, and
     every browser checks it again.
-- **Requests to join are anonymous.** The host sees the note, not who sent it. When the host says yes, both browsers
-  send a signed `hello` with their GUID and keys over the channel, and each adds the other to its contacts.
+- **Requests to join are anonymous, except to contacts.** A stranger's request carries no sender: the host sees the
+  note, not who sent it. When the host is one of your contacts, the request says who it's from (signed), and the host
+  sees the nickname they gave you, but only if you're in their contacts too, with matching keys; otherwise it shows as
+  anonymous. When the host says yes, both browsers send a signed `hello` with their GUID and keys over the channel, and
+  each adds the other to its contacts.
 - **What the server sees:**
   - Public posts: readable, as they must be, and signed, so it can't forge or change them. It can still take one down.
   - Mail: which inbox each message went to, when, and how big it was. Main inboxes belong to known accounts; channel
@@ -163,6 +175,11 @@ of. Everything else happens in the browser: filtering Discover, who's in, the wa
 - **Invitations to connect** are links (`/#invite=<token>`). The token stays in the URL fragment, so it isn't sent
   in requests or logged; the server stores only its SHA-256, and the owner's encrypted vault keeps the link to share
   again. Connecting makes two people contacts, the same as matching (the server records the pair in `connections`).
+  Clicking the avatar of a post's host you aren't connected with sends them an invitation directly instead: it's
+  mailed to their main inbox, sealed with no sender, and shows in their Confirm tab. When they say yes, the inviter's
+  browser confirms it on its own (sending it already said yes) and deletes the invitation. Clicking a contact's avatar
+  edits the nickname and tags you keep for them. The name you set in **Profile** is what invitations offer as what new
+  people should call you; it's kept in your vault, like everything else about you.
 - **Notifications** go through the browser vendor's push service (Google, Mozilla, Apple, or Microsoft). They're
   encrypted for the device, so the service can't read them, but it does see when they're sent and to which device.
   The text is always "New activity": the server doesn't know what the mail says.

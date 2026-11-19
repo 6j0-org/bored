@@ -43,7 +43,7 @@ await rejects(async () => realFetch(BASE + '/api/public', { method: 'PUT', heade
 const ch = await erin.mail.requestJoin(own(ev)[0], 'I bring Catan');
 dv = await dave.mail.loadMail();
 const req = dv.hosting[0].requests[0];
-assert.equal(req.note, 'I bring Catan'); assert.equal(req.hello.attendee, null);
+assert.equal(req.note, 'I bring Catan'); assert.equal(req.hello.attendee, null); assert.equal(req.from, null, 'a stranger is anonymous');
 await dave.mail.sendOn(req.id, { type: 'answer', status: 'accepted' });
 await dave.mail.loadMail();
 ev = await erin.mail.loadMail();
@@ -52,6 +52,22 @@ dv = await dave.mail.loadMail();
 assert.equal(dv.hosting[0].requests[0].hello.attendee.guid, erin.guid);
 assert.ok(dave.sec.vault.data.contacts[erin.guid]?.keys, 'Erin is a contact, keys saved');
 assert.ok(erin.sec.vault.data.contacts[dave.guid]?.keys, 'Dave is a contact, keys saved');
+
+// Now that they're contacts, Erin's request to Dave's next post says it's her. Frank has Dave as a contact, but Dave
+// doesn't have him: his request says who he is, and Dave still sees it as anonymous.
+const second = await dave.mail.savePost({ kind: 'public', fields: { ...fields, title: 'Chess', details: `Bring a board ${RUN}` } });
+const frank = await person('frank');
+await frank.sec.vault.update(frank.api, d => { d.contacts[dave.guid] = { nickname: 'Dave', tags: [], added: '', keys: erin.sec.vault.data.contacts[dave.guid].keys }; });
+for (const who of [erin, frank]) {
+  const p = (await who.mail.loadMail()).deck.find(x => x.pid === second.post.pid);
+  assert.equal(who.mail.hostContact(p), dave.guid);
+  await who.mail.requestJoin(p, `from ${who.name}`);
+}
+dv = await dave.mail.loadMail();
+const asked = dv.hosting.find(h => h.post.pid === second.post.pid).requests;
+assert.equal(asked.find(r => r.note === 'from erin').from, erin.guid, 'a contact is named');
+assert.equal(asked.find(r => r.note === 'from frank').from, null, "someone who isn't my contact stays anonymous");
+await dave.mail.setPostStatus(second.post.pid, 'cancelled');
 
 // An edit: a new version everyone sees, and Erin is asked to re-confirm.
 const edit = await dave.mail.savePost({ pid: post.pid, fields: { ...fields, title: 'Board games night' } });

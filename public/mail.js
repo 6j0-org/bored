@@ -16,6 +16,9 @@
 //   posts:    { [pid]: { record, audience: { groups, contacts }, sharedWith: [guid] } }  posts I host
 //   requests: { [channel secret]: { pid, join, reply: { chat, inbox }, at } }            my requests to join
 //   passed:   [pid]                                                                     posts I swiped no on
+//   passedAt: { [pid]: ms }                                    when, for the discard pile's order (older ones lack it)
+//   invitesSeen: [token]                         invitations to connect sent to me that I've answered (newest last)
+//   invitesDeclined: { [token]: { token, key, name, at } }       the ones I said no to, for Confirm's discard pile
 //   contacts[guid].keys: { chat, sign, inbox }  a contact's keys, saved the first time they're used (so the server
 //                                               can't swap them later)
 import {
@@ -43,6 +46,7 @@ export function resetMail() {
     publicPosts: [],         // derive() posts entries for public posts
     publicAsked: new Set(),  // pids of public posts asked for by ID (ones I've asked to join)
     publicChecked: new Map(),// record signature → the post, or null if it didn't check out
+    invites: new Map(),      // invitations to connect mailed to me: token → { token, key, name }
   };
   view = null;
 }
@@ -99,8 +103,15 @@ async function readMainInbox(rows) {
       if (msg.type === 'unshare') { box.posts.push({ unshare: { pid: String(msg.pid), v: Number(msg.v) }, signer: sender.sign }); continue; }
       const post = await openRecord('post', msg.record, sender.sign);
       if (post?.kind === 'private') box.posts.push({ post, signer: sender.sign, shared: true, host: sender.guid });
-    } else if (msg.type === 'join' && !sender && vault.data.posts?.[msg.pid]) {
-      addChannel(channel, 'host', row.id, msg);
+    } else if (msg.type === 'invite' && [msg.token, msg.key].every(x => typeof x === 'string' && /^[A-Za-z0-9_-]{20,64}$/.test(x))) {
+      // An invitation to connect, sent straight to me instead of shared as a link (see sendInvite). Anonymous: who it's
+      // from shows only as their icon, from the server, and the name they suggest for themselves.
+      box.invites.set(msg.token, { token: msg.token, key: msg.key, name: String(msg.name || '').slice(0, 60) });
+    } else if (msg.type === 'join' && vault.data.posts?.[msg.pid]) {
+      // A join says who it's from only when the person asking has me as a contact (see requestJoin). I show who it
+      // is only if they're in my contacts too, with the keys I saved for them; otherwise it's anonymous like any other.
+      const c = addChannel(channel, 'host', row.id, msg);
+      c.from = sender && vault.data.contacts[sender.guid] && knownKeysMatch(sender.guid, sender) ? sender.guid : null;
     }
   }
 }
@@ -202,6 +213,7 @@ function replay() {
     posts: [...myPostEntries(), ...box.posts, ...box.publicPosts.toReversed()],
     channels: [...box.channels.values()].map(c => ({ ...c, messages: [...c.messages.values()] })),
     passed: hasKeys() ? vault.data.passed || [] : [],
+    passedAt: hasKeys() ? vault.data.passedAt || {} : {},
   });
 }
 
@@ -273,11 +285,21 @@ export async function sendOn(ch, fields, { poke = true } = {}) {
   return msg;
 }
 
+// The host of a post, if they're one of my contacts: who shared it with me, or the contact whose signing key signed
+// it (for a public post). Otherwise null.
+export function hostContact(post) {
+  const contacts = hasKeys() ? vault.data.contacts : {};
+  if (post?.host && contacts[post.host]) return post.host;
+  const k = post?.signer;
+  return (k && Object.keys(contacts).find(g => contacts[g].keys?.sign?.x === k.x && contacts[g].keys?.sign?.y === k.y)) || null;
+}
+
 // Ask to join a post. The channel secret goes into my vault before anything is sent, so it can't be lost.
+// To a contact, the request says who it's from (signed), so they see my name; to anyone else it's anonymous.
 export async function requestJoin(post, note = '') {
   if (!post.reply?.chat || !post.reply?.inbox) throw new Error("This post can't take requests.");
   const join = nextMessage([], 'attendee', { type: 'join', pid: post.pid, note: String(note).slice(0, 280) });
-  const { body, channel } = await sealTo(post.reply.chat, post.reply.inbox, join);
+  const { body, channel } = await sealTo(post.reply.chat, post.reply.inbox, join, { identify: Boolean(hostContact(post)) });
   await vault.update(api, (d) => { d.requests ||= {}; d.requests[channel] = { pid: post.pid, join, reply: post.reply, at: join.at }; });
   try { await postMail([{ inbox: post.reply.inbox, body }]); }
   catch (e) { await vault.update(api, (d) => { delete d.requests?.[channel]; }).catch(() => {}); throw e; }
@@ -286,9 +308,40 @@ export async function requestJoin(post, note = '') {
   return channel;
 }
 
+// Invitations to connect mailed to me that I haven't answered yet, and marking one answered.
+export const invitesForMe = () => {
+  const seen = new Set(hasKeys() ? vault.data.invitesSeen || [] : []);
+  return [...box.invites.values()].filter(i => !seen.has(i.token));
+};
+// declined: the invitation, kept so I can change my mind from the discard pile.
+export const answerInvite = (token, { declined = null } = {}) => vault.update(api, (d) => {
+  d.invitesSeen = [...(d.invitesSeen || []).filter(t => t !== token), token].slice(-500);
+  d.invitesDeclined ||= {};
+  if (declined) d.invitesDeclined[token] = { token, key: declined.key, name: declined.name, at: Date.now() };
+  else delete d.invitesDeclined[token];
+  const keep = Object.values(d.invitesDeclined).sort((a, b) => b.at - a.at).slice(0, 100);
+  d.invitesDeclined = Object.fromEntries(keep.map(i => [i.token, i]));
+});
+export const declinedInvites = () => Object.values((hasKeys() && vault.data.invitesDeclined) || {}).sort((a, b) => b.at - a.at);
+// Send an invitation to connect straight to the host of a post (their main inbox, from the post's reply address),
+// sealed with no sender, like a request to join. invite: { token, key, name } (the vault entry).
+export async function sendInvite(post, invite) {
+  if (!post.reply?.chat || !post.reply?.inbox) throw new Error("This post's host can't be reached.");
+  const { body } = await sealTo(post.reply.chat, post.reply.inbox, { type: 'invite', token: invite.token, key: invite.key, name: invite.name });
+  await postMail([{ inbox: post.reply.inbox, body }]);
+}
+
 // Swiping no, and undoing it.
-export const pass = (pid) => vault.update(api, (d) => { d.passed = [...(d.passed || []).filter(p => p !== pid), pid].slice(-MAX_PASSED); }).then(() => { view = replay(); });
-export const unpass = (pid) => vault.update(api, (d) => { d.passed = (d.passed || []).filter(p => p !== pid); }).then(() => { view = replay(); });
+export const pass = (pid) => vault.update(api, (d) => {
+  d.passed = [...(d.passed || []).filter(p => p !== pid), pid].slice(-MAX_PASSED);
+  const keep = new Set(d.passed);
+  d.passedAt = Object.fromEntries(Object.entries(d.passedAt || {}).filter(([p]) => keep.has(p)));
+  d.passedAt[pid] = Date.now();
+}).then(() => { view = replay(); });
+export const unpass = (pid) => vault.update(api, (d) => {
+  d.passed = (d.passed || []).filter(p => p !== pid);
+  if (d.passedAt) delete d.passedAt[pid];
+}).then(() => { view = replay(); });
 
 // Create or change a post I host. Each save is a new, signed version.
 // - kind 'public': published to /api/public for everyone.

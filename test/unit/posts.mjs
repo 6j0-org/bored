@@ -180,6 +180,26 @@ const ID = (id) => ({ guid: id, chat: { x: id }, sign: { x: id }, inbox: id + '-
     { post: gone, signer: HOST, shared: true }, { unshare: { pid: 'gone', v: 1 }, signer: HOST },
     { post: { ...gone, v: 2 }, signer: HOST, shared: true }] });
   assert.deepEqual(r2.deck.map(p => p.pid), ['gone']);
+  // The discard pile: the matched request isn't in it (it can't be re-swiped), the pass is.
+  assert.deepEqual(r.swiped.map(p => [p.pid, p.swipe]), [['meh', 'pass']]);
+}
+
+// 8b. derive: the discard pile, most recently swiped first; a request counts over a pass for the same post.
+{
+  const [a, b, c, d] = ['a', 'b', 'c', 'd'].map(pid => post(pid, 1));
+  const ca = channel('a'); ca.msgs.forEach(m => { m.at = 200; });
+  const cc = channel('c'); cc.send('host', { type: 'answer', status: 'declined' });
+  const cd = channel('d'); cd.msgs.forEach(m => { m.at = 50; });
+  const r = derive({
+    me: { sign: GUEST },
+    posts: [a, b, c, d].map(p => ({ post: p, signer: HOST })),
+    channels: [{ id: 'ca', role: 'attendee', opened: 1, messages: ca.msgs }, { id: 'cc', role: 'attendee', opened: 2, messages: cc.msgs },
+      { id: 'cd', role: 'attendee', opened: 3, messages: cd.msgs }],
+    passed: ['b', 'd'], passedAt: { b: 100 },
+  });
+  assert.deepEqual(r.swiped.map(p => [p.pid, p.swipe, p.request]), [['a', 'in', 'pending'], ['b', 'pass', null], ['d', 'in', 'pending']]);
+  assert.equal(r.swiped[0].ch, 'ca');
+  assert.equal(r.deck.length, 0);
 }
 
 // 9. Done together: attended matches, from either side.

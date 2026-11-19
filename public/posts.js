@@ -162,14 +162,18 @@ export function nextMessage(channelMessages, role, fields) {
 //   posts:    Map pid → newest version, with .signer and .hidden (unshared from me)
 //   deck:     posts to swipe on: live, not mine, not hidden, not passed, and not already asked about (a request I
 //             took back doesn't count, so the post comes back)
+//   swiped:   the discard pile: live posts (not mine, not hidden) I passed on or am waiting to hear back about, most
+//             recently swiped first: { ...post, swipe: 'in' | 'pass', ch (my request's channel, for 'in'), request
+//             status }. Matched, declined, and other answered requests aren't in it: they can't be re-swiped.
 //   requests: my requests to join (I'm the attendee), newest first: channel state plus post and channel id
-//   hosting:  my posts, each with its requests ({ ...channel state, id }), counts, and the status it should have
+//   hosting:  my posts, each with its requests ({ ...channel state, id, from }), counts, and the status it should have;
+//             from is the GUID of a contact who said who they are when they asked (the loader checks it), else null
 //   todo:     what the host's browser should send: { type: 'promote', ch } and { type: 'status', pid, status }
 //   badges:   { confirm: requests waiting for my answer, plans: accepted matches on either side }
 //   together: { guid: times we've done something together } (attended, either side)
 //   stats:    { hosted: my posts that happened with someone, attended: posts I went to, helped: different hosts of
 //             posts tagged "help" I went to }
-export function derive({ me, posts = [], channels = [], passed = [] }) {
+export function derive({ me, posts = [], channels = [], passed = [], passedAt = {} }) {
   // Posts: per pid, the first signer seen owns it (mine always wins), and the newest version counts.
   const owner = new Map(), latest = new Map(), unshared = new Map();
   for (const e of posts) {
@@ -206,7 +210,7 @@ export function derive({ me, posts = [], channels = [], passed = [] }) {
   const hosting = [...latest.values()].filter(mine).map(post => {
     const reqs = replayed.filter(x => x.c.role === 'host' && x.st.pid === post.pid)
       .sort((a, b) => (a.c.opened ?? 0) - (b.c.opened ?? 0) || String(a.c.id).localeCompare(String(b.c.id)))
-      .map(({ c, st }) => ({ ...st, id: c.id }));
+      .map(({ c, st }) => ({ ...st, id: c.id, from: c.from || null }));
     for (const r of reqs) if (r.status === 'attended') count(r.hello.attendee?.guid);
     const n = (s) => reqs.filter(r => r.status === s).length;
     const accepted = n('accepted'), attended = n('attended');
@@ -230,6 +234,14 @@ export function derive({ me, posts = [], channels = [], passed = [] }) {
   const passedSet = new Set(passed);
   const deck = [...latest.values()].filter(p =>
     LIVE.includes(p.status) && !mine(p) && !p.hidden && !passedSet.has(p.pid) && !asked.has(p.pid));
+  const swipeable = (p) => p && LIVE.includes(p.status) && !mine(p) && !p.hidden;
+  const swiped = [
+    ...requests.filter(r => ['pending', 'waitlisted'].includes(r.status) && swipeable(r.post))
+      .map(r => ({ ...r.post, swipe: 'in', ch: r.id, request: r.status, at: r.joinedAt })),
+    // A request counts over a pass for the same post (asked after passing, from a share link or a second device).
+    ...passed.map(pid => latest.get(pid)).filter(p => swipeable(p) && !asked.has(p.pid))
+      .map(p => ({ ...p, swipe: 'pass', ch: null, request: null, at: Number(passedAt[p.pid]) || 0 })),
+  ].sort((a, b) => b.at - a.at);
 
   const badges = {
     confirm: hosting.filter(h => LIVE.includes(h.post.status)).reduce((n, h) => n + h.counts.pending, 0),
@@ -241,5 +253,5 @@ export function derive({ me, posts = [], channels = [], passed = [] }) {
     attended: went.length,
     helped: new Set(went.filter(r => (r.post?.tags || []).includes('help')).map(r => r.hello.host?.guid || r.post.signer?.x)).size,
   };
-  return { posts: latest, deck, requests, hosting, todo, badges, together, stats };
+  return { posts: latest, deck, swiped, requests, hosting, todo, badges, together, stats };
 }

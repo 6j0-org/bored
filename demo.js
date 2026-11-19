@@ -165,7 +165,7 @@ export async function demoBot(items) {
     const opened = await env.openSealed(body, inbox, people[handle]);
     if (!opened) continue;
     const { msg, sender, channel } = opened;
-    if (msg.type === 'join' && !sender) await answerJoin(handle, msg, channel);
+    if (msg.type === 'join') await answerJoin(handle, msg, channel); // anonymous, or from a contact who says who they are
     else if (msg.type === 'share' && sender) await joinShared(handle, msg, sender);
   }
 }
@@ -192,7 +192,8 @@ async function joinShared(handle, msg, sender) {
   const script = post?.kind === 'private' && post.v === 1 && visitorPosts().find(p => p.fields.title === post.title)?.joins[handle];
   if (!script || !post.reply?.chat || !post.reply?.inbox) return;
   const join = nextMessage([], 'attendee', { type: 'join', pid: post.pid, note: script.note });
-  const { body, channel } = await env.sealTo(post.reply.chat, post.reply.inbox, join);
+  // The visitor is a contact (they shared the post), so the request says who it's from, as the app's would.
+  const { body, channel } = await env.sealTo(post.reply.chat, post.reply.inbox, join, people[handle]);
   drop(post.reply.inbox, body);
   if (!script.accepted) return;
   const list = [join];

@@ -629,13 +629,14 @@ route('POST', '/api/invites/accept', async ({ user, body, res }) => {
   send(res, 200, { status: 'requested' });
 });
 
-// Confirm tab: people who used one of my invitation links and are waiting for me. Icon and their encrypted suggested
-// nickname (note) only, no GUID until I say yes.
-route('GET', '/api/connection-requests', async ({ user, res }) => {
+// Confirm tab: people who used one of my invitation links and are waiting for me (or, with ?answered=1, the ones I
+// said no to, for the discard pile). Icon and their encrypted suggested nickname (note) only, no GUID until I say yes.
+route('GET', '/api/connection-requests', async ({ user, query, res }) => {
+  const status = query.get('answered') === '1' ? 'declined' : 'pending';
   const rows = q(`
     SELECT r.id, r.created_at, r.requester_id, r.invite_id, r.note, u.guid
     FROM connection_requests r JOIN users u ON u.id = r.requester_id
-    WHERE r.owner_id = ? AND r.status = 'pending' ORDER BY r.id`).all(user.id);
+    WHERE r.owner_id = ? AND r.status = ? ORDER BY r.id DESC LIMIT 200`).all(user.id, status);
   send(res, 200, rows.map(({ requester_id: _, guid, ...r }) => ({ ...r, requester: { icon: iconHash(guid) } })));
 });
 

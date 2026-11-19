@@ -55,6 +55,8 @@
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 html, body { margin: 0; height: 100%; }
+/* The browser's own pull-to-refresh would reload the whole app; scrolling up refreshes the view instead (app.js). */
+html, body { overscroll-behavior-y: contain; }
 body {
   font: 16px/1.45 'National Park', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   background: var(--bg);
@@ -133,8 +135,8 @@ nav.tabs svg { width: 26px; height: 26px; filter: drop-shadow(0 1px 0 rgba(40, 1
   transition: transform .3s ease, opacity .3s ease;
 }
 .card.dragging { transition: none; cursor: grabbing; }
-.card:not(.top) { transform: scale(.95) translateY(12px); pointer-events: none; }
-.card:not(.top):not(.second) { opacity: 0; }
+.deck .card:not(.top) { transform: scale(.95) translateY(12px); pointer-events: none; }
+.deck .card:not(.top):not(.second) { opacity: 0; }
 .card .hero {
   height: 42%; min-height: 150px; display: grid; place-items: center;
   font-size: 5rem; position: relative; background: linear-gradient(135deg, rgba(40, 18, 5, .2), rgba(40, 18, 5, .55));
@@ -235,8 +237,6 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
 .stat b { display: block; font-size: 1.6rem; }
 .stat span { color: var(--muted); font-size: .8rem; }
 
-.pill { font-size: .75rem; padding: 2px 8px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); color: var(--muted); white-space: nowrap; }
-.pill.go { background: var(--accent-soft); color: var(--text); border-color: transparent; }
 
 /* ---------- auth ---------- */
 .auth { flex: 1; display: flex; flex-direction: column; justify-content: center; padding: 24px; gap: 18px; }
@@ -277,14 +277,38 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
 }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
-/* ---------- undo ---------- */
-.round.undo { width: 52px; height: 52px; font-size: 1.4rem; color: var(--muted); align-self: center; }
-.round.undo:disabled { opacity: .35; }
+/* ---------- empty deck ---------- */
 .deck-wrap.is-empty .round.yes, .deck-wrap.is-empty .round.no, .deck-wrap.is-empty .hint { display: none; }
 .deck-wrap.is-empty .deck { display: flex; }
 
+/* ---------- discard pile (Discover) ---------- */
+.pile-hint { margin: 0 0 8px; }
+.pile { margin-top: 8px; }
+.pile-list { display: flex; flex-direction: column; gap: 10px; }
+/* A full card (.card) in the page instead of the deck (the discard pile, Plans), with a label in its corner. */
+.card.flat { position: relative; inset: auto; touch-action: pan-y; will-change: auto; }
+.card.flat .body { overflow: visible; }
+.card.flat .body h2 { padding-right: 110px; } /* room for the label */
+.card.flat .label {
+  position: absolute; top: 18px; right: 16px; z-index: 1; padding: 3px 10px; border-radius: 8px; transform: rotate(6deg);
+  font-weight: 900; font-size: .8rem; letter-spacing: .05em; text-transform: uppercase; color: #f6ecda;
+}
+.card.flat .label.in { background: #2f6b3a; }
+.card.flat .label.pass { background: #a8432c; }
+.card.flat .label.warn { background: #9a6b12; }
+.card.flat .label.done { background: rgba(40, 18, 5, .45); }
+.card-actions, .pile-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 0 20px 16px; }
+/* The discard pile: sideways drags re-swipe a card. */
+.pile-card.pass { opacity: .85; }
+.pile-card .stamp { z-index: 2; pointer-events: none; }
+/* Plans: a card opens its chat. */
+.plan-card[data-id] { cursor: pointer; user-select: auto; }
+.plan-card[data-id]:hover { filter: brightness(1.05); }
+.plan-card[data-id]:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.plans-hint { margin: 0 0 4px; }
+
 /* ---------- edits / re-confirm ---------- */
-.pill.warn, .chip.warn { background: var(--warn-pill-bg); color: var(--warn-pill-text); border-color: transparent; }
+.chip.warn { background: var(--warn-pill-bg); color: var(--warn-pill-text); border-color: transparent; }
 .msg.sys.notice { background: var(--surface); border: 1px dashed var(--line); border-radius: 12px; text-align: left; max-width: 90%; }
 .reconfirm {
   background: var(--accent-soft); border-radius: 14px; padding: 12px 14px; margin-bottom: 8px;
@@ -428,6 +452,18 @@ button.link { background: none; border: 0; padding: 0; color: var(--accent); fon
 .chat-head button.link { color: var(--text); font-weight: 700; font-size: 1rem; }
 .me-head { display: flex; align-items: center; gap: 12px; margin: 4px 0 14px; }
 .me-head .grow { flex: 1; min-width: 0; }
+/* My name: edited in place, so it reads as a heading until it's focused. */
+.name-input {
+  width: 100%; font-size: 1.4rem; font-weight: 700; padding: 4px 8px; margin: 0 0 2px -8px;
+  border: 1px solid transparent; border-radius: 10px; background: transparent;
+}
+.name-input:hover { border-color: var(--line); }
+.name-input:focus { border-color: var(--accent); background: var(--surface); outline: none; }
+.me-head .note { margin: 0; }
+/* An avatar to click (a contact's info, or an invitation to connect). */
+.avatar-btn { border: 0; padding: 0; background: none; border-radius: 50%; cursor: pointer; flex: none; line-height: 0; }
+.avatar-btn:hover .avatar { filter: brightness(1.08); }
+.avatar-btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
 
 /* ---------- location: map links and the OSM picker (public/location.js) ---------- */
 .loc-field { position: relative; display: flex; min-width: 0; }
@@ -468,3 +504,15 @@ a.chip.map-link { text-decoration: none; color: var(--accent); }
 .map-status { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-variant-numeric: tabular-nums; }
 .map-status .coords { color: var(--muted); font-size: .9rem; }
 
+
+/* ---------- refresh bump ---------- */
+/* The view nudges down and springs back when scrolling up refreshes it (pullFresh in app.js). */
+#view.bump { animation: fresh-bump .45s cubic-bezier(.3, 1.6, .5, 1); }
+@keyframes fresh-bump { 0% { transform: translateY(0); } 35% { transform: translateY(14px); } 100% { transform: translateY(0); } }
+@media (prefers-reduced-motion: reduce) { #view.bump { animation: none; } }
+
+/* ---------- help notes ---------- */
+/* A short how-to that opens and closes (Profile → Notifications). */
+.help { color: var(--muted); font-size: .85rem; }
+.help summary { cursor: pointer; color: var(--text); font-weight: 600; }
+.help p { margin: 8px 0 0; }

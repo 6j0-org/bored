@@ -8,6 +8,7 @@ import { locationHtml, mountLocationField, pickLocation, PIN_SVG } from './locat
 import { parseWhen, repeatOptions, whenLabel as fmtWhen, localToday, occursBetween } from './when.js';
 import {
   initMail, resetMail, loadMail, mailView, requestJoin, sendOn, pass, unpass, savePost, setPostStatus, reshare,
+  invitesForMe, answerInvite, sendInvite, declinedInvites,
 } from './mail.js';
 import { LIVE } from './posts.js';
 import { postFields, FIELD_LABELS } from './postfields.js';
@@ -262,6 +263,28 @@ const avatar = (key, cls = '') => key
   ? `<div class="avatar icon ${cls}">${identicon(key, 100)}</div>`
   : `<div class="avatar anon ${cls}" aria-hidden="true"></div>`;
 
+// The name I introduce myself with (Profile), offered as what new people should call me. Kept in my vault.
+const myName = () => (hasKeys() && vault.data.profile?.name) || '';
+
+// An avatar to click: a contact's opens my contact info for them; a stranger hosting a post (pid) can be invited to
+// connect. Anyone else's is just a picture. The clicks are handled once, for the whole page, below.
+function personAvatar(guid, cls = '', { pid = null, icon = null } = {}) {
+  if (guid && isContact(guid)) {
+    return `<button type="button" class="avatar-btn" data-person="${esc(guid)}" title="Your contact info for ${esc(displayName(guid))}">${avatar(guid, cls)}</button>`;
+  }
+  if (pid && state.me && hasKeys()) {
+    return `<button type="button" class="avatar-btn" data-invite-host="${esc(pid)}" title="Invite them to connect">${avatar(guid || icon, cls)}</button>`;
+  }
+  return avatar(guid || icon, cls);
+}
+document.addEventListener('click', (e) => {
+  const person = e.target.closest('[data-person]');
+  // Redraw after an edit, except on a deck, which would start over (its names catch up on the next refresh).
+  if (person) return openContactSheet(person.dataset.person, () => { if (!['discover', 'confirm'].includes(state.tab)) render(); });
+  const host = e.target.closest('[data-invite-host]');
+  if (host) inviteHost(host.dataset.inviteHost);
+});
+
 // Add people to my contacts, unnamed unless names[guid] gives a nickname to start with.
 async function addContacts(guids, names = {}) {
   const missing = [...new Set(guids)].filter(g => g && !isContact(g));
@@ -301,7 +324,7 @@ function createInvite() {
     <form class="stack panel">
       <h2>New invitation</h2>
       <label>What should they call you?
-        <input name="name" required maxlength="60" placeholder="e.g. Evan from the garden club" autocomplete="off"></label>
+        <input name="name" required maxlength="60" placeholder="e.g. Evan from the garden club" value="${esc(myName())}" autocomplete="off"></label>
       <p class="note">This is in the link, as a suggested nickname for you. They can change it; only they see what they pick.</p>
       <div class="two">
         <button type="button" class="btn ghost" data-cancel>Cancel</button>
@@ -343,15 +366,29 @@ async function offerPendingInvite() {
   if (!token) return;
   if (!key) { dropPendingInvite(); return toast("That invitation link is incomplete. Ask them to share it again."); }
   let info;
-  try { info = await api('/api/invites/preview', { method: 'POST', body: { token } }); }
+  try { info = await previewInvite(token); }
   catch (e) { dropPendingInvite(); return toast(e.message); }
-  if (info.mine) { dropPendingInvite(); return toast("That's your own invitation link. Share it with someone else."); }
-  if (info.connected) { dropPendingInvite(); return toast("You're already connected with them."); }
-  if (info.requested) { dropPendingInvite(); return toast("You've already asked to connect. They'll see it in their Confirm tab."); }
-  const ready = state.me && hasKeys();
-  const sheet = document.createElement('div');
-  sheet.className = 'sheet';
-  sheet.innerHTML = `
+  if (info.skip) { dropPendingInvite(); return toast(info.skip); }
+  const result = await connectSheet({ token, key, name, info, ready: state.me && hasKeys() });
+  if (result === 'signin') return go('account'); // enterApp offers it again after sign-in
+  dropPendingInvite();
+}
+// Check an invitation before offering it: { icon, skip } (skip: why not to offer it, if there's a reason).
+async function previewInvite(token) {
+  const info = await api('/api/invites/preview', { method: 'POST', body: { token } });
+  info.skip = info.mine ? "That's your own invitation link. Share it with someone else."
+    : info.connected ? "You're already connected with them."
+    : info.requested ? "You've already asked to connect. They'll see it in their Confirm tab." : '';
+  return info;
+}
+// Ask whether to connect through an invitation (a link someone shared, or one mailed to me): my nickname for them
+// (their suggestion to start with) and what they should call me (my Profile name to start with). Resolves to 'sent',
+// 'no', or 'signin' (not signed in yet).
+function connectSheet({ token, key, name, info, ready }) {
+  return new Promise((resolve) => {
+    const sheet = document.createElement('div');
+    sheet.className = 'sheet';
+    sheet.innerHTML = `
     <form class="panel stack">
       <h2>Invitation to connect</h2>
       <div class="invite-from">${avatar(info.icon, 'big')}</div>
@@ -361,7 +398,7 @@ async function offerPendingInvite() {
       <label>Your nickname for them
         <input name="theirName" required maxlength="60" placeholder="e.g. Evan from the garden club" value="${esc(name || '')}" autocomplete="off"></label>
       <label>What should they call you?
-        <input name="myName" required maxlength="60" placeholder="e.g. Sam from book club" autocomplete="off"></label>
+        <input name="myName" required maxlength="60" placeholder="e.g. Sam from book club" value="${esc(myName())}" autocomplete="off"></label>
       <p class="note">Nicknames are private: only you see the one you give them, and only they see the one they give
         you. What you suggest is encrypted so only they can read it.</p>`
       : '<p class="note">Sign in or create an account first. This invitation will be waiting.</p>'}
@@ -370,51 +407,151 @@ async function offerPendingInvite() {
         <button class="btn">${ready ? 'Ask to connect' : 'Sign in'}</button>
       </div>
     </form>`;
+    document.body.appendChild(sheet);
+    const done = (r) => { sheet.remove(); resolve(r); };
+    sheet.querySelector('[data-no]').onclick = () => done('no');
+    sheet.querySelector('form').onsubmit = async (e) => {
+      e.preventDefault();
+      if (!ready) return done('signin');
+      const theirName = e.target.theirName.value.trim(), mine = e.target.myName.value.trim();
+      if (!theirName || !mine) return;
+      try {
+        const note = await sealForInvite(key, mine);
+        const { status } = await api('/api/invites/accept', { method: 'POST', body: { token, note } });
+        await vault.update(api, (d) => { d.pendingNames ||= {}; d.pendingNames[info.icon] = theirName; });
+        if (status === 'connected') { await syncConnections(); toast("You're already connected with them."); }
+        else toast("Request sent. You'll be connected once they confirm.");
+        done('sent');
+      } catch (err) { toast(err.message); }
+    };
+  });
+}
+
+// Invite the host of a post (a stranger: their avatar in Discover) to connect. The invitation is mailed to them
+// (sendInvite) and shows in their Confirm tab. It's only for them: when they say yes, my browser confirms it for me
+// (confirmDirectInvites), since sending it already said yes.
+function inviteHost(pid) {
+  const post = mailView()?.posts.get(pid);
+  if (!post) return toast('That post is gone.');
+  const to = post.signer?.x;
+  if (Object.values(vault.data.invites || {}).some(i => i?.direct && i.to === to)) {
+    return toast("You've already invited them. They'll see it in their Confirm tab.");
+  }
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet';
+  sheet.innerHTML = `
+    <form class="stack panel">
+      <h2>Invite them to connect</h2>
+      <div class="invite-from">${avatar(post.signer ? `${post.signer.x}.${post.signer.y}` : null, 'big')}</div>
+      <p>The host of <b>${esc(post.title)}</b> gets your invitation in their Confirm tab. If they say yes, you'll be in
+        each other's contacts and can share private posts with each other.</p>
+      <label>What should they call you?
+        <input name="name" required maxlength="60" placeholder="e.g. Evan from the garden club" value="${esc(myName())}" autocomplete="off"></label>
+      <p class="note">Only they see it, and they can change it.</p>
+      <div class="two">
+        <button type="button" class="btn ghost" data-cancel>Cancel</button>
+        <button class="btn">Send invitation</button>
+      </div>
+    </form>`;
   document.body.appendChild(sheet);
-  sheet.querySelector('[data-no]').onclick = () => { sheet.remove(); dropPendingInvite(); };
+  sheet.querySelector('[data-cancel]').onclick = () => sheet.remove();
+  sheet.onclick = (e) => { if (e.target === sheet) sheet.remove(); };
   sheet.querySelector('form').onsubmit = async (e) => {
     e.preventDefault();
-    if (!ready) { sheet.remove(); return go('account'); } // enterApp offers it again after sign-in
-    const theirName = e.target.theirName.value.trim(), myName = e.target.myName.value.trim();
-    if (!theirName || !myName) return;
+    const name = e.target.name.value.trim();
+    if (!name) return;
+    let id = null;
     try {
-      const note = await sealForInvite(key, myName);
-      const { status } = await api('/api/invites/accept', { method: 'POST', body: { token, note } });
-      await vault.update(api, (d) => { d.pendingNames ||= {}; d.pendingNames[info.icon] = theirName; });
+      const inv = await api('/api/invites', { method: 'POST' });
+      id = inv.id;
+      const entry = { token: inv.token, key: newInviteKey(), name, direct: true, to };
+      await vault.update(api, (d) => { d.invites ||= {}; d.invites[id] = entry; });
+      await sendInvite(post, entry);
       sheet.remove();
-      dropPendingInvite();
-      if (status === 'connected') { await syncConnections(); return toast("You're already connected with them."); }
-      toast("Request sent. You'll be connected once they confirm.");
-    } catch (err) { toast(err.message); }
+      toast('Invitation sent.');
+    } catch (err) {
+      if (id) {
+        await api(`/api/invites/${id}`, { method: 'DELETE' }).catch(() => {});
+        await vault.update(api, (d) => { delete d.invites?.[id]; }).catch(() => {});
+      }
+      toast(err.message);
+    }
   };
+  sheet.querySelector('input').focus();
+}
+// Requests to connect through invitations I mailed to someone (inviteHost): confirm them, add them to my contacts,
+// and delete the invitation (it was only for them). Returns the other requests.
+async function confirmDirectInvites(requests) {
+  const rest = [];
+  for (const c of requests) {
+    const inv = c.invite_id && inviteOf(c.invite_id);
+    if (!inv?.direct || !inv.token) { rest.push(c); continue; }
+    try {
+      const suggested = inv.key && c.note ? await openForInvite(inv.key, c.note) : null;
+      const r = await api(`/api/connection-requests/${c.id}/respond`, { method: 'POST', body: { yes: true } });
+      if (r.connected) {
+        await addContacts([r.guid], suggested ? { [r.guid]: suggested } : {});
+        toast(`Connected with ${suggested || 'the host you invited'}!`);
+      }
+      await api(`/api/invites/${c.invite_id}`, { method: 'DELETE' }).catch(() => {});
+      await vault.update(api, (d) => { const e = d.invites?.[c.invite_id]; if (e) d.invites[c.invite_id] = { key: e.key, name: e.name, direct: true, to: e.to }; });
+    } catch (err) { console.warn('direct invite', err); rest.push(c); }
+  }
+  return rest;
 }
 const formData = (form) => Object.fromEntries(new FormData(form));
 
 // ---------- swipe deck ----------
 const KEEP_CARD = Symbol('keep card'); // onSwipe can return this to leave the card in place
-// items: array; renderCard(item) -> inner HTML; onSwipe(item, yes) -> Promise;
-// onUndo(item, yes) -> Promise reverses a swipe; labels for stamps.
-function mountDeck(root, { items, renderCard, onSwipe, onUndo, yesLabel, noLabel, empty }) {
+// items: array; renderCard(item) -> inner HTML; onSwipe(item, yes) -> Promise; labels for stamps.
+// Drag a card sideways to swipe it: past 100px it's a yes (right) or a no (left); short of that it springs back.
+// The card's .stamp.yes and .stamp.no fade in as it goes. onDragging(true/false) says when a drag starts and ends.
+function dragToSwipe(el, onSwipe, onDragging = () => {}) {
+  if (!el) return;
+  const yesS = el.querySelector('.stamp.yes'), noS = el.querySelector('.stamp.no');
+  let sx = 0, sy = 0, dx = 0, dy = 0, dragging = false;
+  const back = () => { el.style.transform = ''; if (yesS) yesS.style.opacity = 0; if (noS) noS.style.opacity = 0; };
+  el.addEventListener('pointerdown', (e) => {
+    if (e.target.closest('a,button')) return;
+    dragging = true; sx = e.clientX; sy = e.clientY; dx = dy = 0;
+    el.setPointerCapture(e.pointerId); el.classList.add('dragging'); onDragging(true);
+  });
+  el.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    dx = e.clientX - sx; dy = e.clientY - sy;
+    el.style.transform = `translate(${dx}px, ${dy}px) rotate(${dx / 18}deg)`;
+    if (yesS) yesS.style.opacity = Math.max(0, Math.min(1, dx / 100));
+    if (noS) noS.style.opacity = Math.max(0, Math.min(1, -dx / 100));
+  });
+  const end = () => {
+    if (!dragging) return;
+    dragging = false; el.classList.remove('dragging'); onDragging(false);
+    if (Math.abs(dx) > 100) onSwipe(dx > 0, back);
+    else back();
+  };
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
+}
+
+// No undo: a swiped card goes to the view's discard pile (mountPile), where the answer can be changed.
+function mountDeck(root, { items, renderCard, onSwipe, yesLabel, noLabel, empty }) {
   root.innerHTML = `
     <div class="deck-wrap">
       <div class="deck"></div>
       <div class="actions">
-        <button class="round undo" aria-label="Undo last swipe" title="Undo (Z)" disabled>↶</button>
         <button class="round no" aria-label="${esc(noLabel)}">✕</button>
         <button class="round yes" aria-label="${esc(yesLabel)}">♥</button>
       </div>
-      <div class="hint">Swipe right for <b>${esc(yesLabel)}</b>, left for <b>${esc(noLabel)}</b> · or use ← → · Z to undo</div>
+      <div class="hint">Swipe right for <b>${esc(yesLabel)}</b>, left for <b>${esc(noLabel)}</b> · or use ← →</div>
     </div>`;
   const wrap = root.querySelector('.deck-wrap');
   const deck = root.querySelector('.deck');
-  const undoBtn = root.querySelector('.round.undo');
   const queue = [...items];
-  const history = []; // [{ item, yes }], most recent last
-  let busy = false;
+  const used = new Set(); // ids of cards already swiped away, so an update doesn't bring them back
+  let busy = false, dragging = false;
 
   function draw() {
     deck.innerHTML = '';
-    undoBtn.disabled = !history.length;
     wrap.classList.toggle('is-empty', !queue.length);
     if (!queue.length) { deck.innerHTML = empty; return; }
     queue.slice(0, 2).reverse().forEach((item, i, arr) => {
@@ -442,83 +579,88 @@ function mountDeck(root, { items, renderCard, onSwipe, onUndo, yesLabel, noLabel
         busy = false;
         return;
       }
-      history.push({ item, yes });
     } catch (e) {
-      toast(e.message); // stale card (e.g. event closed): drop it anyway, nothing to undo
+      toast(e.message); // stale card (e.g. event closed): drop it anyway
     }
+    used.add(item.id);
     queue.shift();
     setTimeout(() => { busy = false; draw(); }, 250);
   }
 
-  async function undo() {
-    if (busy || !history.length || !onUndo) return;
-    busy = true;
-    const last = history.pop();
-    try {
-      await onUndo(last.item, last.yes);
-      queue.unshift(last.item);
-      draw();
-      // Fly the card back in from the side it left.
-      const el = deck.querySelector('.card.top');
-      if (el) {
-        el.classList.add('dragging');
-        el.style.transform = flyout(last.yes); el.style.opacity = '0';
-        el.offsetWidth; // force reflow so the transition runs
-        el.classList.remove('dragging');
-        el.style.transform = ''; el.style.opacity = '';
-      }
-    } catch (e) {
-      toast(e.message);
-      draw();
-    }
-    busy = false;
-  }
-
-  function attachDrag(el) {
-    if (!el) return;
-    const yesS = el.querySelector('.stamp.yes'), noS = el.querySelector('.stamp.no');
-    let sx = 0, sy = 0, dx = 0, dy = 0, dragging = false;
-    el.addEventListener('pointerdown', (e) => {
-      if (e.target.closest('a,button')) return;
-      dragging = true; sx = e.clientX; sy = e.clientY; dx = dy = 0;
-      el.setPointerCapture(e.pointerId); el.classList.add('dragging');
-    });
-    el.addEventListener('pointermove', (e) => {
-      if (!dragging) return;
-      dx = e.clientX - sx; dy = e.clientY - sy;
-      el.style.transform = `translate(${dx}px, ${dy}px) rotate(${dx / 18}deg)`;
-      yesS.style.opacity = Math.max(0, Math.min(1, dx / 100));
-      noS.style.opacity = Math.max(0, Math.min(1, -dx / 100));
-    });
-    const end = () => {
-      if (!dragging) return;
-      dragging = false; el.classList.remove('dragging');
-      if (Math.abs(dx) > 100) decide(dx > 0, el);
-      else { el.style.transform = ''; yesS.style.opacity = noS.style.opacity = 0; }
-    };
-    el.addEventListener('pointerup', end);
-    el.addEventListener('pointercancel', end);
-  }
+  const attachDrag = (el) => dragToSwipe(el, (yes) => decide(yes, el), (d) => { dragging = d; });
 
   root.querySelector('.round.yes').onclick = () => decide(true);
   root.querySelector('.round.no').onclick = () => decide(false);
-  undoBtn.onclick = undo;
   mountDeck.keyHandler = (e) => {
     if (e.target.matches('input, textarea, select') || document.querySelector('.overlay, .sheet')) return;
     if (e.key === 'ArrowRight') decide(true);
     if (e.key === 'ArrowLeft') decide(false);
-    if (e.key === 'z' || e.key === 'Z' || e.key === 'Backspace') { e.preventDefault(); undo(); }
   };
   draw();
+
+  // Take in a fresh list without starting over: cards still in it keep their place (with the new data), new ones
+  // go at the end, and ones gone from it drop out. Swiped cards stay gone. Returns false, changing nothing, while a
+  // card is moving (being dragged, flying out, or coming back); the caller can try again later.
+  return {
+    update(fresh) {
+      if (busy || dragging || !document.body.contains(deck)) return false;
+      const byId = new Map(fresh.filter(x => !used.has(x.id)).map(x => [x.id, x]));
+      const shown = queue.slice(0, 2).map(x => x.id + JSON.stringify(x)).join('|');
+      const kept = queue.filter(x => byId.has(x.id)).map(x => byId.get(x.id));
+      const ids = new Set(kept.map(x => x.id));
+      queue.splice(0, queue.length, ...kept, ...[...byId.values()].filter(x => !ids.has(x.id)));
+      if (queue.slice(0, 2).map(x => x.id + JSON.stringify(x)).join('|') !== shown) draw();
+      return true;
+    },
+  };
 }
 document.addEventListener('keydown', (e) => mountDeck.keyHandler?.(e));
+
+// A discard pile, under a deck: full cards already answered, newest first, each labelled with the answer. Swipe one
+// again, or use its button, to change it. items: [{ yes, ... }] (yes: the answer now); label(item) → [class, text];
+// onChange(item, yes) saves the new answer and redraws (false: nothing changed, put the card back). Returns
+// { busy() }, so a refresh can wait until a change is done.
+function mountPile(el, { items, renderCard, label, onChange, yesLabel, noLabel }) {
+  let busy = false;
+  el.hidden = !items.length;
+  el.innerHTML = !items.length ? '' : `
+      <h2 class="section-title">Discard pile</h2>
+      <p class="note">Changed your mind? Swipe a card again, or use its button.</p>
+      <div class="pile-list">${items.map((it, i) => {
+        const [cls, text] = label(it);
+        return `
+        <div class="card flat pile-card ${it.yes ? 'in' : 'pass'}" data-i="${i}">
+          <div class="stamp yes">${esc(yesLabel)}</div><div class="stamp no">${esc(noLabel)}</div>
+          <span class="label ${cls}">${esc(text)}</span>
+          ${renderCard(it)}
+          <div class="pile-actions">
+            <button type="button" class="btn ghost small" data-flip>Change to ${esc(it.yes ? noLabel : yesLabel)}</button>
+          </div>
+        </div>`;
+      }).join('')}</div>`;
+  el.querySelectorAll('.pile-card').forEach(card => {
+    const it = items[card.dataset.i];
+    const restore = () => { card.style.transform = ''; card.style.opacity = ''; card.querySelectorAll('.stamp').forEach(st => { st.style.opacity = 0; }); };
+    const change = async (yes) => {
+      if (busy || yes === it.yes) return restore(); // already that way: spring back
+      busy = true;
+      card.style.transform = `translate(${yes ? 600 : -600}px, 0)`; card.style.opacity = '0';
+      try { if ((await onChange(it, yes)) === false) restore(); }
+      catch (err) { toast(err.message); restore(); }
+      finally { busy = false; }
+    };
+    card.querySelector('[data-flip]').onclick = () => change(!it.yes);
+    dragToSwipe(card, (yes) => change(yes));
+  });
+  return { busy: () => busy };
+}
 
 // ---------- views ----------
 
 // Tab badges: connection requests from the server, plus requests and matches from the mail (public/mail.js).
 function badgeCounts() {
   const c = state.me?.counts || {}, m = mailView()?.badges || {};
-  return { confirm: (c.confirm || 0) + (m.confirm || 0), plans: m.plans || 0 };
+  return { confirm: (c.confirm || 0) + (m.confirm || 0) + (hasKeys() ? invitesForMe().length : 0), plans: m.plans || 0 };
 }
 
 function shell(content) {
@@ -551,6 +693,7 @@ async function refreshMe() {
 
 async function render() {
   mountDeck.keyHandler = null;
+  stopFresh(); // the new view starts its own, if it has one
   // Signed in, but this browser doesn't hold the keys (e.g. keys were cleared): unlock with a passkey first.
   if (state.me && !hasKeys()) state.tab = 'account';
   if (!state.me && !GUEST_TABS.some(t => t.id === state.tab)) state.tab = 'discover';
@@ -629,6 +772,17 @@ async function drawPushSettings(el) {
   }
   el.innerHTML = `
     <p class="note">${note}</p>
+    <details class="help" ${ios && !standalone ? 'open' : ''}>
+      <summary>How to turn them on</summary>
+      <p><b>iPhone and iPad</b> (iOS 16.4 or newer): notifications only work once Bored? is on your Home Screen.
+        Open it in Safari, tap Share, then <b>Add to Home Screen</b>. Open Bored? from the new icon, come back here,
+        and tap <b>Turn on notifications</b>.</p>
+      <p><b>Android</b>: they work right in the browser (Chrome, Firefox, and others). Tap <b>Turn on
+        notifications</b> and allow them when asked. If you like, add Bored? to your home screen too (the browser's
+        menu, then <b>Add to Home screen</b> or <b>Install app</b>) so it opens like an app.</p>
+      <p>Turn them on separately on each device. If you said no by mistake, allow notifications for this site in
+        your browser's site settings.</p>
+    </details>
     ${canToggle ? `<div class="two">
       <button type="button" class="btn ${on ? 'ghost' : ''}" data-push-toggle>${on ? 'Turn off' : 'Turn on notifications'}</button>
       ${on ? '<button type="button" class="btn ghost" data-push-test>Send a test</button>' : ''}</div>` : ''}`;
@@ -773,24 +927,25 @@ function whereHtml(e) {
   return e.online === 1 ? 'Online' : e.online === 2 ? `${place || 'In person'} and online` : place;
 }
 
-// A Discover card: each detail has a label, and no emoji.
-function eventCard(t) {
+// A Discover card: each detail has a label, and no emoji. who: HTML for the people line at the bottom, in place of
+// the host's (Plans says who's going). mine: it's my own post.
+function eventCard(t, { who = null, mine = false } = {}) {
   const fact = (label, value) => `<dt>${label}</dt><dd>${value}</dd>`;
   return `
     <div class="body">
       <h2>${esc(t.title)}</h2>
-      ${t.status === 'full' ? `<div class="meta"><span class="chip warn" title="Say yes to join the waitlist">Full: join the waitlist</span></div>` : ''}
+      ${t.status === 'full' && who === null ? `<div class="meta"><span class="chip warn" title="Say yes to join the waitlist">Full: join the waitlist</span></div>` : ''}
       <dl class="facts">
         ${t.when_text ? fact('When', `<button type="button" class="link" data-ics="${t.id}" title="Add to your calendar">${esc(whenLabel(t.when_text))}</button>`) : ''}
         ${whereHtml(t) ? fact('Where', whereHtml(t)) : ''}
         ${fact('Cost', esc(costLabel(t.cost_amount, t.cost_currency)))}
         ${fact('Max attendees', attendeesLabel(t.max_attendees))}
-        ${fact('Who can see it', t.visibility === 'private' ? 'Private: the host shared it with you' : 'Public')}
+        ${fact('Who can see it', t.visibility !== 'private' ? 'Public' : mine ? 'Private: the contacts you picked' : 'Private: the host shared it with you')}
         ${t.tags.length ? fact('Tags', t.tags.map(x => '#' + esc(x)).join(' ')) : ''}
       </dl>
       ${t.details ? `<div class="details">${esc(t.details)}</div>` : ''}
-      <div class="who">${avatar(t.host.guid || t.host.icon)}
-        <div>${contactName(t.host.guid) ? `<b>${esc(contactName(t.host.guid))}</b>` : ''}</div>
+      <div class="who">${who ?? `${personAvatar(t.host.guid, '', { pid: t.post?.pid, icon: t.host.icon })}
+        <div>${contactName(t.host.guid) ? `<b>${esc(contactName(t.host.guid))}</b>` : ''}</div>`}
       </div>
     </div>`;
 }
@@ -834,9 +989,14 @@ function postCounts(posts) {
 }
 
 async function viewDiscover(v) {
-  v.innerHTML = `<div class="filters" id="filters"></div><div class="deck-host" id="deckHost"></div>`;
-  const filtersEl = v.querySelector('#filters'), host = v.querySelector('#deckHost');
-  let options = { tags: [], costs: [], dates: [] }, events = [];
+  // The hint goes right under the heading: under the deck, the tab bar would cover it on a phone. Guests have no
+  // discard pile (their passes aren't kept).
+  v.innerHTML = `<p class="hint pile-hint">${state.me ? 'Scroll up to refresh. Scroll down to see your discard pile.' : 'Scroll up to refresh.'}</p>
+    <div class="filters" id="filters"></div>
+    <div class="deck-host" id="deckHost"></div>
+    <section class="pile" id="pile" aria-labelledby="pileTitle" hidden></section>`;
+  const filtersEl = v.querySelector('#filters'), host = v.querySelector('#deckHost'), pileEl = v.querySelector('#pile');
+  let options = { tags: [], costs: [], dates: [] }, events = [], deck = null;
 
   // All the filters sit in one panel that opens and closes; its heading says how many are on.
   function drawFilters() {
@@ -874,16 +1034,53 @@ async function viewDiscover(v) {
     filtersEl.querySelector('details').addEventListener('toggle', (e) => { state.filtersOpen = e.target.open; });
   }
 
-  async function load() {
+  // soft: an automatic refresh, which merges into the deck instead of starting it over, and leaves the filters
+  // alone unless their counts changed.
+  async function load({ soft = false } = {}) {
     const mail = await loadMail().catch(err => { console.warn(err); return mailView(); });
+    if (!document.body.contains(host)) return;
     const posts = mail?.deck || [], near = state.discoverNear;
     events = posts.filter(mailPostMatches).map(mailCard);
+    const before = JSON.stringify(options);
     options = postCounts(posts);
-    drawFilters();
-    mountDeck(host, deckOptions(events, { tags: [...state.discoverTags], costs: [...state.discoverCosts], date: state.discoverDate,
+    if (!soft || JSON.stringify(options) !== before) drawFilters();
+    if (soft && deck) deck.update(events);
+    else deck = mountDeck(host, deckOptions(events, drawPile, { tags: [...state.discoverTags], costs: [...state.discoverCosts], date: state.discoverDate,
       near: [near && state.discoverRadius && `Within ${fmtDistance(state.discoverRadius)} of ${near.label.toLowerCase()}`,
         state.discoverOnline && 'online'].filter(Boolean).join(' or ').replace(/^online$/, 'Online') }));
+    if (!pile?.busy()) drawPile();
   }
+  // The discard pile: cards I've swiped (passed, or asked to join and still waiting), newest first, each labelled with
+  // my answer. Swipe one again, or use its button, to change it. Signed in only: a guest's passes aren't kept.
+  let pile = null, pileCards = [];
+  function drawPile() {
+    pileCards = (state.me ? mailView()?.swiped || [] : []).map(p => ({ ...mailCard(p), yes: p.swipe === 'in', request: p.request }));
+    pile = mountPile(pileEl, {
+      items: pileCards, renderCard: eventCard, yesLabel: "I'm in", noLabel: 'Pass',
+      label: (c) => c.yes ? ['in', c.request === 'waitlisted' ? "I'm in · waitlist" : "I'm in"] : ['pass', 'Pass'],
+      onChange: async (c, yes) => { await reswipe(c.post, c, yes); drawPile(); },
+    });
+  }
+  // Change a swipe: pass → I'm in asks to join; I'm in → pass takes the request back (while the host hasn't
+  // answered) and passes.
+  async function reswipe(p, c, yes) {
+    if (yes) {
+      await requestJoin(p);
+      await unpass(p.pid);
+      toast(p.status === 'full' ? `Asked to join the waitlist for “${p.title}”` : `Asked to join “${p.title}”! You'll match if the host swipes yes too.`);
+      return;
+    }
+    // Read first: the host may have said yes since the pile was drawn, and a match can't be taken back here.
+    const answered = 'They already said yes. Message them in Plans if you need to back out.';
+    const ch = mailView()?.swiped.find(x => x.pid === p.pid)?.ch;
+    const status = async () => (await loadMail().catch(() => mailView()))?.requests.find(x => x.id === ch)?.status;
+    if (!['pending', 'waitlisted'].includes(await status())) throw new Error(answered);
+    await sendOn(ch, { type: 'unjoin' });
+    if ((await status()) !== 'cancelled') throw new Error(answered); // they answered while this was sent
+    await pass(p.pid);
+    toast(`Took back your request to join “${p.title}”`);
+  }
+
   // Clearing the filters keeps your location; it only turns the distance off.
   const clearAll = () => { state.discoverTags.clear(); state.discoverCosts.clear(); state.discoverDate = ''; state.discoverRadius = 0; state.discoverOnline = false; };
   const setNear = (lat, lon, label) => {
@@ -926,14 +1123,17 @@ async function viewDiscover(v) {
   });
   v.addEventListener('click', (e) => {
     const cal = e.target.closest('[data-ics]');
-    if (cal) addToCalendar(events.find(t => String(t.id) === cal.dataset.ics));
+    if (cal) addToCalendar([...events, ...pileCards].find(t => String(t.id) === cal.dataset.ics));
     if (e.target.id === 'goPost') go('post');
     if (e.target.id === 'clearFilters') { clearAll(); saveDiscoverFilters(); load().catch(err => toast(err.message)); }
   });
   await load();
+
+  keepFresh(host, () => load({ soft: true }));
 }
 
-function deckOptions(events, filters) {
+// changed: called after a swipe or an undo is saved (Discover redraws the discard pile).
+function deckOptions(events, changed, filters) {
   return {
     items: events,
     renderCard: eventCard,
@@ -944,22 +1144,14 @@ function deckOptions(events, filters) {
         if (yes) { toast('Sign in or create an account to say yes.'); go('account'); return KEEP_CARD; }
         return;
       }
-      if (!yes) return pass(t.pid);
+      if (!yes) { await pass(t.pid); return changed(); }
       t.ch = await requestJoin(t.post);
-      if (yes) toast(t.status === 'full'
+      changed();
+      toast(t.status === 'full'
         ? `Asked to join the waitlist for “${t.title}”. If the host says yes, you'll get the next open spot.`
         : `Asked to join “${t.title}”! You'll match if the host swipes yes too.`);
     },
-    onUndo: async (t, yes) => {
-      if (!state.me) return;
-      if (!yes) await unpass(t.pid);
-      else {
-        const r = mailView()?.requests.find(x => x.id === t.ch);
-        if (r && !['pending', 'waitlisted'].includes(r.status)) throw new Error('They already answered. Message them in Plans if you need to back out.');
-        await sendOn(t.ch, { type: 'unjoin' });
-      }
-      toast(yes ? `Took back your request to join “${t.title}”` : 'Undone');
-    },
+    // No undo: the discard pile, under the deck, is where a swipe is changed.
     empty: filters.tags.length || filters.costs.length || filters.date || filters.near
       ? `<div class="empty"><h3>No matches for these filters</h3>
           <p>${[filters.near && esc(filters.near), filters.date && esc(DATE_FILTERS[filters.date]), filters.tags.length && filters.tags.map(t => '#' + esc(t)).join(' or '), filters.costs.length && filters.costs.map(c => esc(COST_FILTERS[c])).join(' or ')].filter(Boolean).join(' · ')}</p>
@@ -990,7 +1182,7 @@ function connectCard(c) {
 function mailRequests(view) {
   return (view?.hosting || []).filter(h => LIVE.includes(h.post.status)).flatMap(h => h.requests
     .filter(r => r.status === 'pending')
-    .map(r => ({ kind: 'mail', ch: r.id, pid: h.post.pid, title: h.post.title, note: r.note, full: h.status === 'full' })));
+    .map(r => ({ kind: 'mail', id: `m:${r.id}`, ch: r.id, from: r.from, pid: h.post.pid, title: h.post.title, note: r.note, full: h.status === 'full' })));
 }
 // A yes on a full post puts them on the waitlist, as the server does for the posts it stores.
 function mailAnswer(view, pid) {
@@ -998,65 +1190,147 @@ function mailAnswer(view, pid) {
   const max = h?.post.max_attendees ?? null;
   return max !== null && h.counts.accepted + h.counts.attended >= max ? 'waitlisted' : 'accepted';
 }
-const mailRequestCard = (o) => `
-      <div class="hero">${avatar(null, 'big')}</div>
+// A contact who asked says who they are (checked when the mail is read), so they show by the nickname I gave them.
+const mailRequestCard = (o) => {
+  const known = Boolean(o.from) && isContact(o.from);
+  return `
+      <div class="hero">${known ? personAvatar(o.from, 'big') : avatar(null, 'big')}</div>
       <div class="body">
         <div class="meta"><span class="chip">Wants to join: <b>${esc(o.title)}</b></span></div>
+        ${known ? `<h2>${esc(displayName(o.from) || 'One of your contacts')}</h2>` : ''}
         ${o.note ? `<div class="details">“${esc(o.note)}”</div>` : ''}
         ${o.full ? `<p class="note">This post is full, so saying yes puts them on the waitlist. They'll be matched automatically when a spot opens.</p>` : ''}
-        <p class="note">Requests are anonymous: you'll see who it is once you say yes.</p>
+        <p class="note">${known ? "One of your contacts." : "Someone you don't know yet: you'll see who it is once you say yes."}</p>
+      </div>`;
+};
+
+// An invitation to connect someone mailed to me (they clicked my avatar on one of my posts).
+const inviteCard = (o) => `
+      <div class="hero">${avatar(o.icon, 'big')}</div>
+      <div class="body">
+        <div class="meta"><span class="chip">Wants to connect</span></div>
+        <h2>${o.name ? esc(o.name) : 'Someone'}</h2>
+        ${o.name ? '<p class="note">The name they suggest for themselves. You can change it after you connect.</p>' : ''}
+        <p>They invited you to connect. If you say yes, you'll be in each other's contacts and can share private posts
+          with each other.</p>
       </div>`;
 
 async function viewConfirm(v) {
-  const [requests, mail] = await Promise.all([api('/api/connection-requests'), loadMail().catch(() => mailView())]);
+  v.innerHTML = `<p class="hint pile-hint">Scroll up to refresh. Scroll down to see your discard pile.</p>
+    <div class="deck-host" id="deckHost"></div>
+    <section class="pile" id="pile" hidden></section>`;
+  const host = v.querySelector('#deckHost'), pileEl = v.querySelector('#pile');
   // Their suggested nickname, decrypted with the key of the invitation they used (kept in my vault).
-  for (const c of requests) {
-    const inv = c.invite_id && inviteOf(c.invite_id);
-    c.via = inv?.name || '';
-    c.suggested = inv?.key && c.note ? await openForInvite(inv.key, c.note) : null;
+  const withNames = async (requests) => {
+    for (const c of requests) {
+      const inv = c.invite_id && inviteOf(c.invite_id);
+      c.via = inv?.name || '';
+      c.suggested = inv?.key && c.note ? await openForInvite(inv.key, c.note) : null;
+    }
+    return requests;
+  };
+  // Invitations mailed to me, with the inviter's icon; ones that don't apply any more (mine, already connected or
+  // asked, deleted) are answered and dropped.
+  const checkInvites = async (list, declined) => {
+    const out = [];
+    for (const i of list) {
+      const info = await previewInvite(i.token).catch(() => ({ skip: 'gone' }));
+      if (info.skip) await answerInvite(i.token).catch(() => {});
+      else out.push({ ...i, kind: 'invite', id: `i:${i.token}`, icon: info.icon, info, yes: false, at: i.at || 0 });
+    }
+    return out;
+  };
+  const load = async () => {
+    const [all, mail] = await Promise.all([api('/api/connection-requests'), loadMail().catch(() => mailView())]);
+    const requests = await withNames(await confirmDirectInvites(all));
+    return [...requests.map(c => ({ ...c, kind: 'connect' })), ...await checkInvites(invitesForMe()), ...mailRequests(mail)];
+  };
+
+  // The discard pile: what I've answered and can still change. Requests to join I said no to, waitlisted, or said yes
+  // to without chatting yet (after that, it's changed from Plans); connection requests and invitations I said no to.
+  const sqlTime = (t) => Date.parse(String(t || '').replace(' ', 'T') + 'Z') || 0;
+  const loadPile = async () => {
+    const declined = await withNames(await api('/api/connection-requests?answered=1').catch(() => []));
+    const mail = (mailView()?.hosting || []).filter(h => LIVE.includes(h.post.status)).flatMap(h => h.requests
+      .filter(r => r.status === 'declined' || r.status === 'waitlisted' || (r.status === 'accepted' && !r.chatted))
+      .map(r => ({ kind: 'mail', id: `m:${r.id}`, ch: r.id, pid: h.post.pid, title: h.post.title, note: r.note, from: r.from,
+        status: r.status, yes: r.status !== 'declined', at: r.updatedAt })));
+    return [
+      ...mail,
+      ...declined.map(c => ({ ...c, kind: 'connect', yes: false, at: sqlTime(c.created_at) })),
+      ...await checkInvites(declinedInvites()),
+    ].sort((a, b) => b.at - a.at);
+  };
+  const renderCard = (o) => o.kind === 'connect' ? connectCard(o) : o.kind === 'invite' ? inviteCard(o) : mailRequestCard(o);
+  // Answer a request to join, and say what happened.
+  const answerJoin = async (o, yes) => {
+    const status = yes ? mailAnswer(mailView(), o.pid) : 'declined';
+    await sendOn(o.ch, { type: 'answer', status });
+    if (status === 'accepted') showMatch(o.from && isContact(o.from) ? o.from : null, o.title, `m:${o.ch}`);
+    else if (status === 'waitlisted') toast(`Added them to the waitlist for “${o.title}”`);
+    loadMail().then(shellRefreshBadges, () => {}); // say hello, so they become a contact
+  };
+  const connected = async (r, o) => {
+    await refreshMe();
+    if (!r.connected) return;
+    await addContacts([r.guid], o.suggested ? { [r.guid]: o.suggested } : {});
+    toast(o.suggested ? `Connected with ${o.suggested}! Change their nickname if you like.` : "Connected! Give them a nickname only you'll see.");
+    openContactSheet(r.guid, () => {});
+  };
+
+  let pile = null;
+  // force: redraw even while a change is being saved (that change redraws when it's done).
+  async function drawPile(force = false) {
+    const items = await loadPile();
+    if (!document.body.contains(pileEl) || (pile?.busy() && !force)) return;
+    pile = mountPile(pileEl, {
+      items, renderCard, yesLabel: "Let's do it", noLabel: 'No thanks',
+      label: (o) => o.status === 'waitlisted' ? ['warn', 'Waitlist'] : o.yes ? ['in', "Let's do it"] : ['pass', 'No thanks'],
+      onChange: async (o, yes) => {
+        if (o.kind === 'invite') {
+          if (await connectSheet({ token: o.token, key: o.key, name: o.name, info: o.info, ready: true }) !== 'sent') return false;
+          await answerInvite(o.token); // no longer declined
+        } else if (o.kind === 'connect') {
+          await api(`/api/connection-requests/${o.id}/undo`, { method: 'POST' });
+          await connected(await api(`/api/connection-requests/${o.id}/respond`, { method: 'POST', body: { yes: true } }), o);
+        } else {
+          // Read first: it may have changed since the pile was drawn (a chat started, the post filled up).
+          const r = (await loadMail().catch(() => mailView()))?.hosting.flatMap(h => h.requests).find(x => x.id === o.ch);
+          if (!r || r.status !== o.status) { drawPile(); throw new Error('That changed in the meantime. Have another look.'); }
+          if (r.chatted) { drawPile(); throw new Error("You've already started chatting, so change it from Plans."); }
+          await sendOn(o.ch, { type: 'undo' });
+          await answerJoin(o, yes);
+          if (!yes) toast(`Said no thanks for “${o.title}”`);
+        }
+        shellRefreshBadges();
+        await drawPile(true);
+      },
+    });
   }
-  mountDeck(v, {
-    items: [...requests.map(c => ({ ...c, kind: 'connect' })), ...mailRequests(mail)],
-    renderCard: (o) => o.kind === 'connect' ? connectCard(o) : mailRequestCard(o),
+
+  const deck = mountDeck(host, {
+    items: await load(),
+    renderCard,
     yesLabel: "Let's do it", noLabel: 'No thanks',
     onSwipe: async (o, yes) => {
-      if (o.kind === 'connect') {
-        const r = await api(`/api/connection-requests/${o.id}/respond`, { method: 'POST', body: { yes } });
-        await refreshMe();
-        shellRefreshBadges();
-        if (r.connected) {
-          o.added = !isContact(r.guid) && r.guid; // so an undo can take back a contact this just added
-          await addContacts([r.guid], o.suggested ? { [r.guid]: o.suggested } : {});
-          toast(o.suggested ? `Connected with ${o.suggested}! Change their nickname if you like.` : "Connected! Give them a nickname only you'll see.");
-          openContactSheet(r.guid, () => {});
-        }
-        return;
+      if (o.kind === 'invite') {
+        // Yes asks for the names first; closing that without sending leaves the card where it was.
+        if (yes && await connectSheet({ token: o.token, key: o.key, name: o.name, info: o.info, ready: true }) !== 'sent') return KEEP_CARD;
+        await answerInvite(o.token, { declined: yes ? null : o });
+      } else if (o.kind === 'connect') {
+        await connected(await api(`/api/connection-requests/${o.id}/respond`, { method: 'POST', body: { yes } }), o);
+      } else {
+        await answerJoin(o, yes);
       }
-      const status = yes ? mailAnswer(mailView(), o.pid) : 'declined';
-      await sendOn(o.ch, { type: 'answer', status });
       shellRefreshBadges();
-      if (status === 'accepted') showMatch(null, o.title, `m:${o.ch}`);
-      else if (status === 'waitlisted') toast(`Added them to the waitlist for “${o.title}”`);
-      loadMail().then(shellRefreshBadges, () => {}); // say hello, so they become a contact
-    },
-    onUndo: async (o, yes) => {
-      if (o.kind === 'connect') {
-        await api(`/api/connection-requests/${o.id}/undo`, { method: 'POST' });
-        if (o.added) await vault.update(api, (d) => { delete d.contacts[o.added]; }).catch(() => {});
-        await refreshMe();
-        shellRefreshBadges();
-        return toast(yes ? 'Disconnected' : 'Undone');
-      }
-      const r = mailView()?.hosting.flatMap(h => h.requests).find(x => x.id === o.ch);
-      if (r?.chatted) throw new Error("You've already started chatting, so this match can't be undone");
-      await sendOn(o.ch, { type: 'undo' });
-      shellRefreshBadges();
-      toast(yes ? 'Unmatched' : 'Undone');
+      drawPile().catch(err => console.warn(err));
     },
     empty: `<div class="empty"><h3>Nobody to confirm</h3>
       <p>When someone asks to join one of your posts, or asks to connect through one of your invitation links,
         they'll show up here for you to answer.</p></div>`,
   });
+  await drawPile();
+  keepFresh(v, async () => { deck.update(await load()); shellRefreshBadges(); await drawPile(); });
 }
 
 function showMatch(otherGuid, title, matchId) {
@@ -1092,7 +1366,7 @@ function mailMatches(view) {
   const row = (r, role, post) => {
     const other = r.hello[role === 'host' ? 'attendee' : 'host']?.guid || (role === 'attendee' ? post.host : null) || null;
     const last = [...r.timeline].reverse().find(t => t.event === 'chat');
-    return { id: `m:${r.id}`, ch: r.id, role, status: r.status, reconfirm: r.reconfirm, other, state: r,
+    return { id: `m:${r.id}`, ch: r.id, role, status: r.status, reconfirm: r.reconfirm, other, state: r, post,
       title: post.title, when_text: post.when_text, location: post.location, location_name: post.location_name, online: post.online,
       last_message: last?.text || '' };
   };
@@ -1107,6 +1381,11 @@ async function viewPlans(v) {
   if (state.chat) return viewChat(v, state.chat);
   const mail = await loadMail().catch(() => mailView());
   const matches = mailMatches(mail);
+  const shown = JSON.stringify(matches);
+  keepFresh(v, async () => {
+    const m = mailMatches(await loadMail());
+    if (JSON.stringify(m) !== shown && state.tab === 'plans' && !state.chat) { shellRefreshBadges(); await viewPlans(v); }
+  });
   if (!matches.length) {
     v.innerHTML = `<div class="empty"><h3>No plans yet</h3>
       <p>Swipe right on something you'd like to join. When the host swipes yes on you, you'll match.</p>
@@ -1116,35 +1395,49 @@ async function viewPlans(v) {
   }
   const active = matches.filter(m => m.status === 'accepted'), waiting = matches.filter(m => m.status === 'waitlisted');
   const past = matches.filter(m => !['accepted', 'waitlisted'].includes(m.status));
-  const pill = (m) =>
-    m.status === 'attended' ? `<span class="pill">Happened ✓</span>`
-    : m.status === 'withdrawn' ? `<span class="pill">Dropped out</span>`
-    : m.reconfirm ? `<span class="pill warn">${m.role === 'attendee' ? 'Re-confirm?' : 'Awaiting OK'}</span>`
-    : `<span class="pill go">It's on</span>`;
-  const row = (m) => `
-    <button class="row" data-id="${m.id}">
-      <div class="grow">
-        <div class="title">${esc(m.title)}</div>
-        <div class="sub">${m.role === 'attendee' ? `Hosted by ${esc(nameOrSomeone(m.other))}` : `${esc(nameOrSomeone(m.other))} is going`}${m.last_message ? ' · ' + esc(m.last_message) : ''}</div>
-      </div>
-      ${pill(m)}
-    </button>`;
-  // Waitlist rows have no chat yet: that opens when a spot does and they're matched.
-  const waitRow = (m) => `
-    <div class="row">
-      <div class="grow">
-        <div class="title">${esc(m.title)}</div>
-        <div class="sub">${contactName(m.other) ? `Hosted by ${esc(contactName(m.other))} · ` : ''}${m.waitlist_pos ? `#${m.waitlist_pos} on the waitlist` : 'On the waitlist'}</div>
-      </div>
-      <button class="btn ghost small" data-leave-ch="${esc(m.ch)}">Leave</button>
+  // Full cards, like Discover's, each labelled with where the plan stands and who's in it. A card opens its chat.
+  const label = (m) =>
+    m.status === 'attended' ? ['done', 'Happened']
+    : m.status === 'withdrawn' ? ['done', 'Dropped out']
+    : m.reconfirm ? ['warn', m.role === 'attendee' ? 'Re-confirm?' : 'Awaiting OK']
+    : ['in', "It's on"];
+  const who = (m) => `${personAvatar(m.other)}
+    <div><b>${m.role === 'attendee' ? `Hosted by ${esc(nameOrSomeone(m.other))}` : `${esc(nameOrSomeone(m.other))} is going`}</b>
+      ${m.last_message ? `<small>${esc(m.last_message)}</small>` : ''}</div>`;
+  const card = (m) => {
+    const [cls, text] = label(m);
+    return `
+    <div class="card flat plan-card" role="button" tabindex="0" data-id="${m.id}" aria-label="Chat about ${esc(m.title)}">
+      <span class="label ${cls}">${esc(text)}</span>
+      ${eventCard(mailCard(m.post), { who: who(m), mine: m.role === 'host' })}
+    </div>`;
+  };
+  // Waitlist cards have no chat yet: that opens when a spot does and they're matched.
+  const waitCard = (m) => `
+    <div class="card flat plan-card waiting">
+      <span class="label warn">${m.waitlist_pos ? `Waitlist #${m.waitlist_pos}` : 'Waitlist'}</span>
+      ${eventCard(mailCard(m.post), { who: `${personAvatar(m.other)}<div>${contactName(m.other) ? `<b>Hosted by ${esc(contactName(m.other))}</b>` : ''}</div>` })}
+      <div class="card-actions"><button class="btn ghost small" data-leave-ch="${esc(m.ch)}">Leave</button></div>
     </div>`;
   v.innerHTML = `
-    ${active.length ? `<div class="section-title">Happening</div><div class="list">${active.map(row).join('')}</div>` : ''}
+    ${active.length || past.length ? `<p class="hint plans-hint">Click a card to chat.</p>` : ''}
+    ${active.length ? `<div class="section-title">Happening</div><div class="list">${active.map(card).join('')}</div>` : ''}
     ${waiting.length ? `<div class="section-title">Waitlist</div>
       <p class="note">These posts are full. You'll be matched automatically, in order, when a spot opens.</p>
-      <div class="list">${waiting.map(waitRow).join('')}</div>` : ''}
-    ${past.length ? `<div class="section-title">Past</div><div class="list">${past.map(row).join('')}</div>` : ''}`;
-  v.querySelectorAll('button.row').forEach(r => r.onclick = () => { state.chat = r.dataset.id; render(); });
+      <div class="list">${waiting.map(waitCard).join('')}</div>` : ''}
+    ${past.length ? `<div class="section-title">Past</div><div class="list">${past.map(card).join('')}</div>` : ''}`;
+  const all = [...active, ...waiting, ...past];
+  v.onclick = (e) => {
+    const cal = e.target.closest('[data-ics]');
+    if (cal) return addToCalendar(mailCard(all.find(m => m.id === cal.closest('[data-id]')?.dataset.id)?.post || {}));
+    if (e.target.closest('a, button')) return; // the card's own links and buttons
+    const c = e.target.closest('.plan-card[data-id]');
+    if (c) { state.chat = c.dataset.id; render(); }
+  };
+  v.onkeydown = (e) => {
+    const c = e.target.closest?.('.plan-card[data-id]');
+    if (c && e.target === c && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); state.chat = c.dataset.id; render(); }
+  };
   v.querySelectorAll('[data-leave-ch]').forEach(b => b.onclick = async () => {
     if (!confirm('Leave this waitlist?')) return;
     try { await sendOn(b.dataset.leaveCh, { type: 'unjoin' }); toast('Left the waitlist'); render(); }
@@ -1172,9 +1465,9 @@ async function viewChat(v, id) {
     <div class="chat">
       <div class="chat-head">
         <button class="back" aria-label="Back">←</button>
-        ${avatar(m.other)}
+        ${personAvatar(m.other)}
         <div class="grow" style="flex:1;min-width:0">
-          ${m.other ? `<button type="button" class="link" id="rename" title="Change the nickname only you see">${esc(name)} ✎</button>` : `<b>${esc(name)}</b>`}
+          <b>${esc(name)}</b>
           <div class="sub" style="color:var(--muted);font-size:.85rem">${esc(m.title)}${m.when_text ? ` · <button type="button" class="link cal-link" id="addCal" title="Add to your calendar">${esc(whenLabel(m.when_text))}</button>` : ''}${whereHtml(m) ? ' · ' + whereHtml(m) : ''}</div>
         </div>
         ${m.role === 'host' && m.status === 'accepted' ? `<button class="btn small" id="happened">It happened</button>` : ''}
@@ -1197,7 +1490,6 @@ async function viewChat(v, id) {
         </form>` : ''}
     </div>`;
   v.querySelector('.back').onclick = () => { state.chat = null; render(); };
-  v.querySelector('#rename')?.addEventListener('click', () => openContactSheet(m.other, () => render()));
   v.querySelector('#addCal')?.addEventListener('click', () => addToCalendar({ id: m.id, title: m.title, location: m.location, location_name: m.location_name, online: m.online, when_text: m.when_text }));
 
   const msgsEl = v.querySelector('#msgs');
@@ -1577,11 +1869,27 @@ async function viewPost(v) {
     viewers: vault.data.posts?.[h.post.pid]?.sharedWith.length || 0, audience: vault.data.posts?.[h.post.pid]?.audience,
   }));
   const events = mine;
-  const statusPill = (t) => ({
-    open: `<span class="pill">${t.pending ? `${t.pending} interested` : 'Looking'}</span>`,
-    full: `<span class="pill go">It's on</span>`,
-    past: `<span class="pill">Happened ✓</span>`,
-  }[t.status]);
+  // Full cards, like Discover's: labelled with where the post stands, and who can see it and who's in at the bottom.
+  const label = (t) => ({
+    open: t.pending ? ['warn', `${t.pending} interested`] : ['done', 'Looking'],
+    full: ['in', "It's on"],
+    past: ['done', 'Happened'],
+  }[t.status] || ['done', t.status]);
+  const who = (t) => `${avatar(state.me.guid)}
+    <div><b>${t.visibility === 'public' ? 'Public' : t.viewers ? `${t.viewers} can see` : 'Only you'} · ${t.max_attendees == null ? `${t.matched} matched · no limit` : `${t.matched}/${t.max_attendees} matched`}</b>
+      ${t.waitlisted || t.awaiting ? `<small>${[t.waitlisted && `${t.waitlisted} waitlisted`, t.awaiting && `${t.awaiting} to re-confirm`].filter(Boolean).join(' · ')}</small>` : ''}</div>`;
+  const card = (t) => {
+    const [cls, text] = label(t);
+    return `
+        <div class="card flat post-card" data-id="${t.id}">
+          <span class="label ${cls}">${esc(text)}</span>
+          ${eventCard(mailCard(t), { who: who(t), mine: true })}
+          ${t.status !== 'past' ? `<div class="card-actions">
+            <button class="btn ghost small" data-edit="${t.id}">Edit</button>
+            <button class="btn danger small" data-del="${t.id}">Remove</button>
+          </div>` : ''}
+        </div>`;
+  };
   v.innerHTML = `
     <div class="section-title">Post something</div>
     <div class="idea" id="postIdea">
@@ -1597,17 +1905,7 @@ async function viewPost(v) {
     </form>
     <div class="section-title">Your posts</div>
     <div class="list">
-      ${events.length ? events.map(t => `
-        <div class="row">
-          <div class="grow">
-            <div class="title">${esc(t.title)}</div>
-            ${t.tags.length ? `<div class="sub">${t.tags.map(x => '#' + esc(x)).join(' ')}</div>` : ''}
-            <div class="sub">${t.visibility === 'public' ? 'Public' : `${t.viewers ? `${t.viewers} can see` : 'Only you'}`} · ${t.max_attendees == null ? `${t.matched} matched · no limit` : `${t.matched}/${t.max_attendees} matched`}${t.waitlisted ? ` · ${t.waitlisted} waitlisted` : ''}${t.awaiting ? ` · ${t.awaiting} to re-confirm` : ''}${t.when_text ? ' · ' + esc(whenLabel(t.when_text)) : ''}</div>
-          </div>
-          ${statusPill(t)}
-          ${t.status !== 'past' ? `<button class="btn ghost small" data-edit="${t.id}" aria-label="Edit">✎</button>
-            <button class="btn danger small" data-del="${t.id}" aria-label="Remove">✕</button>` : ''}
-        </div>`).join('') : `<p style="color:var(--muted)">Nothing yet. What would you like to host?</p>`}
+      ${events.length ? events.map(card).join('') : `<p style="color:var(--muted)">Nothing yet. What would you like to host?</p>`}
     </div>`;
   rotatePostIdeas(v.querySelector('#postIdea'));
   v.querySelectorAll('.tag-editor').forEach(el => mountTagEditor(el));
@@ -1622,6 +1920,7 @@ async function viewPost(v) {
     catch (err) { toast(err.message); }
   };
   v.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openPostSheet(events.find(t => String(t.id) === b.dataset.edit)));
+  v.querySelectorAll('.post-card [data-ics]').forEach(b => b.onclick = () => addToCalendar(events.find(t => String(t.id) === b.dataset.ics)));
   v.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
     if (!confirm('Remove this post?')) return;
     try { await setPostStatus(b.dataset.del.slice(2), 'cancelled'); } catch (err) { return toast(err.message); }
@@ -1691,7 +1990,11 @@ async function viewProfile(v) {
 
   v.innerHTML = `
     <div class="me-head">${avatar(me.guid)}
-      <div class="grow"><h2>You</h2></div>
+      <div class="grow">
+        <label class="sr-only" for="myName">Your name</label>
+        <input id="myName" class="name-input" maxlength="60" placeholder="Your name" value="${esc(myName())}" autocomplete="nickname">
+        <p class="note">This is the name you'll use to introduce yourself.</p>
+      </div>
     </div>
     <div class="stats">
       <div class="stat"><b>${st.hosted ?? 0}</b><span>events hosted</span></div>
@@ -1721,7 +2024,7 @@ async function viewProfile(v) {
       can use it until you delete it; deleting it doesn't disconnect anyone.</p>
     ${invites.length ? `<div class="list">${invites.map((inv, i) => `
       <div class="row">
-        <div class="grow"><div class="title">${inviteOf(inv.id)?.name ? `As “${esc(inviteOf(inv.id).name)}”` : `Invitation ${invites.length - i}`}</div>
+        <div class="grow"><div class="title">${inviteOf(inv.id)?.name ? `${inviteOf(inv.id).direct ? 'Sent to a host as' : 'As'} “${esc(inviteOf(inv.id).name)}”` : `Invitation ${invites.length - i}`}</div>
           <div class="sub">Created ${fmt(inv.created_at)} · ${inv.uses === 1 ? '1 person' : `${inv.uses} people`} connected</div></div>
         <button class="btn ghost small" data-share-invite="${inv.id}">Share</button>
         <button class="btn danger small" data-del-invite="${inv.id}">Delete</button>
@@ -1738,7 +2041,7 @@ async function viewProfile(v) {
         <button class="row" data-contact="${esc(c.guid)}">${avatar(c.guid)}
           <div class="grow"><div class="title">${esc(c.nickname || 'Unnamed contact')}</div>
             <div class="sub">${(c.tags || []).map(t => '#' + esc(t)).join(' ')}${c.tags?.length ? ' · ' : ''}${c.together || 0} event${c.together === 1 ? '' : 's'} together</div></div>
-          <span class="pill">✎</span></button>`).join('')
+          </button>`).join('')
         : `<p style="color:var(--muted)">${contacts.length ? 'No contacts with those tags.' : "Once you match with someone, they'll show up here for you to name and tag."}</p>`}
     </div>
 
@@ -1762,6 +2065,11 @@ async function viewProfile(v) {
     <button class="btn danger" id="logout" style="margin-top:24px">${isDemo() ? 'Start over' : 'Sign out'}</button>`;
 
   v.querySelector('#newInvite').addEventListener('click', createInvite);
+  v.querySelector('#myName').addEventListener('change', async (e) => {
+    const name = e.target.value.trim().slice(0, 60);
+    try { await vault.update(api, (d) => { d.profile = { ...d.profile, name }; }); toast('Saved'); }
+    catch (err) { toast(err.message); }
+  });
   v.querySelectorAll('[data-share-invite]').forEach(b => b.onclick = () => {
     const inv = inviteOf(b.dataset.shareInvite);
     if (inv?.token && inv.key) shareInvite(inv);
@@ -1806,10 +2114,49 @@ async function viewProfile(v) {
   v.querySelector('#logout').onclick = signOut;
 }
 
+// Refresh the view on screen by scrolling up: Discover, Confirm, and Plans each hand keepFresh their element and a
+// refresh. It runs when someone scrolls back up to the top of the page, or pulls down (or scrolls up with a wheel)
+// while already there, and the view gives a little bump to show it. At most once every couple of seconds, and never
+// while a sheet or overlay is open or a text field has focus. A new view's keepFresh replaces the last one's;
+// render() clears it.
+const FRESH_GAP = 2000, PULL = 60; // ms between refreshes; px to pull down at the top
+let fresh = null;
+function keepFresh(el, refresh) {
+  if (!document.body.contains(el)) return; // a view left before it finished loading doesn't count
+  fresh = { el, refresh, last: fresh?.el === el ? fresh.last : 0 }; // the same view redrawing itself keeps its last refresh
+}
+function stopFresh() { fresh = null; }
+function pullFresh() {
+  const f = fresh;
+  if (!f || Date.now() - f.last < FRESH_GAP) return;
+  if (!document.body.contains(f.el)) return stopFresh();
+  if (document.querySelector('.overlay, .sheet') || document.activeElement?.matches('input, textarea, select')) return;
+  f.last = Date.now();
+  const view = document.getElementById('view');
+  view?.classList.remove('bump'); void view?.offsetWidth; view?.classList.add('bump'); // restart the animation
+  Promise.resolve().then(f.refresh).catch(err => console.warn('refresh', err));
+}
+const atTop = () => window.scrollY <= 0;
+// Scrolled back up to the top.
+let lastY = window.scrollY;
+window.addEventListener('scroll', () => { if (lastY > 0 && atTop()) pullFresh(); lastY = window.scrollY; }, { passive: true });
+// A wheel or trackpad scrolling up while already at the top.
+window.addEventListener('wheel', (e) => { if (e.deltaY < 0 && atTop()) pullFresh(); }, { passive: true });
+// A finger pulling down while already at the top. Not on the deck, where dragging a card moves the card.
+let pullY = null;
+window.addEventListener('touchstart', (e) => {
+  pullY = atTop() && e.touches.length === 1 && !e.target.closest('.deck') ? e.touches[0].clientY : null;
+}, { passive: true });
+window.addEventListener('touchmove', (e) => {
+  if (pullY !== null && atTop() && e.touches[0].clientY - pullY > PULL) { pullY = null; pullFresh(); }
+}, { passive: true });
+window.addEventListener('touchend', () => { pullY = null; }, { passive: true });
+
 // Keep badges fresh without re-rendering the current view.
 setInterval(async () => {
   if (!state.me || !hasKeys()) return;
   await refreshMe();
+  if (state.me?.counts?.confirm) await api('/api/connection-requests').then(confirmDirectInvites).catch(() => {});
   await loadMail().catch(() => {});
   if (state.me) shellRefreshBadges();
 }, 20000);

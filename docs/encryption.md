@@ -30,7 +30,7 @@ What we protect against:
 | Adversary | What we want |
 |---|---|
 | A curious or compromised **server operator**, or someone who steals the database | Can't read private posts, requests to join, answers, matches, waitlists, attendance, or chats. Can't tell who sent any message. Can't forge or change a post. |
-| **Other users** | See only what's meant for them. A host doesn't learn who asked to join until they say yes. Strangers can't link one person's requests together. |
+| **Other users** | See only what's meant for them. A host doesn't learn who asked to join until they say yes, unless the person asking is already one of their contacts. Strangers can't link one person's requests together. |
 | **Push services** (Google, Apple, Mozilla, Microsoft) | Can't read notifications. |
 | **The network** | Nothing readable in transit (HTTPS, plus everything private is end-to-end encrypted anyway). |
 
@@ -164,7 +164,9 @@ flowchart LR
 - **When the sender should be known** (sharing a private post), the inner message carries their public keys and a
   signature over *the recipient's chat key plus the message*. Including the recipient's key means the recipient can't
   forward the signed message to someone else and have it look like it was meant for them.
-- **A request to join carries no sender at all**: that's what makes it anonymous.
+- **A request to join a stranger's post carries no sender at all**: that's what makes it anonymous. A request to a
+  contact's post (one they shared, or a public post signed with a contact's key) carries the sender, so the host sees
+  who it is; the host's browser names them only if they're in its contacts too and the keys match the saved ones.
 - **The recipient's inbox ID is the associated data**, so the server can't move an envelope from one inbox to another.
 
 Why HPKE: it's a standard (RFC 9180) for exactly this job, "encrypt to a public key", with a security proof and test
@@ -263,11 +265,11 @@ sequenceDiagram
   participant A as Attendee's browser
   participant S as Server
   participant H as Host's browser
-  A->>A: make join {pid, note}, seal it to the host's chat key (no sender)
+  A->>A: make join {pid, note}, seal it to the host's chat key (no sender, unless the host is a contact)
   A->>A: save the channel secret in the vault first
   A->>S: join → host's main inbox
   H->>S: read main inbox
-  H->>H: open: an anonymous request, plus the channel secret
+  H->>H: open: an anonymous request (or a contact's, signed), plus the channel secret
   H->>S: answer "accepted" → channel inbox
   A->>S: read both channel inboxes
   A->>S: hello {GUID, signature} → channel
@@ -277,7 +279,7 @@ sequenceDiagram
   H->>S: chat → channel (+ poke to the attendee's main inbox)
 ```
 
-- **The host never learns who asked unless they say yes.** Declined and pending requests stay anonymous for good.
+- **The host never learns who asked unless they say yes**, or the person asking is already a contact. Declined and pending requests from strangers stay anonymous for good.
 - **The `hello` signs the claimed GUID and a hash of the channel secret**, so it can't be replayed on another channel,
   and it's checked against the keys pinned for that GUID.
 - **Everything after the join** (answers, the waitlist, `update` and `reconfirm` after an edit, `leave`, `happened`,

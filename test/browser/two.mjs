@@ -23,7 +23,7 @@ r.card = await B.ev(`document.querySelector('.card.top .who').innerText`);
 await B.ev(`document.querySelector('.round.yes').click()`); await wait(2500);
 r.asked = await B.ev(`document.getElementById('toast').textContent`);
 
-// Host: Confirm shows an anonymous request; yes → It's on! → chat.
+// Host: Confirm shows the request, named (the guest is a contact); yes → It's on! → chat.
 await A.tab('discover'); await A.tab('confirm');
 // The demo account's own seeded requests come first: say no to them until ours is on top.
 for (let i = 0; i < 10; i++) {
@@ -42,8 +42,8 @@ r.hostChat = (await A.text()).slice(0, 160);
 // Guest: Plans shows the match, hosted by Hosty; open the chat and say hi.
 await B.tab('plans');
 await B.until(`document.getElementById('view').innerText.includes('Two-browser picnic')`);
-r.guestPlans = (await B.text()).slice(0, 160);
-await B.ev(`document.querySelector('button.row[data-id^="m:"]').click()`); await wait(2000);
+r.guestPlans = (await B.text()).slice(0, 400);
+await B.ev(`document.querySelector('.plan-card[data-id^="m:"] h2').click()`); await wait(2000);
 await B.ev(`document.getElementById('chatBody').value = 'hi from the guest'; document.getElementById('composer').requestSubmit()`); await wait(2000);
 
 // Host's open chat picks it up within a poll or two, now with the guest's name (from their hello).
@@ -51,22 +51,22 @@ await A.until(`document.getElementById('msgs')?.innerText.includes('hi from the 
 await A.ev(`document.getElementById('chatBody').value = 'hi back'; document.getElementById('composer').requestSubmit()`);
 await B.until(`document.getElementById('msgs')?.innerText.includes('hi back')`, 20000);
 await A.ev(`document.querySelector('.back').click()`); await wait(1500);
-r.hostPlans = (await A.text()).slice(0, 200);
+r.hostPlans = (await A.text()).slice(0, 400);
 r.guestChat = await B.ev(`document.getElementById('msgs').innerText.replace(/\\s+/g, ' ')`);
 // Guest can't make it: the host's post opens up again.
 await B.ev(`window.confirm = () => true; document.getElementById('leave').click()`); await wait(2500);
 await A.tab('post');
-r.hostPostAfterLeave = (await A.ev(`[...document.querySelectorAll('#view .list .row')].find(x => x.innerText.includes('Two-browser picnic'))?.innerText.replace(/\\s+/g, ' ')`));
+r.hostPostAfterLeave = (await A.ev(`[...document.querySelectorAll('#view .post-card')].find(x => x.innerText.includes('Two-browser picnic'))?.innerText.replace(/\\s+/g, ' ')`));
 console.log(JSON.stringify(r, null, 2));
 assert.match(r.posted, /^Posted! 1 person/);
 assert.equal(r.card, 'Hosty', 'the card names the host from contacts');
 assert.match(r.asked, /^Asked to join/);
 assert.equal(r.badge, '1');
-assert.match(r.request, /Requests are anonymous/);
-assert.match(r.overlay, /^It's on!/);
-assert.match(r.guestPlans, /Two-browser picnic Hosted by Hosty/);
-assert.match(r.hostPlans, /Two-browser picnic Guesty is going · hi back/, 'the hello revealed the guest');
+assert.match(r.request, /Guesty One of your contacts/, 'a contact who asks is named');
+assert.match(r.overlay, /^It's on! You and Guesty/);
+assert.match(r.guestPlans, /Two-browser picnic[\s\S]*Hosted by Hosty/);
+assert.match(r.hostPlans, /Two-browser picnic[\s\S]*Guesty is going hi back/);
 assert.match(r.guestChat, /hi from the guest hi back/);
-assert.match(r.hostPostAfterLeave, /0\/1 matched Looking/, 'the post opens up again when the guest leaves');
+assert.match(r.hostPostAfterLeave, /^LOOKING .*0\/1 matched/, 'the post opens up again when the guest leaves');
 A.close(); B.close();
 finish('browser two');

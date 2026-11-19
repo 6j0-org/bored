@@ -92,7 +92,7 @@ export async function browser(name, path = '/?start') {
   const tab = async (id) => { await ev(`document.querySelector('nav.tabs button[data-tab=${id}]').click()`); await wait(1200); };
   const text = () => ev(`document.getElementById('view').innerText.replace(/\\s+/g, ' ')`);
   const reload = async () => { await send('Page.reload'); await ready(); await wait(1500); };
-  return { name, ev, until, tab, text, reload, close: () => { ws.close(); proc.kill(); } };
+  return { name, send, ev, until, tab, text, reload, close: () => { ws.close(); proc.kill(); } };
 }
 
 // Prints the page errors and exits: 1 if there were any.

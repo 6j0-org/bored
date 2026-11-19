@@ -10,9 +10,9 @@ await A.ev(`(() => { const f = document.getElementById('newEvent'); f.title.valu
   f.querySelector('input[name=visibility][value=public]').click(); f.requestSubmit(); })()`);
 await wait(3000);
 r.posted = await A.ev(`document.getElementById('toast').textContent`);
-r.hostRow = await A.ev(`[...document.querySelectorAll('#view .list .row')].find(x => x.innerText.includes('${TITLE}'))?.innerText.replace(/\\s+/g, ' ')`);
+r.hostRow = await A.ev(`[...document.querySelectorAll('#view .post-card')].find(x => x.innerText.includes('${TITLE}'))?.innerText.replace(/\\s+/g, ' ')`);
 // Editing: the visibility stays public.
-await A.ev(`[...document.querySelectorAll('#view .list .row')].find(x => x.innerText.includes('${TITLE}')).querySelector('[data-edit]').click()`); await wait(800);
+await A.ev(`[...document.querySelectorAll('#view .post-card')].find(x => x.innerText.includes('${TITLE}')).querySelector('[data-edit]').click()`); await wait(800);
 r.editLock = await A.ev(`(() => { const s = document.querySelector('.sheet'); return [s.querySelector('input[name=visibility][value=private]').disabled, s.querySelector('.note')?.textContent.trim()]; })()`);
 await A.ev(`document.querySelector('.sheet').remove()`);
 
@@ -48,7 +48,7 @@ assert.match(r.hostRow, /Public · 0\/3 matched/);
 assert.equal(r.editLock[0], true, 'a public post stays public');
 assert.match(r.strangerCard, new RegExp(TITLE));
 assert.match(r.asked, /^Asked to join/);
-assert.match(r.request, /Requests are anonymous/);
-assert.match(r.strangerPlans, new RegExp(`${TITLE} Hosted by`));
+assert.match(r.request, /Someone you don't know yet/);
+assert.match(r.strangerPlans, new RegExp(`${TITLE}[\\s\\S]*Hosted by`));
 A.close(); B.close();
 finish('browser public');

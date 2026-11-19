@@ -18,18 +18,18 @@ await evaluate(`(() => {
 })()`);
 await wait(3000);
 out.toast = await evaluate(`document.getElementById('toast').textContent`);
-out.listed = await evaluate(`[...document.querySelectorAll('#view .list .title')].map(e => e.textContent).includes('Browser test walk')`);
+out.listed = await evaluate(`[...document.querySelectorAll('#view .post-card h2')].map(e => e.textContent).includes('Browser test walk')`);
 // Edit it: the public option is locked.
 await evaluate(`[...document.querySelectorAll('[data-edit]')].find(b => b.dataset.edit.startsWith('m:')).click()`);
 await wait(500);
 out.publicLocked = await evaluate(`document.querySelector('#sheetForm input[name=visibility][value=public]').disabled`);
 await evaluate(`document.querySelector('#sheetForm input[name=title]').value = 'Browser test walk 2'; document.querySelector('#sheetForm').requestSubmit()`);
 await wait(3000);
-out.edited = await evaluate(`[...document.querySelectorAll('#view .list .title')].map(e => e.textContent).includes('Browser test walk 2')`);
+out.edited = await evaluate(`[...document.querySelectorAll('#view .post-card h2')].map(e => e.textContent).includes('Browser test walk 2')`);
 // Reload: the post is still there (from the vault).
 await B.reload();
 await tab('post');
-out.afterReload = await evaluate(`[...document.querySelectorAll('#view .list .title')].map(e => e.textContent).includes('Browser test walk 2')`);
+out.afterReload = await evaluate(`[...document.querySelectorAll('#view .post-card h2')].map(e => e.textContent).includes('Browser test walk 2')`);
 console.log(JSON.stringify(out, null, 2));
 assert.match(out.discover, /I'M IN/, 'Discover shows a card');
 assert.match(out.confirm, /Wants to join: Sunrise hike/, 'Confirm shows the seeded request');

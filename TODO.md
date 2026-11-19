@@ -187,7 +187,6 @@ Must-haves before GA:
 5. Account deletion. I didn't find a delete-account route, and GDPR and similar laws expect one.
 6. Rate limiting on sign-up and sign-in, to stop bots. Sending mail and publishing public posts are limited now (in memory).
 7. Monitoring. An uptime check, error logs, and disk-space alerts.
-8. Tests and CI. There's no test suite in the repo. My demo test script lives only in my scratchpad. A small API test run on every push would catch regressions.
 
 From TODO.md: the P0 items are IP addresses, HTTPS, the server delivering the code that holds the keys, and peer keys not being verified. For a 100-user GA you don't need to solve all of them, but the privacy policy should be honest about them. The cheap ones are HTTPS and proxy log settings.
 

@@ -17,6 +17,20 @@ npm ci         # install the exact versions in package-lock.json
 npm start      # http://localhost:3000
 ```
 
+### Tests
+
+```sh
+npm test               # all of them
+npm run test:unit      # HPKE against RFC 9180's test vectors, and the request rules in posts.js; no server
+npm run test:server    # real accounts in Node against a demo-mode server: mail, public posts, and demo seeding
+npm run test:browser   # the real UI in two headless Chromium profiles: post, join, match, chat, and leave
+```
+
+The runner (`test/run.mjs`) starts its own `DEMO=1` server on a free port, so nothing touches `data.sqlite`. The
+browser tests need Chrome or Chromium (set `CHROME_BIN` if it isn't found); without one they're skipped, except in CI
+(`TEST_BROWSER=1`), where that's a failure. `TEST_VERBOSE=1` prints every test's output, not just the failures'.
+CI runs them on every push and merge request, before building the image.
+
 ### Demo mode
 
 `DEMO=1 npm start` runs a throwaway demo with no sign-in. Each browser automatically gets its own account,
@@ -200,6 +214,7 @@ See `TODO.md` for the full list of open security and privacy issues.
   its git URL, so `.npmrc` sets `allow-git=root`); `public/libphonenumber.js` loads its phone number data in the browser
 - `public/fonts/`: bundled National Park font, used for all text (SIL OFL 1.1, license alongside). The app loads nothing from outside its own server, except OpenStreetMap tiles while the location picker is open. Suggested place names come from OpenStreetMap's Nominatim, asked by the server (`/api/places/reverse`).
 - `demo.js`: demo mode (`DEMO=1`): demo accounts with keys, their signed public posts, and the bot that answers them
+- `test/`: the tests (see [Tests](#tests)); `test/lib.mjs` has the shared helpers
 - `docs/encryption.md`: how the encryption and privacy system works, and why
 - `TODO.md`: open security and privacy issues, by priority
 

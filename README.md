@@ -77,9 +77,11 @@ APPS=bored=http://127.0.0.1:3000 ORIGIN=http://localhost:4000 npm start
 AUTH_MODE=6j0 ID_ORIGIN=http://localhost:4000 ORIGIN=http://127.0.0.1:3000 npm start   # open http://127.0.0.1:3000
 ```
 
-**Database migrations** run automatically on startup (`MIGRATIONS` in `db.js`). The `CREATE TABLE`s are the schema
-as it was at launch; every change since is a numbered migration, tracked in SQLite's `PRAGMA user_version`. To change
-the schema, append a migration (never edit or reorder old ones). Back up `data.sqlite*` before deploying one.
+**Database migrations** run automatically on startup (`MIGRATIONS` in `db.js`, none yet). The `CREATE TABLE`s are
+the schema as of the first real users; every change after that is a numbered migration, tracked in SQLite's
+`PRAGMA user_version`. To change the schema, append a migration (never edit or reorder old ones). Back up
+`data.sqlite*` before deploying one. A database from before the schema was reset (November 2026) can't be upgraded:
+the server says so on startup, and you delete it to start fresh.
 
 ## How it works
 
@@ -101,6 +103,7 @@ signed-out guests. A post stays public or private once it's posted.
 
 The server is a mailbox. It stores signed public posts, and encrypted mail it can't read and can't tell the sender
 of. Everything else happens in the browser: filtering Discover, who's in, the waitlist, and contacts.
+[`docs/encryption.md`](docs/encryption.md) explains the whole design, with diagrams and the reasons for each choice.
 
 - **Accounts** are a server-assigned GUID plus one or more passkeys. The server stores each passkey's public key,
   never a name, email, or password. Lose every passkey and the account is gone: the app nudges people to add a
@@ -129,7 +132,8 @@ of. Everything else happens in the browser: filtering Discover, who's in, the wa
     read without cookies.
   - Not readable: private posts and who they're shared with, who asked to join anything, answers, matches,
     waitlists, attendance, and chats.
-  - Unchanged: accounts, passkeys, sessions, push subscriptions, the encrypted vault, and invitation connections.
+  - Also stored: accounts, passkeys, sessions, push subscriptions, each account's encrypted vault, and invitation
+    connections (who connected with whom, in plaintext).
 - **Names are private.** You see only the nicknames *you* gave people. Everyone's avatar is the
   [Jdenticon](https://jdenticon.com) of their GUID (for a public post's host you don't know, of their signing key),
   which follows a person across their posts.
@@ -150,9 +154,6 @@ of. Everything else happens in the browser: filtering Discover, who's in, the wa
   The text is always "New activity": the server doesn't know what the mail says.
 - **Your location for the distance filter** stays in your browser (`localStorage`). Discover filters right there,
   so the server never learns it.
-- **Before encryption:** plans, chats, and posts from before the move to mail stay readable in a read-only archive
-  (Plans and Post). Old chats were end-to-end encrypted too (ECDH → HKDF per match → AES-GCM), but the server knew
-  who matched with whom. Old posts can be posted again, which removes the old copy.
 - `public/secure.js` holds the account's keys and the vault; `webauthn.js` verifies passkeys on the server with
   `node:crypto` only.
 - Pages are served with a strict Content-Security-Policy (same-origin scripts only) to keep injected code away from keys.
@@ -176,20 +177,20 @@ See `TODO.md` for the full list of open security and privacy issues.
 
 ## Files
 
-- `server.js`: HTTP server + JSON API (passkey auth, mail, public posts, invitations, push, and the read-only archive)
+- `server.js`: HTTP server + JSON API (passkey auth, mail, public posts, invitations, and push)
 - `webauthn.js`: passkey registration/sign-in verification (no dependencies)
 - `idtoken.js`: verifies sign-in tokens from a 6j0.org identity server (`AUTH_MODE=6j0`)
-- `db.js`: SQLite schema and migrations, tag helpers
+- `db.js`: SQLite schema and migrations
 - `public/about.html`, `public/landing.js`, `public/about.js`: the introduction page, shown at `/` on a first visit, with a
   swipeable deck of example posts
 - `public/examples.js`: the example posts, shared by that deck and the demo (`demo.js`)
 - `public/app.js`: single-page front-end (vanilla JS, swipe deck with pointer/touch/keyboard)
-- `public/secure.js`: passkeys + PRF, 6j0.org identity handoff, encrypted vault, key storage, the old E2E chat crypto
+- `public/secure.js`: passkeys + PRF, 6j0.org identity handoff, encrypted vault, and key storage
 - `public/hpke.js`: HPKE (RFC 9180) on WebCrypto, one cipher suite
 - `public/envelope.js`: the mail formats: signatures, signed records, sealed envelopes, and channels
 - `public/posts.js`: the rules for posts, requests, matches, and chat as messages, and `derive()`, which replays them
 - `public/mail.js`: the mail loop (read, check, replay) and everything the app sends
-- `public/postfields.js`: checks a post's fields in the browser, with the server's rules
+- `public/postfields.js`: checks a post's fields, in the browser and (for public posts) on the server
 - `public/location.js`: "lat,lon" locations, links to the viewer's maps app, and a small OpenStreetMap pin picker
 - `public/theme.js`: the automatic / light / dark theme switch, applied before the page draws
 - `public/board.webp`: the wooden board behind the Bored? title
@@ -199,6 +200,7 @@ See `TODO.md` for the full list of open security and privacy issues.
   its git URL, so `.npmrc` sets `allow-git=root`); `public/libphonenumber.js` loads its phone number data in the browser
 - `public/fonts/`: bundled National Park font, used for all text (SIL OFL 1.1, license alongside). The app loads nothing from outside its own server, except OpenStreetMap tiles while the location picker is open. Suggested place names come from OpenStreetMap's Nominatim, asked by the server (`/api/places/reverse`).
 - `demo.js`: demo mode (`DEMO=1`): demo accounts with keys, their signed public posts, and the bot that answers them
+- `docs/encryption.md`: how the encryption and privacy system works, and why
 - `TODO.md`: open security and privacy issues, by priority
 
 ## License

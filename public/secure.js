@@ -1,13 +1,11 @@
-// Bored? client-side security: passkeys, the encrypted vault, and end-to-end encrypted chat.
+// Bored? client-side security: passkeys, the encrypted vault, and the account's keys.
 //
 // Keys
 // - Each passkey yields a secret via the WebAuthn PRF extension (same passkey + same salt → same 32 bytes).
 //   HKDF turns it into a key-encryption key that wraps the account's random 256-bit *vault key*.
 //   The server stores one wrapped copy per passkey and never sees the PRF output or the vault key.
-// - The vault key encrypts the *vault* (nickname + tags for each contact, and who your private posts are shared with)
-//   and your ECDH P-256 *chat private key*. Your chat public key is stored in the clear so matches can reach you.
-// - Chat: ECDH(my private, their public) → HKDF(salt = match id) → AES-256-GCM key per match.
-//   (Prototype: static keys, so no forward secrecy.)
+// - The vault key encrypts the *vault* (contacts, your posts, and your requests to join; see below) and your ECDH
+//   P-256 *chat private key*. Your chat public key is stored in the clear so people can seal mail to you.
 // - With a 6j0.org identity (server AUTH_MODE=6j0) there are no local passkeys: the identity server hands the
 //   page this app's 32-byte *app key* (see the handoff below), and HKDF turns that into the key-encryption key
 //   instead. Everything from the vault key down is the same.
@@ -135,7 +133,7 @@ export async function loadKeys(guid) {
   return Boolean(keys);
 }
 export async function clearKeys() {
-  keys = null; chatKeys.clear(); env.clearChannelCache();
+  keys = null; env.clearChannelCache();
   try { await idbDo('readwrite', s => s.delete('session')); } catch {}
 }
 
@@ -308,14 +306,12 @@ export async function addPasskey(api, nextStep) {
 //     time they're used, so the server can't swap them later)
 //   posts, requests, passed: my posts, my requests to join (with their channel secrets), and posts I passed on (see
 //     public/mail.js)
-//   audiences: { [eventId]: { groups: [tag], contacts: [guid] } },  (who each of my posts from before encryption was
-//     shared with, for posting one again)
 //   prefs: { distanceUnit: 'km' | 'mi' },  (settings from Profile)
 //   invites: { [inviteId]: { token, key, name } },  (my invitation links, so I can share them again; the server has
 //     only hashes. name is the nickname I suggested; key decrypts the nicknames people suggest when they ask)
 //   pendingNames: { [iconHash]: nickname },  (nicknames for inviters I've asked to connect with, applied once they confirm)
 //   inbox: token }  (my main inbox's read token; its SHA-256 is public, see "mail" below)
-const emptyVault = () => ({ v: 1, contacts: {}, audiences: {} });
+const emptyVault = () => ({ v: 1, contacts: {} });
 
 export const vault = {
   data: emptyVault(),
@@ -326,7 +322,7 @@ export const vault = {
   async load(api) {
     if (!this._sealed) { const r = await api('/api/vault'); this._sealed = r.data; this.version = r.version; }
     this.data = this._sealed ? JSON.parse(await openText(keys.vaultKey, this._sealed)) : emptyVault();
-    this.data.contacts ||= {}; this.data.audiences ||= {};
+    this.data.contacts ||= {};
     this._sealed = null; this.loaded = true;
     return this.data;
   },
@@ -361,28 +357,6 @@ export async function openForInvite(k, sealedStr) {
 }
 // SHA-1 of a GUID in hex: the server's `icon` for someone (see iconHash in server.js), so a GUID can be matched to an icon.
 export const sha1Hex = async (s) => [...new Uint8Array(await subtle.digest('SHA-1', te.encode(s)))].map(b => b.toString(16).padStart(2, '0')).join('');
-
-// ---------- E2E chat ----------
-const chatKeys = new Map(); // matchId -> AES key
-
-async function chatKeyFor(matchId, peerJwk) {
-  if (chatKeys.has(matchId)) return chatKeys.get(matchId);
-  if (!peerJwk) throw new Error("This person's chat key is missing, so messages can't be encrypted.");
-  const peer = await subtle.importKey('jwk', peerJwk, { name: 'ECDH', namedCurve: 'P-256' }, false, []);
-  const shared = await subtle.deriveBits({ name: 'ECDH', public: peer }, keys.chatKey, 256);
-  const key = await hkdfKey(shared, `match:${matchId}`, 'bored-chat-v1');
-  chatKeys.set(matchId, key);
-  return key;
-}
-
-export async function encryptMessage(matchId, peerJwk, text) {
-  return seal(await chatKeyFor(matchId, peerJwk), text);
-}
-
-export async function decryptMessage(matchId, peerJwk, sealedStr) {
-  try { return await openText(await chatKeyFor(matchId, peerJwk), sealedStr); }
-  catch { return null; } // unreadable (e.g. corrupted); caller shows a placeholder
-}
 
 // ---------- signatures and mail ----------
 // The formats are in public/envelope.js; these bind them to the signed-in account.

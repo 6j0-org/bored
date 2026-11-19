@@ -13,27 +13,19 @@ left**, and about the limits of doing end-to-end encryption in a web app.
 
 ## 1. Social graph and metadata the server still sees
 
-- [x] **The match graph was in plaintext.** Fixed by the move to encrypted mail: requests to join are anonymous
-  sealed envelopes, and everything after them goes over channels to inboxes the server can't link to anyone.
-  Remaining: the old `swipes`, `events`, `event_viewers`, and `messages` rows stay for the read-only archive; a later
-  migration should drop them once people have had time to post again. And `connections` (people who connected
-  through an invitation) is still plaintext: move invitations to mail too.
+- [ ] **P1: Invitation connections are plaintext.** `connections` records who connected with whom through an
+  invitation link, and `connection_requests` who asked whom. That's part of the social graph. Move invitations to
+  mail too: the link could carry the inviter's main inbox and chat key, and connecting would be a sealed exchange.
 - [ ] **P1: Mail metadata.** The server stores, for each message, the inbox it went to, when, and its size. Main
   inboxes belong to known accounts, so it sees when someone gets a share, a request to join, or a poke. It also sees
   which session sends each message as it arrives (for rate limits, in memory only). Consider padding message sizes,
   sending pokes from a delay queue, and sending without a session (e.g. Privacy Pass-style tokens for rate limits).
-- [x] **The "Your circle" stats came from the graph.** Now counted in the browser from the mail (`derive()` in
-  `public/posts.js`), and `/api/ledger` is gone.
 - [ ] **P1: Public posts link to one host.** A public post carries its host's signing key and main inbox, and the
   card's icon is drawn from the signing key, so anyone can tell which public posts are from the same host. A
   per-post signing key and reply inbox would stop that (the host's browser would keep them in the vault), at the cost
   of people having one face.
-- [x] **Public activity counts.** The hosted and attended counts are gone from cards and Confirm; Profile counts
-  your own in the browser.
 - [ ] **P1: Post contents are identifying.** Public posts are visible to anyone, and "Where" is exact coordinates
   (the picker warns about this). Consider rounding coordinates or coarse neighborhoods.
-- [x] **Private posts revealed who they were shared with.** Private posts are now sealed to each person they're
-  shared with; the server sees only that each of those main inboxes got a message.
 - [ ] **P2: The location picker contacts OpenStreetMap.** While it's open, the browser fetches tiles from
   tile.openstreetmap.org, which sees the viewer's IP, the area they look at, and (via Referer) this site's origin.
   Consider self-hosting tiles or proxying them.
@@ -80,9 +72,6 @@ left**, and about the limits of doing end-to-end encryption in a web app.
   side could write a message as the other (the demo bot does exactly that to fill in conversations). Messages carry a
   role, a counter, and a random ID, so the server can't reflect, reorder, or replay them unnoticed, and a dropped one
   shows as a gap; but it can still drop them. Add per-message signatures (or per-side keys from the channel secret).
-- [x] **The server injected system messages.** Edit notices, re-confirms, and the rest are now channel messages
-  from the people involved, and the browser draws the notice. Only the read-only archive still shows the old
-  server-written ones.
 - [ ] **P1: Vault rollback.** The server could serve an old vault version (`/api/vault`) to hide contact changes.
   Keep a signed or MACed monotonic version on the client and detect rollbacks.
 - [ ] **P1: Not enough AES-GCM additional data.** Sealed envelopes are bound to their inbox (the inbox ID is HPKE's
@@ -169,12 +158,11 @@ left**, and about the limits of doing end-to-end encryption in a web app.
 ## 7. Data retention and deletion
 
 - [ ] **P1: No account deletion.** Add "delete my account", which removes the user, passkeys, sessions, vault, public
-  posts, main inbox mail, and the old archive rows. Channel mail can't be tied to the account, so the browser would
+  posts, and main inbox mail. Channel mail can't be tied to the account, so the browser would
   have to delete it (it knows the channels). Decide what happens to the other person's view of shared matches.
 - [ ] **P1: No retention policy.** Ended public posts and all mail are kept forever. Define retention and purge on
   a schedule.
 - [ ] **P2: The waitlist only moves while the host's browser is open,** since only the host can send answers.
-- [x] **Seed data.** `seed.js` is gone; demo accounts exist only in demo mode, in memory.
 
 # Sloppy part
 
@@ -195,13 +183,13 @@ Must-haves before GA:
    - block a person;
    - report a post or person, and a way for you to act on reports (hide posts, ban accounts);
    - basic safety tips ("meet in public").
-4. Terms of service and a privacy policy. The policy can be short because you collect so little, but you do store exact meetup locations and the who-met-whom graph.
+4. Terms of service and a privacy policy. The policy can be short because you collect so little, but public posts have exact meetup locations, and the server sees mail metadata and invitation connections.
 5. Account deletion. I didn't find a delete-account route, and GDPR and similar laws expect one.
-6. Rate limiting on sign-up, posting, swiping, and messaging, to stop spam and bots. Right now only place-name lookups are throttled.
+6. Rate limiting on sign-up and sign-in, to stop bots. Sending mail and publishing public posts are limited now (in memory).
 7. Monitoring. An uptime check, error logs, and disk-space alerts.
 8. Tests and CI. There's no test suite in the repo. My demo test script lives only in my scratchpad. A small API test run on every push would catch regressions.
 
-From TODO.md: the P0 items are the plaintext match graph, message metadata, IP addresses, HTTPS, the server delivering the code that holds the keys, and peer keys not being verified. For a 100-user GA you don't need to solve all of them, but the privacy policy should be honest about them. The cheap ones are HTTPS and proxy log settings.
+From TODO.md: the P0 items are IP addresses, HTTPS, the server delivering the code that holds the keys, and peer keys not being verified. For a 100-user GA you don't need to solve all of them, but the privacy policy should be honest about them. The cheap ones are HTTPS and proxy log settings.
 
 Nice to have: a staging copy of the site, automatic dependency updates, and a status page.
 
@@ -215,6 +203,4 @@ Moderation - default list of words to filter out? Default follow moderators. Fil
 Federation between instances with activity pub?
 
 export data
-
-map picker should have search field. good luck. Nominatum is not great.
 

@@ -4,11 +4,9 @@ import { readFile } from 'node:fs/promises';
 import { createHash, createPublicKey, randomBytes, randomUUID, verify as verifySignature } from 'node:crypto';
 import { newChallenge, takeChallenge, verifyRegistration, verifyAssertion, WebAuthnError } from './webauthn.js';
 import { verifyIdToken, IdTokenError } from './idtoken.js';
-import { composeWhen, whenLabel, occursBetween } from './public/when.js';
-import { parseCost, costLabel } from './public/cost.js';
-import { piiProblems } from './public/pii.js';
+import { postFields } from './public/postfields.js';
 import { vapidPublicKey, validEndpoint, sendPush } from './push.js';
-import { db, DEMO, parseTags, MAX_TAGS, MAX_ATTENDEES_LIMIT } from './db.js';
+import { db, DEMO } from './db.js';
 import { seedDemo, demoNames, demoSeed, demoBot, pruneVisitors } from './demo.js';
 
 const PORT = Number(process.env.PORT || 3000);
@@ -43,13 +41,6 @@ class HttpError extends Error {
 }
 
 const q = (sql) => db.prepare(sql);
-
-function str(v, max, { required = false, field = 'field' } = {}) {
-  const s = typeof v === 'string' ? v.trim() : '';
-  if (required && !s) throw new HttpError(400, `${field} is required`);
-  if (s.length > max) throw new HttpError(400, `${field} is too long (max ${max})`);
-  return s;
-}
 
 function parseCookies(header = '') {
   return Object.fromEntries(header.split(';').map(c => c.trim().split('=')).filter(p => p[0]).map(([k, ...v]) => [k, decodeURIComponent(v.join('='))]));
@@ -110,34 +101,6 @@ function signedBy(jwkJson, kind, text, sig) {
   } catch { return false; }
 }
 
-// A "match" is an accepted/attended yes-swipe. Only the attendee and the event host may see it.
-function loadMatch(swipeId, userId) {
-  const m = q(`
-    SELECT s.*, t.host_id, t.title, t.status AS event_status
-    FROM swipes s JOIN events t ON t.id = s.event_id
-    WHERE s.id = ? AND s.status IN ('accepted', 'attended', 'withdrawn')`).get(swipeId);
-  if (!m || (m.attendee_id !== userId && m.host_id !== userId)) throw new HttpError(404, 'Match not found');
-  return m;
-}
-
-function tagsField(v) {
-  const tags = parseTags(v);
-  if (tags.length > MAX_TAGS) throw new HttpError(400, `Up to ${MAX_TAGS} tags, please`);
-  return tags;
-}
-
-// SQL column yielding an event's tags as a JSON array, in the host's order. Use with alias t for events.
-const TAGS_COL = `(SELECT json_group_array(tag ORDER BY pos) FROM event_tags WHERE event_id = t.id) AS tags`;
-const withTags = (row) => ({ ...row, tags: JSON.parse(row.tags || '[]') });
-
-// Blank/missing → null (no limit); otherwise a whole number 1..MAX_ATTENDEES_LIMIT.
-function maxAttendeesField(v) {
-  if (v === undefined || v === null || String(v).trim() === '') return null;
-  const n = Number(v);
-  if (!Number.isInteger(n) || n < 1 || n > MAX_ATTENDEES_LIMIT)
-    throw new HttpError(400, `Max attendees must be a whole number from 1 to ${MAX_ATTENDEES_LIMIT}, or blank for no limit`);
-  return n;
-}
 
 // Geocoding for the location picker, from OpenStreetMap's Nominatim: coordinates → a friendly place name (reverse),
 // and a typed query → matching places (search). The browser asks us rather than OSM, so it doesn't talk to another
@@ -199,60 +162,7 @@ async function searchPlaces(q, view, lang) {
   return cachePut(searchCache, key, places);
 }
 
-// Location: "lat,lon" with 6 decimals, e.g. "32.719649,-117.220272", or blank.
-function locationField(v) {
-  const s = str(v, 100, { field: 'Location' });
-  if (!s) return s;
-  const m = /^(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)$/.exec(s);
-  const lat = m && Number(m[1]), lon = m && Number(m[2]);
-  if (!m || Math.abs(lat) > 90 || Math.abs(lon) > 180)
-    throw new HttpError(400, 'Where must be "latitude,longitude", e.g. 32.719649,-117.220272, or picked on the map');
-  return `${lat.toFixed(6)},${lon.toFixed(6)}`;
-}
 
-// When: a date and time, optionally repeating; format in public/when.js. Blank = unspecified.
-function whenField(start, repeat) {
-  const s = str(start, 100, { field: 'When' });
-  const rule = str(repeat, 100, { field: 'Repeats' });
-  if (!s) return s;
-  const v = composeWhen(s, rule);
-  if (!v) throw new HttpError(400, rule ? "That repeat doesn't fit the date picked" : 'When must be a date and time');
-  return v;
-}
-
-function costFields(amount, currency) {
-  const c = parseCost(amount, currency);
-  if (c.error) throw new HttpError(400, c.error);
-  return c;
-}
-
-function noPii(field, text, options) {
-  const { error } = piiProblems(field, text, options);
-  if (error) throw new HttpError(400, error);
-}
-
-function eventFields(body) {
-  const cost = costFields(body.cost_amount, body.cost_currency);
-  const f = {
-    visibility: body.visibility === 'public' ? 'public' : 'private',
-    title: str(body.title, 100, { required: true, field: 'Title' }),
-    details: str(body.details, 1000, { field: 'Details' }),
-    tags: tagsField(body.tags),
-    cost_amount: cost.amount,
-    cost_currency: cost.currency,
-    location: locationField(body.location),
-    location_name: str(body.location_name, 100, { field: 'Where' }),
-    online: [1, 2].includes(Number(body.online)) ? Number(body.online) : 0, // 0 in person, 1 online, 2 both
-    when_text: whenField(body.when_text, body.when_repeat),
-    max_attendees: maxAttendeesField(body.max_attendees),
-  };
-  // An online-only post has no place.
-  if (f.online === 1) { f.location = ''; f.location_name = ''; }
-  // No contact info or ID numbers (public/pii.js): people share contact info in chat after they match.
-  noPii('Title', f.title); noPii('Details', f.details); noPii('Place', f.location_name, { addresses: false });
-  f.tags.forEach(tag => noPii('Tags', tag));
-  return f;
-}
 // Everyone's avatar is the Jdenticon of their GUID. Jdenticon draws from the SHA-1 of its input, so sending that hash
 // lets any browser draw the same icon without learning the GUID (which a SHA-1 of 122 random bits doesn't reveal).
 const iconHash = (guid) => createHash('sha1').update(guid).digest('hex');
@@ -275,9 +185,9 @@ function tx(fn) {
 // notify(userId, { body, tag, open }) sends to all of that user's devices, best effort. Text stays generic: the
 // server doesn't know anyone's name, and messages are end-to-end encrypted. tag groups notifications on the device
 // (a newer one replaces an older one with the same tag); open says what the app shows when it's tapped
-// ('confirm', 'plans', 'profile', or 'chat:<matchId>'). Chat notifications are sent at most once a minute per chat.
+// ('confirm', 'plans', 'profile', or '' for wherever the app is). With throttle, at most one a minute per tag.
 const PUSH_SUBJECT = process.env.VAPID_SUBJECT || (process.env.ORIGIN?.startsWith('https:') ? process.env.ORIGIN : 'mailto:push@bored.invalid');
-const lastPush = new Map(); // "userId:tag" → time, for throttling chat notifications
+const lastPush = new Map(); // "userId:tag" → time, for throttling
 function notify(userId, { body, tag, open = '', throttle = false }) {
   if (afterCommit) return void afterCommit.push(() => notify(userId, { body, tag, open, throttle }));
   if (throttle) {
@@ -582,7 +492,7 @@ const sameJwk = (json, jwk) => { try { const k = JSON.parse(json); return k.x ==
 
 // Publish or update one of my public posts: { record }. The record must be signed with my signing key, say it's
 // public, have a newer version than the one stored, and send requests to join to my own inbox and chat key. Its
-// fields go through the same checks as any post (eventFields, including the personal info check).
+// fields go through the same checks as the post form (postFields, including the personal info check).
 route('PUT', '/api/public', async ({ user, body, res }) => {
   const record = body.record;
   if (!user.sign_pubkey || !user.inbox_id) throw new HttpError(400, 'Open Bored? again to finish setting up encryption first');
@@ -597,7 +507,8 @@ route('PUT', '/api/public', async ({ user, body, res }) => {
   if (post.reply?.inbox !== user.inbox_id || !sameJwk(user.chat_pubkey, post.reply?.chat))
     throw new HttpError(400, 'Requests to join must go to your own inbox');
   const [start, ...rule] = String(post.when_text ?? '').split(';');
-  eventFields({ ...post, when_text: start, when_repeat: rule.join(';') }); // throws on anything a post can't have
+  // The same checks the post form makes (public/postfields.js); throws on anything a post can't have.
+  await postFields({ ...post, when_text: start, when_repeat: rule.join(';') }).catch(e => { throw new HttpError(400, e.message); });
   countMail(`public:${user.id}`, PUBLIC_PER_HOUR);
   const live = ['open', 'full'].includes(post.status) ? 1 : 0;
   tx(() => {
@@ -656,58 +567,6 @@ route('GET', '/api/places/search', async ({ req, query, res }) => {
 });
 
 
-route('GET', '/api/matches', async ({ user, res }) => {
-  const rows = q(`
-    SELECT s.id, s.status, s.note, s.reconfirm, t.id AS event_id, t.title, ${TAGS_COL}, t.location, t.location_name, t.online, t.when_text, t.status AS event_status,
-           t.host_id, s.attendee_id, cu.guid AS host_guid, hu.guid AS attendee_guid,
-           cu.chat_pubkey AS host_pubkey, hu.chat_pubkey AS attendee_pubkey,
-           (SELECT body FROM messages m WHERE m.swipe_id = s.id ORDER BY m.id DESC LIMIT 1) AS last_message,
-           (SELECT kind FROM messages m WHERE m.swipe_id = s.id ORDER BY m.id DESC LIMIT 1) AS last_kind
-    FROM swipes s JOIN events t ON t.id = s.event_id
-    JOIN users cu ON cu.id = t.host_id JOIN users hu ON hu.id = s.attendee_id
-    WHERE s.status IN ('accepted', 'attended', 'withdrawn') AND (s.attendee_id = :me OR t.host_id = :me)
-    ORDER BY s.status != 'accepted', s.id DESC`).all({ me: user.id });
-  // "other" is the GUID of the person on the other side; the browser turns it into the nickname *you* gave them.
-  send(res, 200, rows.map(({ host_id, attendee_id, host_guid, attendee_guid, host_pubkey, attendee_pubkey, ...r }) => {
-    const mine = host_id === user.id;
-    return withTags({
-      ...r,
-      role: mine ? 'host' : 'attendee',
-      other: mine ? attendee_guid : host_guid,
-      other_pubkey: JSON.parse((mine ? attendee_pubkey : host_pubkey) || 'null'),
-    });
-  }));
-});
-
-route('GET', '/api/matches/:id/messages', async ({ user, params, res }) => {
-  loadMatch(params.id, user.id);
-  send(res, 200, q(`
-    SELECT m.id, m.body, m.kind, m.created_at, m.sender_id
-    FROM messages m WHERE m.swipe_id = ? ORDER BY m.id`).all(params.id)
-    .map(({ sender_id, ...m }) => ({ ...m, mine: sender_id === user.id })));
-});
-
-
-route('GET', '/api/events', async ({ user, res }) => {
-  send(res, 200, q(`
-    SELECT t.*, ${TAGS_COL},
-      (SELECT COUNT(*) FROM swipes s WHERE s.event_id = t.id AND s.yes = 1 AND s.status = 'pending') AS pending,
-      (SELECT COUNT(*) FROM swipes s WHERE s.event_id = t.id AND s.status IN ('accepted', 'attended')) AS matched,
-      (SELECT COUNT(*) FROM swipes s WHERE s.event_id = t.id AND s.status = 'accepted' AND s.reconfirm = 1) AS awaiting,
-      (SELECT COUNT(*) FROM swipes s WHERE s.event_id = t.id AND s.status = 'waitlisted') AS waitlisted,
-      (SELECT COUNT(*) FROM event_viewers v WHERE v.event_id = t.id) AS viewers
-    FROM events t WHERE t.host_id = ? AND t.status != 'cancelled'
-    ORDER BY t.status = 'past', t.id DESC`).all(user.id).map(withTags));
-});
-
-
-route('DELETE', '/api/events/:id', async ({ user, params, res }) => {
-  const r = q(`UPDATE events SET status = 'cancelled' WHERE id = ? AND host_id = ? AND status != 'past'`).run(params.id, user.id);
-  if (!r.changes) throw new HttpError(404, 'Event not found');
-  send(res, 200, { ok: true });
-});
-
-// How many events I've been to with each person (as host or attendee), by GUID. The browser shows them under the nicknames in my encrypted contacts.
 // ---------- invitations to connect ----------
 // The link is ${origin}/#invite=<token>. The token stays in the URL fragment, so it never reaches a server's logs;
 // we keep only its SHA-256. The owner's browser keeps the token itself (in their encrypted vault) to share it again.

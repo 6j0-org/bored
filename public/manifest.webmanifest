@@ -1,6 +1,6 @@
 {
-  "name": "Bored?",
-  "short_name": "Bored?",
+  "name": "Bored",
+  "short_name": "Bored",
   "description": "Swipe through local events. When you and the host both say yes, it's on.",
   "start_url": "/",
   "scope": "/",

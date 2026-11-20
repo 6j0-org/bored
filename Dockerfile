@@ -1,4 +1,4 @@
-# Bored? server: Node (>= 24, for the built-in node:sqlite), the app's own files, and the npm packages in
+# Bored server: Node (>= 24, for the built-in node:sqlite), the app's own files, and the npm packages in
 # package.json (installed at build time from the lock file; nothing is fetched while the app runs).
 # demo.js is in, for DEMO=1, which keeps everything in memory and ignores DB_PATH, so demo data never lands in a
 # real database.
@@ -10,10 +10,11 @@ COPY package.json package-lock.json .npmrc ./
 RUN apk add --no-cache --virtual .install-deps git \
  && npm ci --omit=dev --ignore-scripts \
  && apk del .install-deps
-COPY server.js db.js demo.js push.js webauthn.js idtoken.js ./
+COPY server.js db.js demo.js push.js webauthn.js idtoken.js feedback.js ./
 COPY public ./public
 
-# The SQLite database (accounts, posts, encrypted vaults, and chats) lives here; mount a volume to keep it.
+# The SQLite database (accounts, posts, encrypted vaults, and chats) and feedback.jsonl live here; mount a volume to
+# keep them.
 RUN mkdir -p /data && chown node:node /data
 VOLUME /data
 

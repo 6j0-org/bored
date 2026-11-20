@@ -28,7 +28,7 @@ export function icsFor(e, { origin = location.origin } = {}) {
   if (!w) return null;
   const geo = /^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/.exec(e.location || '');
   const lines = [
-    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Bored?//Bored?//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
+    'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Bored//Bored//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
     'BEGIN:VEVENT',
     `UID:event-${e.id}@${new URL(origin).host}`,
     `DTSTAMP:${stamp(new Date())}`,

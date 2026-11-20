@@ -7,7 +7,7 @@ self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 self.addEventListener('push', (e) => {
   let msg = {};
   try { msg = e.data ? e.data.json() : {}; } catch {}
-  e.waitUntil(self.registration.showNotification(msg.title || 'Bored?', {
+  e.waitUntil(self.registration.showNotification(msg.title || 'Bored', {
     body: msg.body || '',
     tag: msg.tag || undefined,
     renotify: Boolean(msg.tag),

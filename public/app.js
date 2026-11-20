@@ -1,10 +1,11 @@
-// Bored? — vanilla JS front-end.
+// Bored — vanilla JS front-end.
 import {
   prfSupport, createAccount, signIn, addPasskey, loadKeys, clearKeys, hasKeys, vault,
   PrfUnsupportedError, startIdSignIn, finishIdSignIn, hasIdCallback, createDemoAccount,
   newInviteKey, sealForInvite, openForInvite, sha1Hex, b64u, ensureKeys,
 } from './secure.js';
 import { locationHtml, mountLocationField, pickLocation, PIN_SVG } from './location.js';
+import { mountFeedback } from './feedback.js';
 import { parseWhen, repeatOptions, whenLabel as fmtWhen, localToday, occursBetween } from './when.js';
 import {
   initMail, resetMail, loadMail, mailView, requestJoin, sendOn, pass, unpass, savePost, setPostStatus, reshare,
@@ -68,7 +69,7 @@ const CONTACT_TAGS = ['family', 'friends', 'neighbors', 'work'];
 // Signed-out guests can browse Discover; everything else needs an account.
 // AGPL-3.0 section 13: people using the app over the network must be offered its source. The links are in the
 // introduction page's footer (public/about.html), reached from here and from the title board.
-const ABOUT_LINKS = `<p class="note" style="margin-top:20px;text-align:center"><a href="/about">About Bored?</a></p>`;
+const ABOUT_LINKS = `<p class="note" style="margin-top:20px;text-align:center"><a href="/about">About Bored</a></p>`;
 
 // Tab icons on the wood buttons: a quest-giver's "?" and "!" for Discover and Confirm, then simple line drawings.
 // All are cream (--wood-text), like the lettering on the other buttons.
@@ -198,7 +199,7 @@ const POST_IDEAS = [
 ];
 const POST_IDEA_MS = 5000;
 
-// config.authMode: 'local' (Bored? passkeys) | '6j0' (sign in with a 6j0.org identity at config.idOrigin)
+// config.authMode: 'local' (Bored passkeys) | '6j0' (sign in with a 6j0.org identity at config.idOrigin)
 //   | 'demo' (server DEMO=1: no sign-in; every browser gets its own throwaway account full of demo content).
 const state = { config: { authMode: 'local' }, me: null, tab: 'discover', chat: null, discoverTags: loadSet('discoverTags'), discoverCosts: new Set([...loadSet('discoverCosts')].filter(c => c in COST_FILTERS)),
   discoverDate: (() => { try { const d = localStorage.getItem('discoverDate'); return d in DATE_FILTERS ? d : ''; } catch { return ''; } })(),
@@ -351,7 +352,7 @@ function createInvite() {
 async function shareInvite(entry) {
   const url = inviteLink(entry);
   if (navigator.share) {
-    try { await navigator.share({ title: 'Connect with me on Bored?', text: "Here's a link to connect with me on Bored?:", url }); return; }
+    try { await navigator.share({ title: 'Connect with me on Bored', text: "Here's a link to connect with me on Bored:", url }); return; }
     catch (e) { if (e.name === 'AbortError') return; }
   }
   try { await navigator.clipboard.writeText(url); toast('Invitation link copied. Paste it to whoever you want to connect with.'); }
@@ -624,7 +625,7 @@ function mountPile(el, { items, renderCard, label, onChange, yesLabel, noLabel }
   let busy = false;
   el.hidden = !items.length;
   el.innerHTML = !items.length ? '' : `
-      <h2 class="section-title">Discard pile</h2>
+      <h2 class="section-title pile-title">Discard Pile</h2>
       <p class="note">Changed your mind? Swipe a card again, or use its button.</p>
       <div class="pile-list">${items.map((it, i) => {
         const [cls, text] = label(it);
@@ -667,11 +668,16 @@ function shell(content) {
   const me = state.me, c = badgeCounts();
   const tabs = me ? TABS : GUEST_TABS;
   // The page's name under the board. The account screen is "Unlock" for someone signed in without their keys here.
-  const title = state.tab === 'account' ? (me ? 'Unlock' : 'Sign in') : TABS.find(t => t.id === state.tab)?.label || '';
+  const title = state.tab === 'account' ? (me ? 'Unlock' : 'Sign in') : state.tab === 'feedback' ? 'Feedback' : TABS.find(t => t.id === state.tab)?.label || '';
+  // Feedback is on every screen once you're signed in, beside the page's name rather than in the tabs.
+  const fb = me && hasKeys() && state.tab !== 'account';
   app.innerHTML = `
     <header class="top">
-      <a class="logo board wide" href="/about" title="About Bored?">Bored?</a>
-      <h1 class="page-title">${esc(title)}</h1>
+      <a class="logo board wide" href="/about" title="About Bored">Bored?</a>
+      <div class="title-row${fb ? ' with-feedback' : ''}">
+        <h1 class="page-title">${esc(title)}</h1>
+        ${fb ? `<button type="button" class="btn ghost small feedback-link" id="feedbackLink" ${state.tab === 'feedback' ? 'aria-current="page"' : ''}>Feedback</button>` : ''}
+      </div>
     </header>
     <main id="view"></main>
     <nav class="tabs" style="grid-template-columns: repeat(${tabs.length}, 1fr)">
@@ -682,6 +688,8 @@ function shell(content) {
       }).join('')}
     </nav>`;
   app.querySelectorAll('nav.tabs button').forEach(b => b.onclick = () => go(b.dataset.tab));
+  const fbLink = document.getElementById('feedbackLink');
+  if (fbLink) fbLink.onclick = () => go('feedback');
   content(document.getElementById('view'));
 }
 
@@ -699,8 +707,24 @@ async function render() {
   if (!state.me && !GUEST_TABS.some(t => t.id === state.tab)) state.tab = 'discover';
   const views = {
     discover: viewDiscover, confirm: viewConfirm, plans: viewPlans, post: viewPost, profile: viewProfile, account: viewAccount,
+    feedback: viewFeedback,
   };
   shell((v) => views[state.tab](v).catch(err => toast(err.message)));
+}
+
+// The feedback page (public/feedback.js, the same file as in Glaze Journal). It's drawn once per account and kept, so
+// a half-written post survives the app redrawing and a trip to another tab.
+let feedbackPage = null; // { guid, el, page }
+async function viewFeedback(v) {
+  if (feedbackPage?.guid !== state.me.guid) {
+    const el = document.createElement('div');
+    const page = mountFeedback(el, {
+      buttonClass: 'btn ghost small', primaryClass: 'btn',
+      ...(isDemo() ? { intro: "Ideas, problems, or questions? In this demo only you can see what you post here. Please don't include anything personal." } : {}),
+    });
+    feedbackPage = { guid: state.me.guid, el, page };
+  } else feedbackPage.page.refresh();
+  v.replaceChildren(feedbackPage.el);
 }
 
 // After any successful sign-in/sign-up/unlock.
@@ -760,7 +784,7 @@ async function drawPushSettings(el) {
   let note = '', on = false, canToggle = false;
   if (!pushSupported()) {
     note = ios && !standalone
-      ? 'On iPhone and iPad, first add Bored? to your Home Screen (Share, then Add to Home Screen), open it from there, and turn notifications on here.'
+      ? 'On iPhone and iPad, first add Bored to your Home Screen (Share, then Add to Home Screen), open it from there, and turn notifications on here.'
       : "This browser doesn't support notifications.";
   } else if (Notification.permission === 'denied') {
     note = "Notifications are blocked for this site. Allow them in your browser's site settings, then come back here.";
@@ -774,11 +798,11 @@ async function drawPushSettings(el) {
     <p class="note">${note}</p>
     <details class="help" ${ios && !standalone ? 'open' : ''}>
       <summary>How to turn them on</summary>
-      <p><b>iPhone and iPad</b> (iOS 16.4 or newer): notifications only work once Bored? is on your Home Screen.
-        Open it in Safari, tap Share, then <b>Add to Home Screen</b>. Open Bored? from the new icon, come back here,
+      <p><b>iPhone and iPad</b> (iOS 16.4 or newer): notifications only work once Bored is on your Home Screen.
+        Open it in Safari, tap Share, then <b>Add to Home Screen</b>. Open Bored from the new icon, come back here,
         and tap <b>Turn on notifications</b>.</p>
       <p><b>Android</b>: they work right in the browser (Chrome, Firefox, and others). Tap <b>Turn on
-        notifications</b> and allow them when asked. If you like, add Bored? to your home screen too (the browser's
+        notifications</b> and allow them when asked. If you like, add Bored to your home screen too (the browser's
         menu, then <b>Add to Home screen</b> or <b>Install app</b>) so it opens like an app.</p>
       <p>Turn them on separately on each device. If you said no by mistake, allow notifications for this site in
         your browser's site settings.</p>
@@ -798,7 +822,7 @@ async function drawPushSettings(el) {
 
 const PASSKEY_ADVICE = `Your passkey <b>is</b> your account: there's no email or password to recover it with.
   Add a second passkey in Profile (another device or a security key), so losing one device doesn't lose your account.`;
-const UPGRADE_ADVICE = `Bored? encrypts your contacts and chats with a key that only your passkey can make, using a
+const UPGRADE_ADVICE = `Bored encrypts your contacts and chats with a key that only your passkey can make, using a
   passkey feature called <b>PRF</b>. This browser or passkey manager doesn't support it. <b>Some password managers,
   including Bitwarden, don't support it yet.</b><br><br>
   Passkeys that do: a <b>security key</b> (YubiKey 5, Nitrokey 3, SoloKey 2, and similar), <b>Google Password
@@ -816,7 +840,7 @@ function viewAccountId(v) {
            Join something fun, or host your own.`}</p>
       <button class="btn" id="idSignIn">${unlocking ? 'Unlock' : 'Continue'} with ${esc(idHost())}</button>
       <div class="error" id="authErr"></div>
-      <div class="notice"><b>No names or email.</b> Bored? uses your anonymous 6j0.org identity: one sign-in, with a
+      <div class="notice"><b>No names or email.</b> Bored uses your anonymous 6j0.org identity: one sign-in, with a
         passkey or a username and password, for every 6j0.org app. New here? You can create one on the next screen.
         Nobody sees a name for you unless they've connected with you, and then only the nickname <em>they</em> chose.
         Your contacts and chats are encrypted with a key only you can unlock.</div>
@@ -854,7 +878,7 @@ async function viewAccount(v) {
   const fail = (e) => {
     if (e instanceof PrfUnsupportedError) {
       note.classList.add('warn');
-      note.innerHTML = UPGRADE_ADVICE + `<br><br>If a "Bored?" passkey was just saved, you can delete it from your passkey manager.`;
+      note.innerHTML = UPGRADE_ADVICE + `<br><br>If a "Bored" passkey was just saved, you can delete it from your passkey manager.`;
       err.textContent = '';
     } else if (e?.name === 'NotAllowedError') err.textContent = 'Passkey request was cancelled or timed out.';
     else err.textContent = e.message;
@@ -1742,7 +1766,7 @@ function postedMessage(form, r = {}) {
   const pick = form.audience?.();
   if (!pick) return 'Posted! Anyone can now swipe on it.';
   const n = r.shared ?? audienceGuids(pick).length;
-  const later = r.missing ? ` ${r.missing === 1 ? '1 person gets' : `${r.missing} people get`} it once they open Bored? again.` : '';
+  const later = r.missing ? ` ${r.missing === 1 ? '1 person gets' : `${r.missing} people get`} it once they open Bored again.` : '';
   return (n ? `Posted! ${n === 1 ? '1 person' : `${n} people`} can now swipe on it.` : 'Posted. Only you can see it until you share it with someone.') + later;
 }
 

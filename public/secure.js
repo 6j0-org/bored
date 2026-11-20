@@ -1,4 +1,4 @@
-// Bored? client-side security: passkeys, the encrypted vault, and the account's keys.
+// Bored client-side security: passkeys, the encrypted vault, and the account's keys.
 //
 // Keys
 // - Each passkey yields a secret via the WebAuthn PRF extension (same passkey + same salt → same 32 bytes).
@@ -31,7 +31,7 @@ const subtle = crypto.subtle;
 const te = new TextEncoder(), td = new TextDecoder();
 
 export class PrfUnsupportedError extends Error {
-  constructor() { super("This browser or passkey manager can't create the encryption key Bored? needs."); }
+  constructor() { super("This browser or passkey manager can't create the encryption key Bored needs."); }
 }
 
 // Encoding (b64u) and the AES-GCM helpers (seal, openBytes, openText) are in public/envelope.js.

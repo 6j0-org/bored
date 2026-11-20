@@ -7,7 +7,7 @@ export const db = new DatabaseSync(DEMO ? ':memory:' : process.env.DB_PATH || ne
 
 // A database from before the schema was reset (it still has the old events table) can't be upgraded.
 if (db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'events'").get())
-  throw new Error('This database is from an older, incompatible version of Bored? (before the schema was reset). Delete it (data.sqlite and its -wal and -shm files) to start fresh.');
+  throw new Error('This database is from an older, incompatible version of Bored (before the schema was reset). Delete it (data.sqlite and its -wal and -shm files) to start fresh.');
 
 db.exec(`
 PRAGMA journal_mode = WAL;

@@ -1,6 +1,6 @@
 # Security & privacy TODO
 
-Open security and privacy issues in the Bored? prototype, grouped by area.
+Open security and privacy issues in the Bored prototype, grouped by area.
 Priority: **P0** = must fix before real users, **P1** = should fix before launch, **P2** = later / hardening.
 
 Goal (from the product brief): the server admin should not learn any user's real name or social connections.
@@ -130,10 +130,10 @@ left**, and about the limits of doing end-to-end encryption in a web app.
 
 ### With a 6j0.org identity (`AUTH_MODE=6j0`)
 
-- [ ] **P1: The identity server holds every app's keys.** It can't read Bored? data on its own (it never sees the root
+- [ ] **P1: The identity server holds every app's keys.** It can't read Bored data on its own (it never sees the root
   secret), but a compromised id.6j0.org page could derive every app's key for whoever signs in there. Keep it small,
   strictly CSP'd, and separately deployed. See the id repo's TODO.
-- [ ] **P1: Signing out of Bored? doesn't sign out of id.6j0.org,** so "Continue" signs straight back in without a
+- [ ] **P1: Signing out of Bored doesn't sign out of id.6j0.org,** so "Continue" signs straight back in without a
   passkey prompt while the identity session lasts. Say so in the UI, and consider a "sign out of all 6j0.org apps" link.
 - [ ] **P2: Setup tickets and seen-token IDs live in process memory** (like passkey challenges): a restart between the
   redirect and account creation means signing in again.

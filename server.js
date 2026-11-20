@@ -1,5 +1,7 @@
 import http from 'node:http';
-import { readFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { createHash, createPublicKey, randomBytes, randomUUID, verify as verifySignature } from 'node:crypto';
 import { newChallenge, takeChallenge, verifyRegistration, verifyAssertion, WebAuthnError } from './webauthn.js';
@@ -8,6 +10,7 @@ import { postFields } from './public/postfields.js';
 import { vapidPublicKey, validEndpoint, sendPush } from './push.js';
 import { db, DEMO } from './db.js';
 import { seedDemo, demoNames, demoSeed, demoBot, pruneVisitors } from './demo.js';
+import { createFeedback, FeedbackError } from './feedback.js';
 
 const PORT = Number(process.env.PORT || 3000);
 // Passkeys are bound to an origin. Defaults to whatever host the browser used (fine for localhost);
@@ -17,7 +20,7 @@ const rpIdOf = (req) => process.env.RP_ID || new URL(originOf(req)).hostname;
 const MAX_SEALED = 200 * 1024; // max size of one encrypted blob (vault, key) in characters
 
 // Who signs people in:
-// - AUTH_MODE=local (default): Bored? runs its own passkeys (RP ID = RP_ID or the ORIGIN hostname). Standalone.
+// - AUTH_MODE=local (default): Bored runs its own passkeys (RP ID = RP_ID or the ORIGIN hostname). Standalone.
 // - AUTH_MODE=6j0: a 6j0.org identity server at ID_ORIGIN does. The browser comes back with a signed token and
 //   this app's key from that server; the local passkey routes are switched off. ID_APP is this app's name in the
 //   identity server's APPS list (default "bored"). ID_JWKS_URL overrides where its public keys are fetched from
@@ -197,7 +200,7 @@ function notify(userId, { body, tag, open = '', throttle = false }) {
     if (lastPush.size > 10000) lastPush.clear();
   }
   for (const s of q('SELECT * FROM push_subscriptions WHERE user_id = ?').all(userId)) {
-    sendPush(s, { title: 'Bored?', body, tag, open }, { subject: PUSH_SUBJECT, topic: tag }).then((status) => {
+    sendPush(s, { title: 'Bored', body, tag, open }, { subject: PUSH_SUBJECT, topic: tag }).then((status) => {
       if (status === 404 || status === 410) q('DELETE FROM push_subscriptions WHERE id = ?').run(s.id);
       else if (status >= 400) console.warn(`Push to subscription ${s.id} failed with HTTP ${status}`);
     }, (err) => console.warn(`Push to subscription ${s.id} failed: ${err.message}`));
@@ -216,6 +219,42 @@ const route = (method, pattern, handler, { auth = true, mode } = {}) => {
   routes.push({ method, re, keys, handler, auth });
 };
 
+// ---------- feedback ----------
+// Signed-in people read everyone's feedback and post their own (feedback.js, the same file as in Glaze Journal; the
+// page is public/feedback.js). It's shared, so it isn't encrypted. Posts are filed under the account's GUID, which is
+// never shown with them. It's kept in a JSON Lines file: FEEDBACK_PATH, by default feedback.jsonl next to the database.
+// In the demo it goes to a temporary folder that's deleted on exit, and each visitor sees only their own posts, so the
+// demo can't turn into an anonymous message board.
+// The admin, who can delete anyone's feedback and whose own is labeled, is ADMIN_SUB (a 6j0.org identity's sub, with
+// AUTH_MODE=6j0) or ADMIN_GUID (an account's GUID, in any mode).
+const FEEDBACK_PATH = DEMO ? (() => {
+  const dir = mkdtempSync(join(tmpdir(), 'bored-demo-feedback-'));
+  process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
+  for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(0));
+  return join(dir, 'feedback.jsonl');
+})() : process.env.FEEDBACK_PATH || join(dirname(process.env.DB_PATH || new URL('./data.sqlite', import.meta.url).pathname), 'feedback.jsonl');
+const feedback = createFeedback({ file: FEEDBACK_PATH, scope: DEMO ? 'own' : 'all' });
+const ADMIN_SUB = process.env.ADMIN_SUB || '', ADMIN_GUID = process.env.ADMIN_GUID || '';
+function feedbackWho(user) {
+  const sub = ADMIN_SUB && AUTH_MODE === '6j0' ? q('SELECT sub FROM id_accounts WHERE user_id = ?').get(user.id)?.sub : null;
+  return { user: user.guid, admin: Boolean((ADMIN_GUID && user.guid === ADMIN_GUID) || (sub && sub === ADMIN_SUB)) };
+}
+function feedbackCall(fn) {
+  try { return fn(); } catch (e) { if (e instanceof FeedbackError) throw new HttpError(e.status, e.message); throw e; }
+}
+route('GET', '/api/feedback', async ({ user, res }) => {
+  send(res, 200, { ...feedbackCall(() => feedback.list(feedbackWho(user))), demo: DEMO });
+});
+route('POST', '/api/feedback', async ({ user, body, res }) => {
+  send(res, 201, feedbackCall(() => feedback.post(feedbackWho(user), body.body)));
+});
+// Feedback IDs aren't numbers, which route()'s :params are, so this one has its own pattern.
+routes.push({ method: 'DELETE', re: /^\/api\/feedback\/([A-Za-z0-9_-]{1,32})$/, keys: [], auth: true, handler: async ({ req, user, res }) => {
+  const id = new URL(req.url, 'http://x').pathname.split('/').pop();
+  feedbackCall(() => feedback.remove(feedbackWho(user), id));
+  send(res, 200, { ok: true });
+} });
+
 // ---------- passkeys ----------
 // Sign-up: the server picks the GUID; the browser creates a passkey (with the PRF extension), derives a vault key,
 // encrypts its chat private key and empty vault with it, and sends only ciphertext plus the passkey's public key.
@@ -232,8 +271,8 @@ route('POST', '/api/passkey/register/options', async ({ req, res }) => {
   const guid = randomUUID();
   send(res, 200, {
     challenge: newChallenge('register', { guid }),
-    rp: { id: rpIdOf(req), name: 'Bored?' },
-    user: { id: Buffer.from(guid).toString('base64url'), name: `Bored? ${guid.slice(0, 8)}`, displayName: 'Bored? account' },
+    rp: { id: rpIdOf(req), name: 'Bored' },
+    user: { id: Buffer.from(guid).toString('base64url'), name: `Bored ${guid.slice(0, 8)}`, displayName: 'Bored account' },
   });
 }, { auth: false, mode: 'local' });
 
@@ -262,7 +301,7 @@ route('POST', '/api/passkey/login/options', async ({ req, res }) => {
 
 route('POST', '/api/passkey/login/verify', async ({ req, body, res }) => {
   const pk = q('SELECT * FROM passkeys WHERE credential_id = ?').get(String(body.credentialId || ''));
-  if (!pk) throw new HttpError(401, "This passkey isn't registered with Bored?. Was the account created on another site or deleted?");
+  if (!pk) throw new HttpError(401, "This passkey isn't registered with Bored. Was the account created on another site or deleted?");
   const { signCount } = verifyAssertion(body, pk, webauthnCtx(req, 'login'));
   const user = q('SELECT * FROM users WHERE id = ?').get(pk.user_id);
   if (body.userHandle && Buffer.from(body.userHandle, 'base64url').toString() !== user.guid) throw new HttpError(401, 'Passkey user mismatch');
@@ -276,8 +315,8 @@ route('POST', '/api/passkey/add/options', async ({ req, user, res }) => {
   const mine = q('SELECT credential_id, wrapped_key FROM passkeys WHERE user_id = ?').all(user.id);
   send(res, 200, {
     challenge: newChallenge('add', { userId: user.id }),
-    rp: { id: rpIdOf(req), name: 'Bored?' },
-    user: { id: Buffer.from(user.guid).toString('base64url'), name: `Bored? ${user.guid.slice(0, 8)}`, displayName: 'Bored? account' },
+    rp: { id: rpIdOf(req), name: 'Bored' },
+    user: { id: Buffer.from(user.guid).toString('base64url'), name: `Bored ${user.guid.slice(0, 8)}`, displayName: 'Bored account' },
     existing: mine.map(p => ({ credentialId: p.credential_id, wrappedKey: p.wrapped_key })),
   });
 }, { mode: 'local' });
@@ -495,7 +534,7 @@ const sameJwk = (json, jwk) => { try { const k = JSON.parse(json); return k.x ==
 // fields go through the same checks as the post form (postFields, including the personal info check).
 route('PUT', '/api/public', async ({ user, body, res }) => {
   const record = body.record;
-  if (!user.sign_pubkey || !user.inbox_id) throw new HttpError(400, 'Open Bored? again to finish setting up encryption first');
+  if (!user.sign_pubkey || !user.inbox_id) throw new HttpError(400, 'Open Bored again to finish setting up encryption first');
   if (!record || typeof record.body !== 'string' || record.body.length > MAX_PUBLIC_POST || typeof record.sig !== 'string')
     throw new HttpError(400, 'Bad post');
   if (!sameJwk(user.sign_pubkey, record.signer) || !signedBy(user.sign_pubkey, 'post', record.body, record.sig))
@@ -719,6 +758,7 @@ route('POST', '/api/push/test', async ({ user, res }) => {
 
 const STATIC = {
   '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/secure.js': 'secure.js', '/hpke.js': 'hpke.js', '/envelope.js': 'envelope.js', '/posts.js': 'posts.js', '/mail.js': 'mail.js', '/postfields.js': 'postfields.js', '/style.css': 'style.css', '/location.js': 'location.js', '/when.js': 'when.js', '/cost.js': 'cost.js', '/ics.js': 'ics.js',
+  '/feedback.js': 'feedback.js',
   '/pii.js': 'pii.js', '/libphonenumber.js': 'libphonenumber.js',
   '/about': 'about.html', '/about.html': 'about.html', '/landing.js': 'landing.js', '/about.js': 'about.js', '/examples.js': 'examples.js',
   '/sw.js': 'sw.js', '/theme.js': 'theme.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon.svg': 'icon.svg', '/board.webp': 'board.webp',
@@ -797,4 +837,4 @@ if (DEMO) {
   await seedDemo();
   setInterval(pruneVisitors, 60 * 60 * 1000).unref();
 }
-server.listen(PORT, () => console.log(`Bored? → http://localhost:${PORT}${DEMO ? ' (demo: no sign-in, nothing is saved)' : ''}`));
+server.listen(PORT, () => console.log(`Bored → http://localhost:${PORT}${DEMO ? ' (demo: no sign-in, nothing is saved)' : ''}`));

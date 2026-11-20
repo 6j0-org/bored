@@ -1,11 +1,13 @@
-# Bored?
+# Bored
 
 A local event board that works like a dating app.
 Host an event. Users swipe through posts in **Discover**, and **right = "I'm in"**.
 In **Confirm**, the host swipes through the requests to join (anonymous, unless they're from one of the host's contacts), and **right = "Let's do it"**. When both sides say yes, it's on:
 it shows up in **Plans**, where you chat and sort out details. Afterwards the host marks it as happened.
 
-Accounts are anonymous: a random GUID and a passkey. No usernames, passwords, or email. Anyone can browse **Discover** without an account.
+Accounts are anonymous: a random GUID. Depending on how the server is set up, you sign in with a passkey or with a
+6j0.org identity (see [Sign-in](#sign-in-standalone-or-with-a-6j0org-identity)). Bored itself never asks for a name,
+email, or password. Anyone can browse **Discover** without an account.
 
 ## Run
 
@@ -21,7 +23,7 @@ npm start      # http://localhost:3000
 
 ```sh
 npm test               # all of them
-npm run test:unit      # HPKE against RFC 9180's test vectors, and the request rules in posts.js; no server
+npm run test:unit      # HPKE against RFC 9180's test vectors, the request rules in posts.js, and feedback.js; no server
 npm run test:server    # real accounts in Node against a demo-mode server: mail, public posts, and demo seeding
 npm run test:browser   # the real UI in two headless Chromium profiles: post, join, match, chat, and leave
 ```
@@ -60,7 +62,22 @@ otherwise.
 Env vars: `PORT` (default 3000), `DB_PATH` (default `./data.sqlite`), `ORIGIN` (e.g. `https://bored.example`; required
 behind HTTPS/proxies, passkeys are bound to it; also turns on `Secure` cookies), `RP_ID` (passkey domain; defaults to
 the `ORIGIN` hostname), `VAPID_SUBJECT` (a `mailto:` or `https:` contact for push services; defaults to `ORIGIN`),
-`PUSH_HOSTS` (extra push service hostnames to allow, comma-separated), `DEMO` (`1` for [demo mode](#demo-mode)).
+`PUSH_HOSTS` (extra push service hostnames to allow, comma-separated), `DEMO` (`1` for [demo mode](#demo-mode)),
+`FEEDBACK_PATH` (default `feedback.jsonl` next to the database), `ADMIN_SUB` or `ADMIN_GUID` (who can delete anyone's
+[feedback](#feedback): a 6j0.org identity's `sub` with `AUTH_MODE=6j0`, or an account's GUID in any mode).
+
+### Feedback
+
+The Feedback button beside the page title (on every screen once you're signed in) opens a page where people read
+everyone's feedback and post their own: plain text, up to 2048 characters. Posts show no author; the server files
+each one under the account's GUID so people can delete their own. Each account can post 5 times a day, and everyone
+together 500 times a day. The admin (`ADMIN_SUB` or `ADMIN_GUID`) can delete anyone's posts, and theirs are labeled
+"Developer". In the demo, each visitor sees only their own posts.
+
+Feedback is shared, so it isn't encrypted, and the page says so. It's kept in a JSON Lines file (`FEEDBACK_PATH`): one
+JSON object per line, appended to and never edited in place, with deletions as `{"delete": id}` lines. The server
+loads it at startup and, if anything was deleted, rewrites it without the deleted posts. `feedback.js` and
+`public/feedback.js` are the same files as in Glaze Journal, which has the feature too; keep them identical.
 
 ### Notifications
 
@@ -73,7 +90,7 @@ database), using `node:crypto` only. Push needs HTTPS (or `localhost`).
 
 `AUTH_MODE` picks who signs people in:
 
-- `local` (default): Bored? runs its own passkeys, as described below. Works on its own.
+- `local` (default): Bored runs its own passkeys, as described below. Works on its own.
 - `6j0`: people sign in with an anonymous identity from a [6j0.org identity server](https://gitlab.com/6j0-org/id),
   so one sign-in (passkey, or username + password) covers every 6j0.org app. Set `ID_ORIGIN` (e.g. `https://id.6j0.org`). Optional: `ID_APP` (this
   app's name in the identity server's `APPS`; default `bored`) and `ID_JWKS_URL` (where to fetch its public keys;
@@ -81,7 +98,7 @@ database), using `node:crypto` only. Push needs HTTPS (or `localhost`).
 
 The two modes keep separate accounts, so pick one before people sign up. Switching later strands existing users.
 
-To try `6j0` mode locally, run the identity server on `localhost` and Bored? on `127.0.0.1` (cookies ignore the
+To try `6j0` mode locally, run the identity server on `localhost` and Bored on `127.0.0.1` (cookies ignore the
 port, so two apps on one hostname would overwrite each other's session cookie):
 
 ```sh
@@ -128,11 +145,13 @@ The server is a mailbox. It stores signed public posts, and encrypted mail it ca
 of. Everything else happens in the browser: filtering Discover, who's in, the waitlist, and contacts.
 [`docs/encryption.md`](docs/encryption.md) explains the whole design, with diagrams and the reasons for each choice.
 
-- **Accounts** are a server-assigned GUID plus one or more passkeys. The server stores each passkey's public key,
-  never a name, email, or password. Lose every passkey and the account is gone: the app nudges people to add a
-  second passkey (another device or a security key) (Profile → Passkeys).
+- **Accounts** are a server-assigned GUID. Bored never stores a name, email, or password. If you used a passkey
+  (`AUTH_MODE=local`), the server stores each passkey's public key; lose every passkey and the account is gone, so
+  the app nudges people to add a second one (another device or a security key) (Profile → Passkeys). If you used a
+  6j0.org identity, signing in is the identity server's job (see below).
 - **Keys.** Each account has an ECDH P-256 *chat key* and an ECDSA P-256 *signing key*. The private halves are
-  encrypted with the vault key, so any of your passkeys can unlock them on a new device, and the browser keeps them as
+  encrypted with the vault key, so whatever you sign in with (any of your passkeys, or your 6j0.org identity) can
+  unlock them on a new device, and the browser keeps them as
   non-extractable WebCrypto keys. Each account also has a *main inbox*: a random token only its vault holds; the
   server files mail under the token's SHA-256.
 - **Mail** (`public/envelope.js`) is built from standard parts, with nothing invented at the crypto layer:
@@ -168,10 +187,10 @@ of. Everything else happens in the browser: filtering Discover, who's in, the wa
   wrapped by a key derived from each passkey's PRF output, so the server only stores ciphertext. A contact's keys are
   saved the first time they're used, so the server can't swap them later.
 - **With a 6j0.org identity** (`AUTH_MODE=6j0`) the passkeys (and the optional password) live on the identity server instead. After sign-in it
-  sends the browser back with a signed token and Bored?'s own *app key*, encrypted to a one-time key the page made
+  sends the browser back with a signed token and Bored's own *app key*, encrypted to a one-time key the page made
   and carried in the URL fragment (which never reaches a server). The vault key is wrapped by a key derived from the
-  app key. Other 6j0.org apps get different app keys, so they can't read Bored? data, and Bored? gives the account
-  its own public GUID, so people can't link your Bored? account to your accounts in other apps.
+  app key. Other 6j0.org apps get different app keys, so they can't read Bored data, and Bored gives the account
+  its own public GUID, so people can't link your Bored account to your accounts in other apps.
 - **Invitations to connect** are links (`/#invite=<token>`). The token stays in the URL fragment, so it isn't sent
   in requests or logged; the server stores only its SHA-256, and the owner's encrypted vault keeps the link to share
   again. Connecting makes two people contacts, the same as matching (the server records the pair in `connections`).
@@ -224,12 +243,14 @@ See `TODO.md` for the full list of open security and privacy issues.
 - `public/postfields.js`: checks a post's fields, in the browser and (for public posts) on the server
 - `public/location.js`: "lat,lon" locations, links to the viewer's maps app, and a small OpenStreetMap pin picker
 - `public/theme.js`: the automatic / light / dark theme switch, applied before the page draws
-- `public/board.webp`: the wooden board behind the Bored? title
+- `public/board.webp`: the wooden board behind the Bored title
 - `public/when.js`, `public/cost.js`: event time (with repeat rules) and cost formats, shared by server and browser
 - `public/pii.js`: finds contact info and ID numbers in posts and notes, which the post form points out as you type
   and refuses (and the server refuses in public posts), with [`@devopscoop/eat-the-pii`](https://gitlab.com/devopscoop/eat-the-pii) (installed from
   its git URL, so `.npmrc` sets `allow-git=root`); `public/libphonenumber.js` loads its phone number data in the browser
 - `public/fonts/`: bundled National Park font, used for all text (SIL OFL 1.1, license alongside). The app loads nothing from outside its own server, except OpenStreetMap tiles while the location picker is open. Suggested place names come from OpenStreetMap's Nominatim, asked by the server (`/api/places/reverse`).
+- `feedback.js`, `public/feedback.js`: the [feedback](#feedback) page's storage and rules, and the page itself (the same
+  files as in Glaze Journal)
 - `demo.js`: demo mode (`DEMO=1`): demo accounts with keys, their signed public posts, and the bot that answers them
 - `test/`: the tests (see [Tests](#tests)); `test/lib.mjs` has the shared helpers
 - `docs/encryption.md`: how the encryption and privacy system works, and why
@@ -239,11 +260,11 @@ See `TODO.md` for the full list of open security and privacy issues.
 
 Copyright © 2026 6j0.org.
 
-Bored? is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public
+Bored is free software: you can redistribute it and/or modify it under the terms of the GNU Affero General Public
 License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later
 version. See [`LICENSE`](LICENSE).
 
-The AGPL also covers running Bored? as a service: if you run a modified version for other people, you must offer them
+The AGPL also covers running Bored as a service: if you run a modified version for other people, you must offer them
 its source. The app links to the source from the sign-in and Profile screens (`SOURCE_URL` in `public/app.js`); point
 it at your own repository if you change the code.
 

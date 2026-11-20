@@ -1,6 +1,6 @@
-# How Bored? keeps things private
+# How Bored keeps things private
 
-This document explains how Bored? encrypts and signs what people send each other, what the server can and can't
+This document explains how Bored encrypts and signs what people send each other, what the server can and can't
 see, and why each part was chosen. It's for contributors, people running a server, and anyone who wants to check
 our claims. The code is the final word; each section names the files to read.
 
@@ -21,7 +21,7 @@ our claims. The code is the final word; each section names the files to read.
 
 ## 1. Goals and threat model
 
-Bored? gets strangers and friends to meet in person, so the most sensitive thing it handles isn't any one message:
+Bored gets strangers and friends to meet in person, so the most sensitive thing it handles isn't any one message:
 it's **who does what with whom**. The product brief's goal is that *the server's operator should not learn any user's
 real name or social connections.*
 
@@ -59,7 +59,7 @@ flowchart LR
   subgraph S["Server"]
     M[("mail<br/>inbox ID + ciphertext")]
     P[("public_posts<br/>signed records")]
-    U[("accounts, passkeys,<br/>encrypted vaults")]
+    U[("accounts, passkeys (if used),<br/>encrypted vaults")]
   end
   subgraph B["Bob's browser"]
     BK["keys + vault"]
@@ -87,7 +87,7 @@ flowchart TD
   ID["6j0.org identity server"] -.->|"app key, AUTH_MODE=6j0"| APP["32-byte app key"]
   PRF -->|"HKDF 'vault-kek-v1'"| KEK["key-encryption key"]
   APP -.->|"HKDF 'vault-kek-6j0-v1'"| KEK
-  KEK -->|"unwraps (one wrapped copy per passkey,<br/>stored on the server)"| VK["vault key<br/>random AES-256"]
+  KEK -->|"unwraps (one wrapped copy per passkey<br/>or 6j0.org identity, stored on the server)"| VK["vault key<br/>random AES-256"]
   VK -->|encrypts| V["vault: contacts, nicknames, saved keys,<br/>my posts, my requests and channel secrets,<br/>main inbox token"]
   VK -->|encrypts| CK["chat key: ECDH P-256<br/>(public half published)"]
   VK -->|encrypts| SK["signing key: ECDSA P-256<br/>(public half published)"]
@@ -103,14 +103,17 @@ Each account has:
 
 Why these choices:
 
-- **Passkeys with PRF, no passwords.** The passkey's PRF output is a secret the browser gets only after the person
-  authenticates, and the server never sees it. That gives us an encryption key without a password to choose, forget,
-  or reuse. Signup is blocked on authenticators without PRF rather than falling back to something weaker.
-- **A random vault key, wrapped per passkey.** Deriving the vault key straight from one passkey would lock the account
-  to that passkey. Wrapping one random key once per passkey lets people add a second passkey (another device, a
-  security key) without re-encrypting anything.
+- **If you used a passkey: PRF, no passwords.** The passkey's PRF output is a secret the browser gets only after the
+  person authenticates, and the server never sees it. That gives us an encryption key without a password to choose,
+  forget, or reuse. Signup is blocked on authenticators without PRF rather than falling back to something weaker.
+- **If you used a 6j0.org identity** (`AUTH_MODE=6j0`): however you signed in there (a passkey, or a username and
+  password), the identity server hands the browser this app's own *app key*, and the key-encryption key is derived
+  from that instead. Bored never sees the password.
+- **A random vault key, wrapped per sign-in.** Deriving the vault key straight from one passkey would lock the account
+  to that passkey. Wrapping one random key once per passkey (or once for a 6j0.org identity) lets people add a second
+  passkey (another device, a security key) without re-encrypting anything.
 - **Private keys never leave WebCrypto in usable form.** After sign-in, the vault, chat, and signing keys are imported
-  as **non-extractable** CryptoKeys and kept in IndexedDB, so a page reload doesn't need the passkey, and no script
+  as **non-extractable** CryptoKeys and kept in IndexedDB, so a page reload doesn't need you to sign in again, and no script
   can read the raw key bytes out (it can only *use* them; see [limits](#10-known-limits)).
 - **P-256 everywhere.** It's the one curve every WebCrypto implementation supports for both ECDH and ECDSA with
   non-extractable private keys. That rules out secp256k1 (Nostr's curve), which WebCrypto doesn't have at all, and
@@ -345,7 +348,7 @@ anything.
 | Which session is sending, as it sends | Yes, in memory | For rate limits; never stored. |
 | Inbox, time, and size of each message | **Yes** | Main inboxes belong to known accounts; channel inboxes don't. |
 | IP addresses | **Yes**, in transit | Not stored by the app; a reverse proxy may log them. |
-| Accounts, passkeys' public keys, sessions, push subscriptions | Yes | No names, emails, or passwords exist to store. |
+| Accounts, passkeys' public keys (if you used a passkey), sessions, push subscriptions | Yes | Bored stores no names, emails, or passwords. A 6j0.org identity's password, if it has one, stays on the identity server. |
 | The vault | No | Encrypted with the vault key. |
 | Invitation connections | **Yes** | Who connected with whom through an invitation link. Still plaintext (see `TODO.md`). |
 | Your location (distance filter) | No | Stays in the browser; Discover filters locally. |

@@ -3,10 +3,11 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { readFile } from 'node:fs/promises';
-import { createHash, createPublicKey, randomBytes, randomUUID, verify as verifySignature } from 'node:crypto';
+import { createHash, createHmac, createPublicKey, randomBytes, randomUUID, verify as verifySignature } from 'node:crypto';
 import { newChallenge, takeChallenge, verifyRegistration, verifyAssertion, WebAuthnError } from './webauthn.js';
 import { verifyIdToken, IdTokenError } from './idtoken.js';
 import { postFields } from './public/postfields.js';
+import { REPORT_REASONS as MODERATION_REASONS } from './public/moderation.js';
 import { vapidPublicKey, validEndpoint, sendPush } from './push.js';
 import { db, DEMO } from './db.js';
 import { seedDemo, demoNames, demoSeed, demoBot, pruneVisitors } from './demo.js';
@@ -583,6 +584,53 @@ route('POST', '/api/public/read', async ({ body, res }) => {
   send(res, 200, { posts: rows.map(r => JSON.parse(r.body)), seq, more });
 }, { auth: false });
 
+// ---------- reports on public posts ----------
+// Signed-in people report public posts (spam, offensive, …). The server only counts: each browser decides what to
+// hide from its own person's settings (public/moderation.js). One report per reason per account and post. Rows are
+// filed under a keyed hash of the account and the post, not the account, so the table alone doesn't say who reported
+// what. The server still sees who sends each report as it arrives, and it holds the key, so this keeps the table from
+// being an easy list, not a secret.
+const REPORT_REASONS = Object.keys(MODERATION_REASONS);
+const REPORTS_PER_HOUR = 60;
+const reportKey = (() => {
+  let k = q(`SELECT value FROM app_settings WHERE key = 'report_key'`).get()?.value;
+  if (!k) { k = randomBytes(32).toString('base64url'); q(`INSERT INTO app_settings (key, value) VALUES ('report_key', ?)`).run(k); }
+  return k;
+})();
+const reporterOf = (user, pid) => createHmac('sha256', reportKey).update(`${user.guid}:${pid}`).digest('base64url').slice(0, 22);
+
+// Report a public post: { pid, reasons }. The reasons replace my earlier ones for that post, so [] takes my report
+// back.
+route('POST', '/api/public/report', async ({ user, body, res }) => {
+  const pid = String(body.pid || '');
+  const reasons = Array.isArray(body.reasons) ? [...new Set(body.reasons.map(String))] : null;
+  if (!PID_RE.test(pid) || !reasons || reasons.some(r => !REPORT_REASONS.includes(r))) throw new HttpError(400, 'Bad report');
+  const post = q('SELECT host_id FROM public_posts WHERE pid = ?').get(pid);
+  if (!post) throw new HttpError(404, 'That post is gone');
+  if (post.host_id === user.id) throw new HttpError(400, "That's your own post");
+  countMail(`report:${user.id}`, REPORTS_PER_HOUR);
+  const who = reporterOf(user, pid);
+  tx(() => {
+    q('DELETE FROM post_reports WHERE pid = ? AND who = ?').run(pid, who);
+    for (const r of reasons) q('INSERT INTO post_reports (pid, who, reason) VALUES (?, ?, ?)').run(pid, who, r);
+  });
+  send(res, 200, { ok: true });
+});
+
+// The report counts for some public posts: { pids } → { reports: { [pid]: { reason: n } } }, only for posts someone
+// reported. Anyone can ask, guests too; the browser asks without cookies, like reading the posts.
+route('POST', '/api/public/reports', async ({ body, res }) => {
+  const pids = Array.isArray(body.pids) ? [...new Set(body.pids.map(String))].filter(p => PID_RE.test(p)) : [];
+  if (pids.length > MAX_PUBLIC_PIDS) throw new HttpError(400, `Up to ${MAX_PUBLIC_PIDS} posts at a time`);
+  const counts = q('SELECT reason, COUNT(*) n FROM post_reports WHERE pid = ? GROUP BY reason');
+  const reports = {};
+  for (const pid of pids) {
+    const rows = counts.all(pid);
+    if (rows.length) reports[pid] = Object.fromEntries(rows.map(r => [r.reason, r.n]));
+  }
+  send(res, 200, { reports });
+}, { auth: false });
+
 const placesLang = (req) => String(req.headers['accept-language'] || '').split(',')[0].trim().slice(0, 20).replace(/[^\w-]/g, '');
 
 // Location picker: a friendly name for a spot (signed-in users only). ?lat=&lon=
@@ -721,6 +769,19 @@ route('GET', '/api/connections', async ({ user, res }) => {
     WHERE c.a = ? OR c.b = ?`).all(user.id, user.id, user.id));
 });
 
+// Deleting a contact: { guid }. Removes our invitation connection, if there is one, so my browser doesn't add them
+// back, and the requests behind it, so either of us can use an invitation again later. Matches aren't stored here
+// (they're in mail), so a contact from a match has nothing to remove.
+route('POST', '/api/connections/remove', async ({ user, body, res }) => {
+  const other = typeof body.guid === 'string' && q('SELECT id FROM users WHERE guid = ?').get(body.guid);
+  if (other) tx(() => {
+    q('DELETE FROM connections WHERE a = ? AND b = ?').run(Math.min(user.id, other.id), Math.max(user.id, other.id));
+    q(`DELETE FROM connection_requests WHERE (owner_id = ? AND requester_id = ?) OR (owner_id = ? AND requester_id = ?)`)
+      .run(user.id, other.id, other.id, user.id);
+  });
+  send(res, 200, { ok: true });
+});
+
 // ---------- push subscriptions ----------
 route('GET', '/api/push/key', async ({ res }) => send(res, 200, { publicKey: vapidPublicKey() }), { auth: false });
 
@@ -758,7 +819,7 @@ route('POST', '/api/push/test', async ({ user, res }) => {
 
 const STATIC = {
   '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/secure.js': 'secure.js', '/hpke.js': 'hpke.js', '/envelope.js': 'envelope.js', '/posts.js': 'posts.js', '/mail.js': 'mail.js', '/postfields.js': 'postfields.js', '/style.css': 'style.css', '/location.js': 'location.js', '/when.js': 'when.js', '/cost.js': 'cost.js', '/ics.js': 'ics.js',
-  '/feedback.js': 'feedback.js',
+  '/feedback.js': 'feedback.js', '/moderation.js': 'moderation.js',
   '/pii.js': 'pii.js', '/libphonenumber.js': 'libphonenumber.js',
   '/about': 'about.html', '/about.html': 'about.html', '/landing.js': 'landing.js', '/about.js': 'about.js', '/examples.js': 'examples.js',
   '/sw.js': 'sw.js', '/theme.js': 'theme.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon.svg': 'icon.svg', '/board.webp': 'board.webp',
@@ -771,8 +832,9 @@ const VENDOR = {
   '/vendor/jdenticon.js': 'node_modules/jdenticon/dist/jdenticon-module.mjs', // Jdenticon avatars, MIT
   '/vendor/eat-the-pii.js': 'node_modules/@devopscoop/eat-the-pii/src/index.js', // personal info in posts, MIT
   '/vendor/libphonenumber-min.js': 'node_modules/libphonenumber-js/bundle/libphonenumber-min.js', // phone numbers, MIT
+  '/vendor/profanity-en.json': 'node_modules/@dsojevic/profanity-list/en.json', // the built-in word list, MIT
 };
-const MIME = { html: 'text/html; charset=utf-8', js: 'text/javascript; charset=utf-8', mjs: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8',
+const MIME = { html: 'text/html; charset=utf-8', json: 'application/json; charset=utf-8', js: 'text/javascript; charset=utf-8', mjs: 'text/javascript; charset=utf-8', css: 'text/css; charset=utf-8',
   woff2: 'font/woff2', webmanifest: 'application/manifest+json', svg: 'image/svg+xml', webp: 'image/webp' };
 
 // Everything is served from this origin; a strict CSP keeps injected scripts away from the keys in the page.

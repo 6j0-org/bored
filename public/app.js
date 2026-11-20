@@ -16,6 +16,10 @@ import { postFields, FIELD_LABELS } from './postfields.js';
 import { CURRENCIES, DEFAULT_CURRENCY, costLabel } from './cost.js';
 import { toSvg as identicon } from './vendor/jdenticon.js';
 import { addToCalendar } from './ics.js';
+import {
+  builtinTerms, ownTerms, censor, mentions, reportedFor, moderationSettings, parseTerms, reportThreshold, REPORT_REASONS,
+  MAX_LISTS, MAX_LIST_WORDS, MAX_THRESHOLD,
+} from './moderation.js';
 
 // Well-known tags, offered as one-tap suggestions. Posts can also use any other tag.
 const TAGS = ['help', 'hiking', 'food', 'gardening', 'hauling', 'moving', 'fixing', 'pets', 'tech', 'cooking',
@@ -669,15 +673,13 @@ function shell(content) {
   const tabs = me ? TABS : GUEST_TABS;
   // The page's name under the board. The account screen is "Unlock" for someone signed in without their keys here.
   const title = state.tab === 'account' ? (me ? 'Unlock' : 'Sign in') : state.tab === 'feedback' ? 'Feedback' : TABS.find(t => t.id === state.tab)?.label || '';
-  // Feedback is on every screen once you're signed in, beside the page's name rather than in the tabs.
-  const fb = me && hasKeys() && state.tab !== 'account';
+  // Under the board on every screen: Bored is in alpha, and asks for feedback (the feedback page, once signed in).
   app.innerHTML = `
     <header class="top">
       <a class="logo board wide" href="/about" title="About Bored">Bored?</a>
-      <div class="title-row${fb ? ' with-feedback' : ''}">
-        <h1 class="page-title">${esc(title)}</h1>
-        ${fb ? `<button type="button" class="btn ghost small feedback-link" id="feedbackLink" ${state.tab === 'feedback' ? 'aria-current="page"' : ''}>Feedback</button>` : ''}
-      </div>
+      <p class="alpha-note"><span class="alpha-tag">Alpha</span> Bored is new and still changing.
+        <button type="button" class="link" id="feedbackLink" ${state.tab === 'feedback' ? 'aria-current="page"' : ''}>Tell us what you think</button></p>
+      <h1 class="page-title">${esc(title)}</h1>
     </header>
     <main id="view"></main>
     <nav class="tabs" style="grid-template-columns: repeat(${tabs.length}, 1fr)">
@@ -688,12 +690,17 @@ function shell(content) {
       }).join('')}
     </nav>`;
   app.querySelectorAll('nav.tabs button').forEach(b => b.onclick = () => go(b.dataset.tab));
-  const fbLink = document.getElementById('feedbackLink');
-  if (fbLink) fbLink.onclick = () => go('feedback');
+  document.getElementById('feedbackLink').onclick = openFeedback;
   content(document.getElementById('view'));
 }
 
 function go(tab) { state.tab = tab; state.chat = null; render(); }
+// The feedback page needs an account (posts are filed under it), so anyone else is sent to sign in first.
+function openFeedback() {
+  if (state.me && hasKeys()) return go('feedback');
+  toast('Sign in to send feedback.');
+  if (state.tab !== 'account') go('account');
+}
 
 async function refreshMe() {
   try { state.me = await api('/api/me'); } catch { state.me = null; }
@@ -774,6 +781,7 @@ async function syncPush() {
 }
 // Go where a tapped notification says: 'confirm', 'plans', 'profile', or 'discover'.
 function openScreen(open) {
+  if (open === 'feedback') return openFeedback(); // from the About page's Feedback button
   if (!open || !state.me || !['confirm', 'plans', 'profile', 'discover'].includes(open)) return;
   state.tab = open; state.chat = null;
   render();
@@ -952,9 +960,13 @@ function whereHtml(e) {
 }
 
 // A Discover card: each detail has a label, and no emoji. who: HTML for the people line at the bottom, in place of
-// the host's (Plans says who's going). mine: it's my own post.
+// the host's (Plans says who's going), which also has a button to report the post or block its host. mine: it's my
+// own post. Someone else's post has the words my filters catch starred out.
 function eventCard(t, { who = null, mine = false } = {}) {
   const fact = (label, value) => `<dt>${label}</dt><dd>${value}</dd>`;
+  if (!mine) t = { ...t, title: clean(t.title), details: clean(t.details), location_name: clean(t.location_name), tags: t.tags.map(clean) };
+  const report = !mine && who === null && t.post?.pid && state.me && hasKeys()
+    ? `<button type="button" class="link report-link" data-report="${esc(t.post.pid)}">Report or block</button>` : '';
   return `
     <div class="body">
       <h2>${esc(t.title)}</h2>
@@ -969,7 +981,7 @@ function eventCard(t, { who = null, mine = false } = {}) {
       </dl>
       ${t.details ? `<div class="details">${esc(t.details)}</div>` : ''}
       <div class="who">${who ?? `${personAvatar(t.host.guid, '', { pid: t.post?.pid, icon: t.host.icon })}
-        <div>${contactName(t.host.guid) ? `<b>${esc(contactName(t.host.guid))}</b>` : ''}</div>`}
+        <div>${contactName(t.host.guid) ? `<b>${esc(contactName(t.host.guid))}</b>` : ''}</div>${report}`}
       </div>
     </div>`;
 }
@@ -1017,10 +1029,13 @@ async function viewDiscover(v) {
   // discard pile (their passes aren't kept).
   v.innerHTML = `<p class="hint pile-hint">${state.me ? 'Scroll up to refresh. Scroll down to see your discard pile.' : 'Scroll up to refresh.'}</p>
     <div class="filters" id="filters"></div>
+    <p class="note mod-note" id="modNote" hidden></p>
     <div class="deck-host" id="deckHost"></div>
     <section class="pile" id="pile" aria-labelledby="pileTitle" hidden></section>`;
   const filtersEl = v.querySelector('#filters'), host = v.querySelector('#deckHost'), pileEl = v.querySelector('#pile');
+  const modNote = v.querySelector('#modNote');
   let options = { tags: [], costs: [], dates: [] }, events = [], deck = null;
+  let hidden = new Map(); // posts my moderation settings hide, from the deck and the discard pile (moderatePosts)
 
   // All the filters sit in one panel that opens and closes; its heading says how many are on.
   function drawFilters() {
@@ -1062,8 +1077,14 @@ async function viewDiscover(v) {
   // alone unless their counts changed.
   async function load({ soft = false } = {}) {
     const mail = await loadMail().catch(err => { console.warn(err); return mailView(); });
+    // Posts my moderation settings hide (blocked hosts, reports, and word lists that hide posts) are left out of the
+    // deck and the discard pile, before the filters, so their counts don't include them either.
+    hidden = await moderatePosts([...(mail?.deck || []), ...(state.me ? mail?.swiped || [] : [])]);
     if (!document.body.contains(host)) return;
-    const posts = mail?.deck || [], near = state.discoverNear;
+    const posts = (mail?.deck || []).filter(p => !hidden.has(p.pid)), near = state.discoverNear;
+    modNote.hidden = !hidden.size;
+    modNote.innerHTML = `${hidden.size === 1 ? '1 post is' : `${hidden.size} posts are`} hidden by ${state.me ? 'your' : 'the default'} moderation settings.${
+      state.me && hasKeys() ? ' <button type="button" class="link" data-mod-settings>Change them</button>' : ''}`;
     events = posts.filter(mailPostMatches).map(mailCard);
     const before = JSON.stringify(options);
     options = postCounts(posts);
@@ -1078,7 +1099,7 @@ async function viewDiscover(v) {
   // my answer. Swipe one again, or use its button, to change it. Signed in only: a guest's passes aren't kept.
   let pile = null, pileCards = [];
   function drawPile() {
-    pileCards = (state.me ? mailView()?.swiped || [] : []).map(p => ({ ...mailCard(p), yes: p.swipe === 'in', request: p.request }));
+    pileCards = (state.me ? mailView()?.swiped || [] : []).filter(p => !hidden.has(p.pid)).map(p => ({ ...mailCard(p), yes: p.swipe === 'in', request: p.request }));
     pile = mountPile(pileEl, {
       items: pileCards, renderCard: eventCard, yesLabel: "I'm in", noLabel: 'Pass',
       label: (c) => c.yes ? ['in', c.request === 'waitlisted' ? "I'm in · waitlist" : "I'm in"] : ['pass', 'Pass'],
@@ -1149,6 +1170,7 @@ async function viewDiscover(v) {
     const cal = e.target.closest('[data-ics]');
     if (cal) addToCalendar([...events, ...pileCards].find(t => String(t.id) === cal.dataset.ics));
     if (e.target.id === 'goPost') go('post');
+    if (e.target.closest('[data-mod-settings]')) { state.focus = 'moderation'; go('profile'); }
     if (e.target.id === 'clearFilters') { clearAll(); saveDiscoverFilters(); load().catch(err => toast(err.message)); }
   });
   await load();
@@ -1195,7 +1217,7 @@ function connectCard(c) {
       <div class="hero">${avatar(c.requester.icon, 'big')}</div>
       <div class="body">
         <div class="meta"><span class="chip">Wants to connect${c.via ? ` through your invitation as “${esc(c.via)}”` : ''}</span></div>
-        <h2>${c.suggested ? esc(c.suggested) : 'Someone'}</h2>
+        <h2>${c.suggested ? esc(clean(c.suggested)) : 'Someone'}</h2>
         ${c.suggested ? '<p class="note">The nickname they suggest for themselves. You can change it after you connect.</p>' : ''}
         <p>They opened one of your invitation links and asked to connect. If you say yes, you'll be in each other's
           contacts and can share private posts with each other.</p>
@@ -1222,7 +1244,7 @@ const mailRequestCard = (o) => {
       <div class="body">
         <div class="meta"><span class="chip">Wants to join: <b>${esc(o.title)}</b></span></div>
         ${known ? `<h2>${esc(displayName(o.from) || 'One of your contacts')}</h2>` : ''}
-        ${o.note ? `<div class="details">“${esc(o.note)}”</div>` : ''}
+        ${o.note ? `<div class="details">“${esc(clean(o.note))}”</div>` : ''}
         ${o.full ? `<p class="note">This post is full, so saying yes puts them on the waitlist. They'll be matched automatically when a spot opens.</p>` : ''}
         <p class="note">${known ? "One of your contacts." : "Someone you don't know yet: you'll see who it is once you say yes."}</p>
       </div>`;
@@ -1233,7 +1255,7 @@ const inviteCard = (o) => `
       <div class="hero">${avatar(o.icon, 'big')}</div>
       <div class="body">
         <div class="meta"><span class="chip">Wants to connect</span></div>
-        <h2>${o.name ? esc(o.name) : 'Someone'}</h2>
+        <h2>${o.name ? esc(clean(o.name)) : 'Someone'}</h2>
         ${o.name ? '<p class="note">The name they suggest for themselves. You can change it after you connect.</p>' : ''}
         <p>They invited you to connect. If you say yes, you'll be in each other's contacts and can share private posts
           with each other.</p>
@@ -1264,10 +1286,28 @@ async function viewConfirm(v) {
     }
     return out;
   };
+  // People I've blocked get a no without being shown: requests to join from a contact who said who they are, and
+  // requests to connect and invitations, which come with the icon of the person's GUID.
+  const blockedIcons = async () => new Set(await Promise.all(Object.values(mod().blocked).filter(b => b.guid).map(b => sha1Hex(b.guid))));
   const load = async () => {
     const [all, mail] = await Promise.all([api('/api/connection-requests'), loadMail().catch(() => mailView())]);
-    const requests = await withNames(await confirmDirectInvites(all));
-    return [...requests.map(c => ({ ...c, kind: 'connect' })), ...await checkInvites(invitesForMe()), ...mailRequests(mail)];
+    const icons = await blockedIcons();
+    const requests = [];
+    for (const c of await withNames(await confirmDirectInvites(all))) {
+      if (!icons.has(c.requester.icon)) requests.push(c);
+      else await api(`/api/connection-requests/${c.id}/respond`, { method: 'POST', body: { yes: false } }).catch(() => {});
+    }
+    const invites = [];
+    for (const i of await checkInvites(invitesForMe())) {
+      if (!icons.has(i.icon)) invites.push(i);
+      else await answerInvite(i.token).catch(() => {});
+    }
+    const joins = [];
+    for (const o of mailRequests(mail)) {
+      if (!(o.from && isBlocked({ guid: o.from }))) joins.push(o);
+      else await sendOn(o.ch, { type: 'answer', status: 'declined' }).catch(() => {});
+    }
+    return [...requests.map(c => ({ ...c, kind: 'connect' })), ...invites, ...joins];
   };
 
   // The discard pile: what I've answered and can still change. Requests to join I said no to, waitlisted, or said yes
@@ -1278,11 +1318,12 @@ async function viewConfirm(v) {
     const mail = (mailView()?.hosting || []).filter(h => LIVE.includes(h.post.status)).flatMap(h => h.requests
       .filter(r => r.status === 'declined' || r.status === 'waitlisted' || (r.status === 'accepted' && !r.chatted))
       .map(r => ({ kind: 'mail', id: `m:${r.id}`, ch: r.id, pid: h.post.pid, title: h.post.title, note: r.note, from: r.from,
-        status: r.status, yes: r.status !== 'declined', at: r.updatedAt })));
+        guid: r.hello.attendee?.guid || null, status: r.status, yes: r.status !== 'declined', at: r.updatedAt })));
+    const icons = await blockedIcons();
     return [
-      ...mail,
-      ...declined.map(c => ({ ...c, kind: 'connect', yes: false, at: sqlTime(c.created_at) })),
-      ...await checkInvites(declinedInvites()),
+      ...mail.filter(o => !isBlocked({ guid: o.from || o.guid })),
+      ...declined.filter(c => !icons.has(c.requester.icon)).map(c => ({ ...c, kind: 'connect', yes: false, at: sqlTime(c.created_at) })),
+      ...(await checkInvites(declinedInvites())).filter(i => !icons.has(i.icon)),
     ].sort((a, b) => b.at - a.at);
   };
   const renderCard = (o) => o.kind === 'connect' ? connectCard(o) : o.kind === 'invite' ? inviteCard(o) : mailRequestCard(o);
@@ -1427,7 +1468,7 @@ async function viewPlans(v) {
     : ['in', "It's on"];
   const who = (m) => `${personAvatar(m.other)}
     <div><b>${m.role === 'attendee' ? `Hosted by ${esc(nameOrSomeone(m.other))}` : `${esc(nameOrSomeone(m.other))} is going`}</b>
-      ${m.last_message ? `<small>${esc(m.last_message)}</small>` : ''}</div>`;
+      ${m.last_message && !isBlocked({ guid: m.other }) ? `<small>${esc(clean(m.last_message))}</small>` : ''}</div>`;
   const card = (m) => {
     const [cls, text] = label(m);
     return `
@@ -1497,6 +1538,8 @@ async function viewChat(v, id) {
         ${m.role === 'host' && m.status === 'accepted' ? `<button class="btn small" id="happened">It happened</button>` : ''}
         ${m.role === 'attendee' && m.status === 'accepted' && !m.reconfirm ? `<button class="btn ghost small" id="leave">Can't make it</button>` : ''}
       </div>
+      ${isBlocked({ guid: m.other }) ? `<div class="notice">You blocked ${esc(name)}, so their messages are hidden.
+        <button type="button" class="link" id="unblockChat">Unblock</button></div>` : ''}
       <div class="msgs" id="msgs"></div>
       ${m.status === 'accepted' && m.reconfirm && m.role === 'attendee' ? `
         <div class="reconfirm">
@@ -1514,15 +1557,19 @@ async function viewChat(v, id) {
         </form>` : ''}
     </div>`;
   v.querySelector('.back').onclick = () => { state.chat = null; render(); };
+  v.querySelector('#unblockChat')?.addEventListener('click', async () => {
+    try { await setBlocked({ guid: m.other }, false); toast(`Unblocked ${name}`); render(); } catch (err) { toast(err.message); }
+  });
   v.querySelector('#addCal')?.addEventListener('click', () => addToCalendar({ id: m.id, title: m.title, location: m.location, location_name: m.location_name, online: m.online, when_text: m.when_text }));
 
   const msgsEl = v.querySelector('#msgs');
   let drawn = '';
   function drawMsgs(x) {
-    const nm = esc(nameOrSomeone(x.other));
+    const nm = esc(nameOrSomeone(x.other)), blocked = isBlocked({ guid: x.other });
     const html = `<div class="msg sys">${x.role === 'attendee' ? `You asked to join and ${nm} said yes!` : `${nm} asked to join and you said yes!`}</div>` +
       x.state.timeline.map(t => t.event === 'chat'
-        ? `<div class="msg ${t.role === x.role ? 'mine' : ''}">${esc(t.text)}</div>`
+        ? t.role === x.role ? `<div class="msg mine">${esc(t.text)}</div>`
+          : blocked ? '<div class="msg hidden-msg">Message hidden</div>' : `<div class="msg">${esc(clean(t.text))}</div>`
         : mailSystemLine(t, x) ? `<div class="msg sys notice">${esc(mailSystemLine(t, x))}</div>` : '').join('') +
       (x.status === 'attended' ? '<div class="msg sys">Marked as happened. Hope it was fun!</div>'
         : x.status === 'accepted' && x.reconfirm && x.role === 'host' ? `<div class="msg sys">Waiting for ${nm} to re-confirm</div>` : '');
@@ -1687,7 +1734,8 @@ function mountCostFields(form) {
 const emptyAudience = () => ({ groups: [], contacts: [] });
 function audienceGuids({ groups = [], contacts = [] }) {
   const all = vault.data.contacts;
-  return [...new Set([...contacts.filter(g => all[g]), ...Object.keys(all).filter(g => (all[g].tags || []).some(t => groups.includes(t)))])];
+  return [...new Set([...contacts.filter(g => all[g]), ...Object.keys(all).filter(g => (all[g].tags || []).some(t => groups.includes(t)))])]
+    .filter(g => !isBlocked({ guid: g })); // blocked contacts stop getting my private posts
 }
 const contactGroups = () => {
   const counts = {};
@@ -1952,6 +2000,159 @@ async function viewPost(v) {
   });
 }
 
+// ---------- moderation ----------
+// Everything here is the person's own choice, kept in their encrypted vault (moderation in public/moderation.js), and
+// only changes what they see. Guests get the defaults: the built-in word list and every report reason, on.
+const mod = () => moderationSettings(hasKeys() ? vault.data.moderation : null);
+const saveMod = (fn) => vault.update(api, (d) => { d.moderation = moderationSettings(d.moderation); fn(d.moderation); });
+// The built-in word list (profanity-list, served from node_modules), loaded once at startup (loadBuiltinWords).
+// Until it's loaded, or if it can't be, only the person's own lists apply.
+let builtinWords = builtinTerms([]);
+async function loadBuiltinWords() {
+  try { builtinWords = builtinTerms(await (await fetch('/vendor/profanity-en.json')).json()); wordCache = { key: null }; }
+  catch (err) { console.warn("Couldn't load the built-in word list", err); }
+}
+const MAX_REPORTED = 1000; // posts whose reports the vault remembers, for the report sheet
+
+// The word lists that are on, as term sets: all of them (to star words out) and the ones that hide whole posts.
+// Built again only when the lists change.
+let wordCache = { key: null };
+function wordFilters() {
+  const m = mod(), key = JSON.stringify([m.builtin, m.lists]);
+  if (wordCache.key !== key) {
+    const on = [...(m.builtin.on ? [{ set: builtinWords.set, hide: m.builtin.hide }] : []),
+      ...m.lists.filter(l => l.on).map(l => ({ set: ownTerms(l.words), hide: l.hide }))];
+    wordCache = { key, all: on.map(x => x.set), hide: on.filter(x => x.hide).map(x => x.set) };
+  }
+  return wordCache;
+}
+// Someone else's text with the filtered words starred out.
+const clean = (text) => censor(String(text ?? ''), wordFilters().all);
+const postText = (p) => [p.title, p.details, p.location_name, ...(p.tags || [])].join('\n');
+
+// Blocking: people are blocked by GUID (contacts) or signing key (the host of a public post I don't know), and a
+// contact is also blocked by any key saved for them, so their public posts are caught too.
+const sameKey = (a, b) => Boolean(a && b && a.x === b.x && a.y === b.y);
+function isBlocked({ guid = null, sign = null } = {}) {
+  const b = Object.values(mod().blocked);
+  if (!b.length) return false;
+  const key = sign || (guid && vault.data.contacts[guid]?.keys?.sign);
+  return b.some(x => (guid && x.guid === guid) || (key && sameKey(x.sign, key)));
+}
+const postBlocked = (p) => isBlocked({ guid: p.host || contactBySign(p.signer) || null, sign: p.signer || null });
+// Block or unblock someone: { guid?, sign?, name }. Blocking a contact also stops sharing private posts with them.
+async function setBlocked(who, on) {
+  const sign = who.sign || (who.guid && vault.data.contacts[who.guid]?.keys?.sign) || null;
+  await saveMod((m) => {
+    for (const [k, x] of Object.entries(m.blocked)) if ((who.guid && x.guid === who.guid) || (sign && sameKey(x.sign, sign))) delete m.blocked[k];
+    if (on) m.blocked[who.guid || `k:${sign.x}.${sign.y}`] = { guid: who.guid || null, sign, name: String(who.name || '').slice(0, 80), at: Date.now() };
+  });
+  syncAudiences().catch(err => toast(err.message));
+}
+// After a moderation change: refresh the view on screen without starting a deck over.
+function moderationChanged() {
+  if (fresh && document.body.contains(fresh.el)) Promise.resolve().then(fresh.refresh).catch(err => console.warn(err));
+  else render();
+}
+
+// Report counts for public posts (POST /api/public/reports, without cookies), kept for a minute.
+const REPORTS_TTL = 60_000;
+const reportCache = new Map(); // pid → { at, counts }
+async function reportCounts(pids) {
+  const now = Date.now(), need = pids.filter(p => !(now - (reportCache.get(p)?.at || 0) < REPORTS_TTL));
+  for (let i = 0; i < need.length; i += 500) {
+    const part = need.slice(i, i + 500);
+    try {
+      const res = await fetch('/api/public/reports', { method: 'POST', credentials: 'omit', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pids: part }) });
+      const { reports = {} } = await res.json();
+      for (const p of part) reportCache.set(p, { at: now, counts: reports[p] || null });
+    } catch { break; } // try again next time; until then nothing is hidden for its reports
+  }
+  return Object.fromEntries(pids.map(p => [p, reportCache.get(p)?.counts || null]));
+}
+// Which posts my settings hide, and why: Map pid → 'blocked' | 'words' | a report reason.
+async function moderatePosts(posts) {
+  const m = mod(), hide = wordFilters().hide, out = new Map();
+  const counts = await reportCounts(posts.filter(p => p.kind === 'public').map(p => p.pid));
+  for (const p of posts) {
+    const why = postBlocked(p) ? 'blocked' : reportedFor(counts[p.pid], m.reports) || (hide.length && mentions(postText(p), hide) ? 'words' : null);
+    if (why) out.set(p.pid, why);
+  }
+  return out;
+}
+
+// Report a post and/or block its host. Only public posts can be reported (the server keeps the counts for them);
+// a private post's host is one of my contacts, who I can block.
+function openReportSheet(pid) {
+  const post = mailView()?.posts.get(pid);
+  if (!post) return toast('That post is gone.');
+  const m = mod(), mine = m.reported[pid] || [], isPublic = post.kind === 'public';
+  const hostGuid = post.host || contactBySign(post.signer) || null;
+  const who = { guid: hostGuid, sign: post.signer || null, name: hostGuid ? displayName(hostGuid) : `Host of “${post.title}”` };
+  const blocked = isBlocked(who);
+  const hostName = hostGuid ? esc(displayName(hostGuid)) : 'this host';
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet';
+  sheet.innerHTML = `
+    <form class="stack panel" id="reportForm">
+      <h2>Report or block</h2>
+      ${isPublic ? `<fieldset class="checks"><legend>Report this post for</legend>
+        ${Object.entries(REPORT_REASONS).map(([r, label]) => `<label class="check"><input type="checkbox" name="reason" value="${r}" ${mine.includes(r) ? 'checked' : ''}> ${esc(label)}</label>`).join('')}
+      </fieldset>
+      <p class="note">Nobody else, including the host, learns who reported a post. The server counts reports, and
+        each person's own moderation settings decide how many reports it takes to hide a post from them. A post you
+        report goes to your discard pile.</p>`
+      : `<p class="note">This post was shared with you privately, so it can't be reported. You can block whoever shared it.</p>`}
+      <label class="check"><input type="checkbox" name="block" ${blocked ? 'checked' : ''}> Block ${hostName}: hide their posts${hostGuid ? ' and stop sharing your private posts with them' : ''}</label>
+      <div class="two">
+        <button type="button" class="btn ghost" id="cancelSheet">Cancel</button>
+        <button class="btn">Save</button>
+      </div>
+    </form>`;
+  document.body.appendChild(sheet);
+  const close = () => sheet.remove();
+  sheet.querySelector('#cancelSheet').onclick = close;
+  sheet.onclick = (e) => { if (e.target === sheet) close(); };
+  sheet.querySelector('#reportForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const reasons = [...e.target.querySelectorAll('input[name=reason]:checked')].map(i => i.value);
+    const block = e.target.block.checked, said = [];
+    e.target.querySelector('.btn:not(.ghost)').disabled = true;
+    try {
+      if (isPublic && (reasons.length !== mine.length || reasons.some(r => !mine.includes(r)))) {
+        await api('/api/public/report', { method: 'POST', body: { pid, reasons } });
+        reportCache.delete(pid); // count my report the next time posts are checked
+        await saveMod((x) => {
+          delete x.reported[pid];
+          if (reasons.length) x.reported[pid] = reasons; // newest last, and only the newest MAX_REPORTED kept
+          x.reported = Object.fromEntries(Object.entries(x.reported).slice(-MAX_REPORTED));
+        });
+        if (reasons.length && mailView()?.deck.some(p => p.pid === pid)) await pass(pid);
+        said.push(reasons.length ? 'Reported' : 'Report taken back');
+      }
+      if (block !== blocked) { await setBlocked(who, block); said.push(block ? 'Blocked' : 'Unblocked'); }
+      close();
+      if (said.length) { toast(said.join(' and ')); moderationChanged(); }
+    } catch (err) { toast(err.message); e.target.querySelector('.btn:not(.ghost)').disabled = false; }
+  };
+}
+document.addEventListener('click', (e) => {
+  const r = e.target.closest('[data-report]');
+  if (r) openReportSheet(r.dataset.report);
+});
+
+// Delete a contact: out of my vault (and any invitation connection on the server), and out of my posts' audiences.
+// They aren't told, and keep me as their contact; blocking is what keeps their posts away.
+async function deleteContact(guid) {
+  await api('/api/connections/remove', { method: 'POST', body: { guid } });
+  await vault.update(api, (d) => {
+    delete d.contacts[guid];
+    d.removedContacts = { ...d.removedContacts, [guid]: Date.now() };
+    for (const p of Object.values(d.posts || {})) if (p.audience?.contacts) p.audience.contacts = p.audience.contacts.filter(g => g !== guid);
+  });
+  syncAudiences().catch(err => toast(err.message));
+}
+
 // Edit the nickname and tags you keep for a contact. Saved only in your encrypted vault.
 function openContactSheet(guid, onSaved) {
   const c = vault.data.contacts[guid] || { nickname: '', tags: [] };
@@ -1973,9 +2174,27 @@ function openContactSheet(guid, onSaved) {
         <button type="button" class="btn ghost" id="cancelSheet">Cancel</button>
         <button class="btn">Save</button>
       </div>
+      ${isContact(guid) ? `<div class="two">
+        <button type="button" class="btn danger small" id="blockContact">${isBlocked({ guid }) ? 'Unblock' : 'Block'}</button>
+        <button type="button" class="btn danger small" id="deleteContact">Delete contact</button>
+      </div>
+      <p class="note">Blocking hides their posts and messages and stops sharing your private posts with them. Deleting
+        takes them out of your contacts. Neither one tells them.</p>` : ''}
     </form>`;
   document.body.appendChild(sheet);
   sheet.querySelectorAll('.tag-editor').forEach(el => mountTagEditor(el, CONTACT_TAGS));
+  const label = c.nickname || 'this contact';
+  sheet.querySelector('#blockContact')?.addEventListener('click', async () => {
+    const on = !isBlocked({ guid });
+    if (on && !confirm(`Block ${label}? You won't see their posts or messages, and your private posts won't be shared with them. They aren't told.`)) return;
+    try { await setBlocked({ guid, name: c.nickname }, on); close(); toast(on ? `Blocked ${label}` : `Unblocked ${label}`); moderationChanged(); }
+    catch (err) { toast(err.message); }
+  });
+  sheet.querySelector('#deleteContact')?.addEventListener('click', async () => {
+    if (!confirm(`Delete ${label} from your contacts? Your nickname and tags for them are deleted, and your private posts stop being shared with them. They aren't told. To stop seeing their posts too, block them instead.`)) return;
+    try { await deleteContact(guid); close(); toast(`Deleted ${label}`); onSaved?.(); }
+    catch (err) { toast(err.message); }
+  });
   const close = () => sheet.remove();
   sheet.querySelector('#cancelSheet').onclick = close;
   sheet.onclick = (e) => { if (e.target === sheet) close(); };
@@ -2042,6 +2261,8 @@ async function viewProfile(v) {
         </select></label>
     </form>
 
+    ${moderationHtml()}
+
     <div class="section-title">Invitations</div>
     <p class="note">Send people a link to connect. When someone opens it and asks to connect, they show up in your
       Confirm tab; once you say yes, you're in each other's contacts and can share private posts. Anyone with the link
@@ -2064,7 +2285,7 @@ async function viewProfile(v) {
       ${shown.length ? shown.map(c => `
         <button class="row" data-contact="${esc(c.guid)}">${avatar(c.guid)}
           <div class="grow"><div class="title">${esc(c.nickname || 'Unnamed contact')}</div>
-            <div class="sub">${(c.tags || []).map(t => '#' + esc(t)).join(' ')}${c.tags?.length ? ' · ' : ''}${c.together || 0} event${c.together === 1 ? '' : 's'} together</div></div>
+            <div class="sub">${isBlocked({ guid: c.guid }) ? 'Blocked · ' : ''}${(c.tags || []).map(t => '#' + esc(t)).join(' ')}${c.tags?.length ? ' · ' : ''}${c.together || 0} event${c.together === 1 ? '' : 's'} together</div></div>
           </button>`).join('')
         : `<p style="color:var(--muted)">${contacts.length ? 'No contacts with those tags.' : "Once you match with someone, they'll show up here for you to name and tag."}</p>`}
     </div>
@@ -2136,6 +2357,98 @@ async function viewProfile(v) {
     try { await api(`/api/passkeys/${b.dataset.rmkey}`, { method: 'DELETE' }); render(); } catch (e) { toast(e.message); }
   });
   v.querySelector('#logout').onclick = signOut;
+  mountModeration(v);
+  if (state.focus === 'moderation') { state.focus = null; v.querySelector('#moderation')?.scrollIntoView(); }
+}
+
+// Profile's Moderation section: word lists, report thresholds, and the people I've blocked.
+function moderationHtml() {
+  const m = mod(), fmt = (ms) => new Date(ms).toLocaleDateString();
+  const check = (name, on, label) => `<label class="check"><input type="checkbox" name="${name}" ${on ? 'checked' : ''}> <span>${label}</span></label>`;
+  const HIDE = 'Hide whole posts that use them, instead of starring the words out';
+  const blocked = Object.entries(m.blocked).sort(([, a], [, b]) => (b.at || 0) - (a.at || 0));
+  return `
+    <div class="section-title" id="moderation">Moderation</div>
+    <p class="note">Your own rules for what you see. They only change what you see, and they're kept in your encrypted
+      vault, so nobody else, including the server, can read them.</p>
+    <form class="stack" id="modForm">
+      <h3 class="sub-title">Word lists</h3>
+      <div class="mod-list">
+        ${check('builtinOn', m.builtin.on, `<b>Built-in list of offensive words</b><small>${builtinWords.entries || 'About 400'} slurs, sexual terms, and other
+          offensive words and phrases, from <a href="https://github.com/dsojevic/profanity-list" target="_blank" rel="noopener">profanity-list</a>. Mild words aren't on it.</small>`)}
+        ${check('builtinHide', m.builtin.hide, HIDE)}
+      </div>
+      ${m.lists.map((l, i) => `
+      <div class="mod-list" data-list="${i}">
+        <div class="mod-list-head">
+          <input name="name" maxlength="60" placeholder="List name" aria-label="List name" value="${esc(l.name)}">
+          <button type="button" class="btn danger small" data-del-list="${i}">Delete</button>
+        </div>
+        <label>Words and phrases, one per line or separated by commas. Add * after a letter that may repeat (so*o).
+          <textarea name="words" rows="3" spellcheck="false">${esc(l.words.join('\n'))}</textarea></label>
+        ${check('on', l.on, 'On')}
+        ${check('hide', l.hide, HIDE)}
+      </div>`).join('')}
+      ${m.lists.length < MAX_LISTS ? '<button type="button" class="btn ghost" id="addList">Add a word list</button>' : ''}
+
+      <h3 class="sub-title">Reports</h3>
+      <p class="note">People can report public posts. Hide a post from you, in Discover and its discard pile, once this
+        many people have reported it for that reason.</p>
+      ${Object.entries(REPORT_REASONS).map(([r, label]) => `
+      <div class="mod-report">
+        ${check(`rep-${r}`, m.reports[r].on, esc(label))}
+        <label class="count">at least <input type="number" name="count-${r}" min="1" max="${MAX_THRESHOLD}" step="1" value="${m.reports[r].count}" aria-label="${esc(label)}: number of reports"> ${m.reports[r].count === 1 ? 'report' : 'reports'}</label>
+      </div>`).join('')}
+    </form>
+
+    <h3 class="sub-title">Blocked</h3>
+    ${blocked.length ? `<div class="list">${blocked.map(([key, b]) => `
+      <div class="row">${avatar(b.guid || (b.sign ? `${b.sign.x}.${b.sign.y}` : null))}
+        <div class="grow"><div class="title">${esc((b.guid && isContact(b.guid) && displayName(b.guid)) || b.name || 'Someone')}</div>
+          <div class="sub">Blocked ${b.at ? fmt(b.at) : ''}</div></div>
+        <button type="button" class="btn ghost small" data-unblock="${esc(key)}">Unblock</button>
+      </div>`).join('')}</div>`
+    : '<p class="note">Nobody. Block someone from a post (Report or block) or from their contact info.</p>'}`;
+}
+
+function mountModeration(v) {
+  const form = v.querySelector('#modForm');
+  if (!form) return;
+  // Read the whole form back into the settings.
+  const read = (m) => {
+    m.builtin = { on: form.builtinOn.checked, hide: form.builtinHide.checked };
+    m.lists = [...form.querySelectorAll('[data-list]')].map((el, i) => ({
+      ...m.lists[i], name: el.querySelector('[name=name]').value.trim().slice(0, 60),
+      words: parseTerms(el.querySelector('[name=words]').value),
+      on: el.querySelector('[name=on]').checked, hide: el.querySelector('[name=hide]').checked,
+    }));
+    for (const r of Object.keys(REPORT_REASONS)) {
+      const count = reportThreshold(form[`count-${r}`].value) ?? m.reports[r].count;
+      form[`count-${r}`].value = count; // a number it can't take goes back to what was saved
+      m.reports[r] = { on: form[`rep-${r}`].checked, count };
+    }
+  };
+  form.addEventListener('change', async () => {
+    try {
+      await saveMod(read);
+      const long = [...form.querySelectorAll('[name=words]')].some(t => parseTerms(t.value).length >= MAX_LIST_WORDS);
+      toast(long ? `Saved. Each list keeps up to ${MAX_LIST_WORDS} words.` : 'Saved');
+    } catch (err) { toast(err.message); }
+  });
+  form.querySelector('#addList')?.addEventListener('click', async () => {
+    try {
+      await saveMod((m) => { read(m); m.lists.push({ id: b64u.enc(crypto.getRandomValues(new Uint8Array(9))), name: `My list ${m.lists.length + 1}`, words: [], on: true, hide: false }); });
+      state.focus = 'moderation'; render();
+    } catch (err) { toast(err.message); }
+  });
+  form.querySelectorAll('[data-del-list]').forEach(b => b.onclick = async () => {
+    if (!confirm('Delete this word list?')) return;
+    try { await saveMod((m) => { read(m); m.lists.splice(Number(b.dataset.delList), 1); }); state.focus = 'moderation'; render(); } catch (err) { toast(err.message); }
+  });
+  v.querySelectorAll('[data-unblock]').forEach(b => b.onclick = async () => {
+    const who = mod().blocked[b.dataset.unblock];
+    try { if (who) await setBlocked(who, false); toast('Unblocked'); render(); } catch (err) { toast(err.message); }
+  });
 }
 
 // Refresh the view on screen by scrolling up: Discover, Confirm, and Plans each hand keepFresh their element and a
@@ -2187,7 +2500,7 @@ setInterval(async () => {
 
 // Boot: restore the session and, if this browser still holds the keys, the vault.
 initMail(api);
-try { state.config = await api('/api/config'); } catch {}
+await Promise.all([api('/api/config').then(c => { state.config = c; }, () => {}), loadBuiltinWords()]);
 // An invitation link (#invite=…): remember it through sign-in, and take it out of the address bar.
 {
   const frag = new URLSearchParams(location.hash.slice(1)), token = frag.get('invite');

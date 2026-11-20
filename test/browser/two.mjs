@@ -19,7 +19,7 @@ const r = { posted: await A.ev(`document.getElementById('toast').textContent`) }
 // Guest finds it first in Discover, hosted by "Hosty", and swipes yes.
 await B.tab('confirm'); await B.tab('discover');
 await B.until(`document.querySelector('.card.top h2')?.textContent === 'Two-browser picnic'`).catch(async e => { console.log(JSON.stringify(r), await B.ev(`[...document.querySelectorAll('.card h2')].map(h => h.textContent).slice(0, 5).join(' | ')`), await B.ev(`import('/mail.js').then(m => m.mailView().deck.slice(0,3).map(p => p.title).join(' | '))`)); throw e; });
-r.card = await B.ev(`document.querySelector('.card.top .who').innerText`);
+r.card = await B.ev(`document.querySelector('.card.top .who b').innerText`);
 await B.ev(`document.querySelector('.round.yes').click()`); await wait(2500);
 r.asked = await B.ev(`document.getElementById('toast').textContent`);
 

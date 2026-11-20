@@ -1,15 +1,16 @@
-// Headless Chromium against the demo: the Feedback button beside the page title on every tab, posting (with the
-// character count and the 2048-character limit), a draft surviving a trip to another tab, and deleting your own.
+// Headless Chromium against the demo: the "Alpha" note under the board on every tab and its feedback link, the
+// About page's Feedback button, posting (with the character count and the 2048-character limit), a draft surviving
+// a trip to another tab, and deleting your own.
 import assert from 'node:assert/strict';
-import { browser, finish, wait } from '../lib.mjs';
+import { browser, finish, wait, BASE } from '../lib.mjs';
 
 const B = await browser('feedback');
 const items = () => B.ev(`[...document.querySelectorAll('.fb-item .fb-text')].map(e => e.textContent)`);
 
-// The button is on every tab, and opens the page.
+// The Alpha note is on every tab, and its link opens the page.
 for (const t of ['discover', 'confirm', 'plans', 'post', 'profile']) {
   await B.tab(t);
-  assert.ok(await B.ev(`Boolean(document.getElementById('feedbackLink'))`), `Feedback button on ${t}`);
+  assert.match(await B.ev(`document.querySelector('header.top .alpha-note')?.textContent || ''`), /Alpha.*Tell us what you think/s, `Alpha note on ${t}`);
 }
 await B.ev(`document.getElementById('feedbackLink').click()`);
 await B.until(`document.querySelector('.fb-empty')?.textContent.includes('No feedback yet')`);
@@ -18,6 +19,13 @@ assert.equal(await B.ev(`document.getElementById('feedbackLink').getAttribute('a
 assert.equal(await B.ev(`!document.querySelector('nav.tabs [aria-current]')`), true, 'no tab is marked as open');
 assert.match(await B.ev(`document.querySelector('.fb-intro').textContent`), /only you can see/);
 assert.equal(await B.ev(`document.getElementById('fbBody').maxLength`), 2048);
+
+// The About page has the note and the Feedback button, which opens the same page in the app.
+await B.send('Page.navigate', { url: BASE + '/about' }); await wait(1500);
+assert.match(await B.ev(`document.querySelector('.bar .alpha-note').textContent`), /Alpha.*Feedback/s);
+await B.ev(`document.querySelector('.bar .alpha-note a.btn').click()`);
+await B.until(`document.querySelector('.page-title')?.textContent === 'Feedback'`);
+assert.equal(await B.ev(`location.search`), '', 'the open=feedback is taken out of the address');
 
 // A draft survives going to another tab and back.
 await B.ev(`document.getElementById('fbBody').focus()`);

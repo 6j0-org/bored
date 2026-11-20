@@ -23,8 +23,8 @@ npm start      # http://localhost:3000
 
 ```sh
 npm test               # all of them
-npm run test:unit      # HPKE against RFC 9180's test vectors, the request rules in posts.js, and feedback.js; no server
-npm run test:server    # real accounts in Node against a demo-mode server: mail, public posts, and demo seeding
+npm run test:unit      # HPKE against RFC 9180's test vectors, the request rules in posts.js, feedback.js, and moderation.js; no server
+npm run test:server    # real accounts in Node against a demo-mode server: mail, public posts, reports, and demo seeding
 npm run test:browser   # the real UI in two headless Chromium profiles: post, join, match, chat, and leave
 ```
 
@@ -68,8 +68,9 @@ the `ORIGIN` hostname), `VAPID_SUBJECT` (a `mailto:` or `https:` contact for pus
 
 ### Feedback
 
-The Feedback button beside the page title (on every screen once you're signed in) opens a page where people read
-everyone's feedback and post their own: plain text, up to 2048 characters. Posts show no author; the server files
+Bored is in alpha, and every screen says so in a note under the board, with a link to the feedback page; the About
+page has a Feedback button that opens it too. People who aren't signed in are asked to sign in first. The page is
+where people read everyone's feedback and post their own: plain text, up to 2048 characters. Posts show no author; the server files
 each one under the account's GUID so people can delete their own. Each account can post 5 times a day, and everyone
 together 500 times a day. The admin (`ADMIN_SUB` or `ADMIN_GUID`) can delete anyone's posts, and theirs are labeled
 "Developer". In the demo, each visitor sees only their own posts.
@@ -108,7 +109,7 @@ APPS=bored=http://127.0.0.1:3000 ORIGIN=http://localhost:4000 npm start
 AUTH_MODE=6j0 ID_ORIGIN=http://localhost:4000 ORIGIN=http://127.0.0.1:3000 npm start   # open http://127.0.0.1:3000
 ```
 
-**Database migrations** run automatically on startup (`MIGRATIONS` in `db.js`, none yet). The `CREATE TABLE`s are
+**Database migrations** run automatically on startup (`MIGRATIONS` in `db.js`). The `CREATE TABLE`s are
 the schema as of the first real users; every change after that is a numbered migration, tracked in SQLite's
 `PRAGMA user_version`. To change the schema, append a migration (never edit or reorder old ones). Back up
 `data.sqlite*` before deploying one. A database from before the schema was reset (November 2026) can't be upgraded:
@@ -138,6 +139,30 @@ move off the waitlist in order as spots open. Posts with no limit stay open unti
 **private** by default: only the contacts and groups (contact tags) the host picks can see them. Until someone has a
 contact (from matching or an invitation), new posts are public. **Public** posts show for everyone, including
 signed-out guests. A post stays public or private once it's posted.
+
+## Moderation
+
+Moderation is up to each person, in **Profile → Moderation**. The settings are kept in their encrypted vault, and they
+only change what that person sees. Guests get the defaults, and everything is on by default.
+
+- **Word lists.** The built-in list of offensive words stars them out of other people's posts, request notes, and chats.
+  People can add their own lists (one word or phrase per line; `x*` means the letter can repeat), and set each list,
+  built-in or their own, to hide whole posts that use its words instead. Words are matched whole, and plurals count, so
+  "class" never matches a word inside it. The built-in list is
+  [profanity-list](https://github.com/dsojevic/profanity-list) (the `@dsojevic/profanity-list` npm package, MIT),
+  leaving out its mildest entries (everyday words like mild swearing, religious words, and medical terms). The server
+  serves it from `node_modules` like the other browser packages, so the words aren't in this repository.
+- **Reports.** "Report or block" on someone else's card reports a public post for spam, scam or fraud, offensive,
+  harassment or hate, or dangerous or illegal content. A post you report goes to your discard pile, like a pass. The
+  server counts reports per post and reason. Each person picks, per reason, how many reports it takes to hide a post
+  from them (3 by default), or turns that reason off; hidden posts are left out of Discover and its discard pile until
+  they change the setting. Private posts can't be reported, since they come from contacts, who can be blocked.
+- **Blocking** someone (from a post's "Report or block", or a contact's info) hides their posts and their chat
+  messages, says no to their requests to join, connect, and invitations without showing them, and stops sharing
+  private posts with them. Requests from strangers are anonymous, so blocking only catches people who say who they
+  are. Blocked people are listed in Moderation, to unblock.
+- **Deleting a contact** removes them from your contacts (and any invitation connection on the server), and stops
+  sharing private posts with them. Neither blocking nor deleting tells the other person.
 
 ## Privacy model
 
@@ -175,8 +200,10 @@ of. Everything else happens in the browser: filtering Discover, who's in, the wa
     inboxes don't. It never stores who sent a message. It does see which signed-in session sends each message as it
     arrives (for rate limits, kept in memory) and every request's IP address, though it doesn't store either. Mail is
     read without cookies.
+  - Reports on public posts, as each arrives with its session. They're stored under a keyed hash of the account and
+    the post, with no timestamps, so the table alone isn't a list of who reported what; but the server holds the key.
   - Not readable: private posts and who they're shared with, who asked to join anything, answers, matches,
-    waitlists, attendance, and chats.
+    waitlists, attendance, chats, moderation settings, and who you've blocked.
   - Also stored: accounts, passkeys, sessions, push subscriptions, each account's encrypted vault, and invitation
     connections (who connected with whom, in plaintext).
 - **Names are private.** You see only the nicknames *you* gave people. Everyone's avatar is the
@@ -221,7 +248,9 @@ of. Everything else happens in the browser: filtering Discover, who's in, the wa
 - **Each browser downloads every live public post.** Fine at this size; splitting by region would come later.
 - **Two devices sending on the same request at the same instant** can lose one of the two messages.
 - **Spam:** anyone can send a request to a public post's host. Rate limits on the server, plus the browser ignoring
-  anything the rules don't allow, are the only defense.
+  anything the rules don't allow, are the only defense. Blocking can't catch a stranger's request, which is anonymous.
+- **Report counts can be gamed** by someone with many accounts, like any vote. Each person's own threshold, and
+  being able to turn a reason off, limit the damage.
 
 See `TODO.md` for the full list of open security and privacy issues.
 
@@ -245,6 +274,7 @@ See `TODO.md` for the full list of open security and privacy issues.
 - `public/theme.js`: the automatic / light / dark theme switch, applied before the page draws
 - `public/board.webp`: the wooden board behind the Bored title
 - `public/when.js`, `public/cost.js`: event time (with repeat rules) and cost formats, shared by server and browser
+- `public/moderation.js`: word filters, report thresholds, and moderation settings
 - `public/pii.js`: finds contact info and ID numbers in posts and notes, which the post form points out as you type
   and refuses (and the server refuses in public posts), with [`@devopscoop/eat-the-pii`](https://gitlab.com/devopscoop/eat-the-pii) (installed from
   its git URL, so `.npmrc` sets `allow-git=root`); `public/libphonenumber.js` loads its phone number data in the browser
@@ -268,4 +298,5 @@ The AGPL also covers running Bored as a service: if you run a modified version f
 its source. The app links to the source from the sign-in and Profile screens (`SOURCE_URL` in `public/app.js`); point
 it at your own repository if you change the code.
 
-The bundled National Park font is under the SIL Open Font License 1.1 (`public/fonts/NationalPark-OFL.txt`), and Jdenticon, eat-the-pii, and libphonenumber-js are MIT.
+The bundled National Park font is under the SIL Open Font License 1.1 (`public/fonts/NationalPark-OFL.txt`), and Jdenticon, eat-the-pii, libphonenumber-js, and profanity-list are MIT.
+The built-in word list is David Sojevic's profanity-list (MIT).

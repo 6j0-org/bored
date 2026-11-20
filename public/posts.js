@@ -111,7 +111,7 @@ function apply(st, m) {
     case 'hello': {
       if (s !== 'accepted' && s !== 'attended') return false;
       if (st.hello[m.role] || typeof m.guid !== 'string' || !m.chat || !m.sign) return false;
-      st.hello[m.role] = { guid: m.guid, chat: m.chat, sign: m.sign, inbox: m.inbox || null };
+      st.hello[m.role] = { guid: m.guid, chat: m.chat, sign: m.sign, inbox: m.inbox || null, at: Number(m.at) || 0 };
       return true;
     }
     case 'update':

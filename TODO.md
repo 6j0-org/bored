@@ -148,11 +148,18 @@ left**, and about the limits of doing end-to-end encryption in a web app.
 - [ ] **P1: Spam requests to join.** Anyone can send requests to a public post's host, anonymously by design. Beyond
   the rate limits, the browser only ignores what the rules don't allow. Consider a way for hosts to stop requests on
   a post, or proof-of-work on requests.
-- [ ] **P0: In-person safety.** Users meet anonymous strangers in real life. Add blocking, reporting, safety tips, and
-  a way to unmatch and hide your posts from someone. Design reporting so it doesn't break the privacy model
-  (e.g. the reporter voluntarily reveals specific decrypted messages).
+- [ ] **P0: In-person safety.** Users meet anonymous strangers in real life. Blocking, reporting public posts, and
+  user-controlled moderation are in (README, "Moderation"). Still missing: safety tips, a way to unmatch, hiding your
+  public posts from someone you blocked (they're public, so a blocked person still sees them), and reporting a
+  person or a chat, not just a public post (e.g. the reporter voluntarily reveals specific decrypted messages).
 - [ ] **P1: Anonymous public posts can be abused** (harassment, scams, illegal events). Moderation needs to work without
   identities: think through tooling.
+- [ ] **P1: Reports are tied to accounts as they arrive.** The server needs one per account to count people, so it
+  sees which account reports which public post (stored under a keyed hash, but it holds the key). Consider anonymous
+  credentials (Privacy Pass-style tokens, one per post) so it can count without knowing who. Counts can also be gamed
+  with many accounts (see the Sybil item above).
+- [ ] **P2: The word filter only matches whole words,** without leetspeak (e.g. digits for letters) or words run
+  together. Matching inside words would bring back the Scunthorpe problem; a careful leetspeak pass might be worth it.
 - [ ] **P2: Request size limits** are 512 KB per body and 200 KB per encrypted blob. Review them once real usage is known.
 
 ## 7. Data retention and deletion

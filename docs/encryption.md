@@ -352,6 +352,8 @@ anything.
 | The vault | No | Encrypted with the vault key. |
 | Invitation connections | **Yes** | Who connected with whom through an invitation link. Still plaintext (see `TODO.md`). |
 | Your location (distance filter) | No | Stays in the browser; Discover filters locally. |
+| Reports on public posts | **Yes**, as it arrives | Counted per post. Stored under a keyed hash of the account and the post, so the table alone is no list of who reported what, but the server holds the key and sees each one arrive. |
+| Your moderation settings and who you've blocked | No | In the vault. Word filters and report thresholds are applied in the browser. |
 
 ## 9. Choices we considered and didn't make
 
@@ -399,5 +401,7 @@ These are also tracked in `TODO.md`.
 - **No push before a match**, since channel inboxes aren't tied to accounts.
 - **The waitlist moves only while the host's browser is open.**
 - **Spam:** anyone can send requests to a public post's host. Rate limits and the browser's rules are the only defense.
+  Blocking only catches requests from contacts, since a stranger's request is anonymous by design.
+- **Reports reveal who reported.** Reporting a public post tells the server which account did it, as it arrives.
 - **Public posts link to one host** through their signing key and reply inbox.
 - **Invitation connections are plaintext.**

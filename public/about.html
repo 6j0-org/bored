@@ -17,19 +17,20 @@
       --bg: #f2eee5; --surface: #fffcf6; --text: #2b2219; --muted: #776a5a; --line: #e2d9c9;
       --accent: #2f6b3a; --accent-ink: #ffffff; --accent-soft: #e0e9d5; --accent-text: #2a5f33;
       --shadow: 0 10px 30px rgba(43, 34, 25, .12); --wood-line: #934e23;
+      --alpha-bg: #fef3c7; --alpha-text: #92400e;
       color-scheme: light dark;
     }
     /* Dark: when the device asks for it (theme "automatic"), or when chosen (public/theme.js). */
     @media (prefers-color-scheme: dark) {
       :root:not([data-theme="light"]) {
         --bg: #14110d; --surface: #211c16; --text: #f0e9dd; --muted: #a69885; --line: #362e25;
-        --accent: #4e9258; --accent-soft: #24382a; --accent-text: #8cc293; --shadow: 0 10px 30px rgba(0, 0, 0, .5); --wood-line: #a75e25;
+        --accent: #4e9258; --accent-soft: #24382a; --accent-text: #8cc293; --shadow: 0 10px 30px rgba(0, 0, 0, .5); --wood-line: #a75e25; --alpha-bg: #78350f; --alpha-text: #fef3c7;
         color-scheme: dark;
       }
     }
     :root[data-theme="dark"] {
       --bg: #14110d; --surface: #211c16; --text: #f0e9dd; --muted: #a69885; --line: #362e25;
-      --accent: #4e9258; --accent-soft: #24382a; --accent-text: #8cc293; --shadow: 0 10px 30px rgba(0, 0, 0, .5); --wood-line: #a75e25;
+      --accent: #4e9258; --accent-soft: #24382a; --accent-text: #8cc293; --shadow: 0 10px 30px rgba(0, 0, 0, .5); --wood-line: #a75e25; --alpha-bg: #78350f; --alpha-text: #fef3c7;
       color-scheme: dark;
     }
     :root[data-theme="light"] { color-scheme: light; }
@@ -89,6 +90,15 @@
       display: block; width: 97%; align-self: center; text-align: center;
       font-size: clamp(2.7rem, 12vw, 5.4rem); transform: rotate(-1.2deg);
     }
+    /* "Alpha" under the board, asking for feedback (the same as in the app, public/style.css). The Feedback button
+       opens the app's feedback page (through "/?start", like "Open Bored"), which asks guests to sign in first. */
+    .alpha-note { margin: 16px 0 0; text-align: center; font-size: .9rem; color: var(--muted); text-wrap: balance; }
+    .alpha-tag {
+      display: inline-block; margin-right: 4px; padding: 1px 8px; border-radius: 999px; vertical-align: 1px;
+      background: var(--alpha-bg); color: var(--alpha-text); font-size: .74rem; font-weight: 800;
+      letter-spacing: .06em; text-transform: uppercase;
+    }
+    .alpha-note .btn { margin-left: 6px; vertical-align: middle; }
     /* the board's wood brown and dark outline, lettered in National Park (same as the app's buttons, public/style.css) */
     .btn {
       display: inline-block; text-decoration: none; border: 1.5px solid #472610; border-radius: 6px; padding: 12px 20px;
@@ -214,6 +224,8 @@
   <div class="wrap">
     <header class="bar">
       <span class="board" aria-label="Bored?">Bored?</span>
+      <p class="alpha-note"><span class="alpha-tag">Alpha</span> Bored is new and still changing. Tell us what works and what doesn't.
+        <a class="btn ghost small" href="/?start&amp;open=feedback">Feedback</a></p>
     </header>
 
     <div class="hero">

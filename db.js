@@ -129,7 +129,17 @@ CREATE TABLE IF NOT EXISTS app_settings (key TEXT PRIMARY KEY, value TEXT NOT NU
 // change: every change is a migration below. Append one, never edit or reorder old ones. The database's PRAGMA
 // user_version counts how many have run; on startup the rest run in order, each in its own transaction with the
 // version bump, so a failure leaves the database on the last good version.
-const MIGRATIONS = [];
+const MIGRATIONS = [
+  // 1. Reports on public posts, so people can hide posts enough people reported (see public/moderation.js). `who` is a
+  // keyed hash of the account and the post (server.js reporterOf), so a copy of the table alone doesn't say who
+  // reported what. No timestamps.
+  `CREATE TABLE post_reports (
+     pid    TEXT NOT NULL REFERENCES public_posts(pid) ON DELETE CASCADE,
+     who    TEXT NOT NULL,
+     reason TEXT NOT NULL,
+     PRIMARY KEY (pid, who, reason)
+   ) WITHOUT ROWID;`,
+];
 
 export function migrate() {
   const from = db.prepare('PRAGMA user_version').get().user_version;

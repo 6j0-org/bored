@@ -19,6 +19,7 @@
 //   passedAt: { [pid]: ms }                                    when, for the discard pile's order (older ones lack it)
 //   invitesSeen: [token]                         invitations to connect sent to me that I've answered (newest last)
 //   invitesDeclined: { [token]: { token, key, name, at } }       the ones I said no to, for Confirm's discard pile
+//   removedContacts: { [guid]: ms }             contacts I deleted, and when, so an old match doesn't add them back
 //   contacts[guid].keys: { chat, sign, inbox }  a contact's keys, saved the first time they're used (so the server
 //                                               can't swap them later)
 import {
@@ -225,7 +226,10 @@ async function act_() {
   const each = (r, role) => {
     const other = role === 'host' ? 'attendee' : 'host';
     if ((r.status === 'accepted' || r.status === 'attended') && !r.hello[role]) hellos.push(r.id);
-    if (r.hello[other] && !vault.data.contacts[r.hello[other].guid]) contacts[r.hello[other].guid] = r.hello[other];
+    const h = r.hello[other];
+    // Not someone I deleted, unless this is a new match since (their hello came after).
+    const gone = h && vault.data.removedContacts?.[h.guid];
+    if (h && !vault.data.contacts[h.guid] && !(gone && h.at <= gone)) contacts[h.guid] = h;
   };
   view.requests.forEach(r => each(r, 'attendee'));
   view.hosting.forEach(h => h.requests.forEach(r => each(r, 'host')));

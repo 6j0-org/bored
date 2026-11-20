@@ -307,6 +307,9 @@ export async function addPasskey(api, nextStep) {
 //   posts, requests, passed: my posts, my requests to join (with their channel secrets), and posts I passed on (see
 //     public/mail.js)
 //   prefs: { distanceUnit: 'km' | 'mi' },  (settings from Profile)
+//   moderation: { builtin, lists, reports, blocked, reported },  (my word lists, report thresholds, who I've blocked,
+//     and what I reported; see public/moderation.js)
+//   removedContacts: { [guid]: ms },  (contacts I deleted, so an old match doesn't add them back; public/mail.js)
 //   invites: { [inviteId]: { token, key, name } },  (my invitation links, so I can share them again; the server has
 //     only hashes. name is the nickname I suggested; key decrypts the nicknames people suggest when they ask)
 //   pendingNames: { [iconHash]: nickname },  (nicknames for inviters I've asked to connect with, applied once they confirm)

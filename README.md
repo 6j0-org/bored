@@ -129,7 +129,8 @@ Discover, Confirm, and Plans refresh when you scroll back up to the top of the p
 while you're already there; the page gives a little bump when it does. Refreshing never resets a deck, and swiped
 cards stay gone from it, so the decks have no undo button. Under the Discover deck, the **discard pile** shows the full cards you passed on or are still
 waiting to hear back about, newest first, labelled "I'm in" or "Pass". Swipe one again (or use its button) to change
-your mind: a pass becomes a request to join, and a request the host hasn't answered yet is taken back. **Confirm** has
+your mind: a pass becomes a request to join, and a request the host hasn't answered yet is taken back. **Delete** clears
+a card out of the pile for good (it stays out of the deck too; deleting a request you're waiting on takes it back first). **Confirm** has
 a discard pile too: requests to join you said no to, waitlisted, or said yes to (until you've chatted), and connection
 requests and invitations you said no to. Swipe one again to change your answer. **Plans** shows the full card for each
 match; click one to open its chat, which is also where a match is changed once you've chatted.

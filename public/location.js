@@ -353,7 +353,46 @@ export function mountLocationField(form) {
     if (place) place.hidden = r.value === '1' && r.checked;
   }));
   // Clearing the name clears the spot too, so an empty box means no location.
-  name.addEventListener('input', () => { if (!name.value.trim()) coords.value = ''; });
+  name.addEventListener('input', () => { if (!name.value.trim()) coords.value = ''; showResults(''); searchNo++; });
+
+  // Enter in the name box searches for places (not as you type: Nominatim's policy forbids that), and picking one
+  // sets the name and the spot. Typed coordinates go straight to that spot. Near the spot already picked, if any.
+  const resultsEl = document.createElement('ul');
+  resultsEl.className = 'map-results place-results'; resultsEl.hidden = true; resultsEl.setAttribute('aria-live', 'polite');
+  name.closest('.loc-field').after(resultsEl);
+  const showResults = (html) => { resultsEl.innerHTML = html; resultsEl.hidden = !html; };
+  let searchNo = 0, found = [];
+  const choose = (p) => {
+    coords.value = fmt(p.lat, p.lon);
+    if (p.name) name.value = p.name;
+    showResults(''); searchNo++;
+    name.focus();
+  };
+  name.addEventListener('keydown', async (e) => {
+    if (e.key === 'Escape' && !resultsEl.hidden) { e.preventDefault(); e.stopPropagation(); showResults(''); searchNo++; return; }
+    if (e.key !== 'Enter' || e.isComposing) return;
+    e.preventDefault(); // don't submit the post form
+    const q = name.value.trim(), ll = parseLatLon(q);
+    if (ll) { coords.value = fmt(...ll); name.value = ''; name.placeholder = 'Spot picked on the map (no name yet)'; return showResults(''); }
+    if (q.length < 2) return showResults('<li class="note">Type at least 2 letters to search.</li>');
+    const n = ++searchNo, near = parseLatLon(coords.value);
+    showResults('<li class="note">Searching…</li>');
+    try {
+      const places = await searchPlaces(q, near ? [near[1] - 0.5, near[0] - 0.5, near[1] + 0.5, near[0] + 0.5] : null);
+      if (n !== searchNo) return;
+      found = places;
+      showResults(places.length
+        ? places.map((p, i) => `<li><button type="button" data-result="${i}"><strong>${esc(p.name)}</strong>
+            ${p.detail ? `<span>${esc(p.detail)}</span>` : ''}</button></li>`).join('')
+        : '<li class="note">No places found. Try adding the town, or pick the spot on the map.</li>');
+    } catch (err) {
+      if (n === searchNo) showResults(`<li class="note">${esc(err.message.replace('Try moving the map instead.', 'Try picking the spot on the map.'))}</li>`);
+    }
+  });
+  resultsEl.onclick = (e) => {
+    const b = e.target.closest('[data-result]');
+    if (b) choose(found[Number(b.dataset.result)]);
+  };
   btn.onclick = async () => {
     const v = await pickLocation(coords.value, name.value);
     if (v !== undefined) {

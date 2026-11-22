@@ -6,9 +6,9 @@ import {
 } from './secure.js';
 import { locationHtml, mountLocationField, pickLocation, PIN_SVG } from './location.js';
 import { mountFeedback } from './feedback.js';
-import { parseWhen, repeatOptions, whenLabel as fmtWhen, localToday, occursBetween } from './when.js';
+import { parseWhen, parseEnd, shiftEnd, repeatOptions, whenLabel as fmtWhen, localToday, occursBetween } from './when.js';
 import {
-  initMail, resetMail, loadMail, mailView, requestJoin, sendOn, pass, unpass, savePost, setPostStatus, reshare,
+  initMail, resetMail, loadMail, mailView, requestJoin, sendOn, pass, unpass, deletePassed, savePost, setPostStatus, reshare,
   invitesForMe, answerInvite, sendInvite, declinedInvites,
 } from './mail.js';
 import { LIVE } from './posts.js';
@@ -27,7 +27,7 @@ const TAGS = ['help', 'hiking', 'food', 'gardening', 'hauling', 'moving', 'fixin
 const MAX_TAGS = 5;
 const MAX_ATTENDEES_LIMIT = 500; // must match db.js
 const attendeesLabel = (max) => (max == null ? 'No limit' : max === 1 ? '1 person' : `Up to ${max} people`);
-const whenLabel = (s) => fmtWhen(s, { today: localToday() });
+const whenLabel = (s, end) => fmtWhen(s, { today: localToday(), end });
 // Discover's cost filter: prices in different currencies can't be compared, so it's just free vs. paid.
 const COST_FILTERS = { free: 'Free', paid: 'Paid' };
 // Discover's distance filter: your spot (kept on this device only) and a radius, in the unit you picked in Profile
@@ -623,14 +623,15 @@ document.addEventListener('keydown', (e) => mountDeck.keyHandler?.(e));
 
 // A discard pile, under a deck: full cards already answered, newest first, each labelled with the answer. Swipe one
 // again, or use its button, to change it. items: [{ yes, ... }] (yes: the answer now); label(item) → [class, text];
-// onChange(item, yes) saves the new answer and redraws (false: nothing changed, put the card back). Returns
+// onChange(item, yes) saves the new answer and redraws (false: nothing changed, put the card back). onDelete(item),
+// if given, adds a Delete button that removes the card from the pile for good (false: put it back). Returns
 // { busy() }, so a refresh can wait until a change is done.
-function mountPile(el, { items, renderCard, label, onChange, yesLabel, noLabel }) {
+function mountPile(el, { items, renderCard, label, onChange, onDelete, yesLabel, noLabel }) {
   let busy = false;
   el.hidden = !items.length;
   el.innerHTML = !items.length ? '' : `
       <h2 class="section-title pile-title">Discard Pile</h2>
-      <p class="note">Changed your mind? Swipe a card again, or use its button.</p>
+      <p class="note">Changed your mind? Swipe a card again, or use its button.${onDelete ? ' Delete one to clear it out of here for good.' : ''}</p>
       <div class="pile-list">${items.map((it, i) => {
         const [cls, text] = label(it);
         return `
@@ -639,6 +640,7 @@ function mountPile(el, { items, renderCard, label, onChange, yesLabel, noLabel }
           <span class="label ${cls}">${esc(text)}</span>
           ${renderCard(it)}
           <div class="pile-actions">
+            ${onDelete ? '<button type="button" class="btn danger small" data-delete>Delete</button>' : ''}
             <button type="button" class="btn ghost small" data-flip>Change to ${esc(it.yes ? noLabel : yesLabel)}</button>
           </div>
         </div>`;
@@ -655,6 +657,15 @@ function mountPile(el, { items, renderCard, label, onChange, yesLabel, noLabel }
       finally { busy = false; }
     };
     card.querySelector('[data-flip]').onclick = () => change(!it.yes);
+    const del = card.querySelector('[data-delete]');
+    if (del) del.onclick = async () => {
+      if (busy) return;
+      busy = true;
+      card.style.opacity = '0';
+      try { if ((await onDelete(it)) === false) restore(); }
+      catch (err) { toast(err.message); restore(); }
+      finally { busy = false; }
+    };
     dragToSwipe(card, (yes) => change(yes));
   });
   return { busy: () => busy };
@@ -972,7 +983,7 @@ function eventCard(t, { who = null, mine = false } = {}) {
       <h2>${esc(t.title)}</h2>
       ${t.status === 'full' && who === null ? `<div class="meta"><span class="chip warn" title="Say yes to join the waitlist">Full: join the waitlist</span></div>` : ''}
       <dl class="facts">
-        ${t.when_text ? fact('When', `<button type="button" class="link" data-ics="${t.id}" title="Add to your calendar">${esc(whenLabel(t.when_text))}</button>`) : ''}
+        ${t.when_text ? fact('When', `<button type="button" class="link" data-ics="${t.id}" title="Add to your calendar">${esc(whenLabel(t.when_text, t.end_text))}</button>`) : ''}
         ${whereHtml(t) ? fact('Where', whereHtml(t)) : ''}
         ${fact('Cost', esc(costLabel(t.cost_amount, t.cost_currency)))}
         ${fact('Max attendees', attendeesLabel(t.max_attendees))}
@@ -1007,7 +1018,7 @@ function mailPostMatches(p) {
   const km = near && state.discoverRadius ? state.discoverRadius * kmPerUnit() : 0, online = state.discoverOnline;
   if (tags.size && !(p.tags || []).some(t => tags.has(t))) return false;
   if (costs.size && !costs.has(p.cost_amount > 0 ? 'paid' : 'free')) return false;
-  if (state.discoverDate) { const [from, to] = dateFilterRange(state.discoverDate); if (!occursBetween(p.when_text, from, to)) return false; }
+  if (state.discoverDate) { const [from, to] = dateFilterRange(state.discoverDate); if (!occursBetween(p.when_text, from, to, p.end_text)) return false; }
   if (km || online) return (km && distanceKm(near, p.location) <= km) || (online && p.online > 0);
   return true;
 }
@@ -1018,7 +1029,7 @@ function postCounts(posts) {
   return {
     tags: [...tags].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag)),
     costs: Object.keys(COST_FILTERS).map(c => ({ cost: c, count: posts.filter(p => cost(p) === c).length })),
-    dates: Object.keys(DATE_FILTERS).map(key => { const [from, to] = dateFilterRange(key); return { key, count: posts.filter(p => occursBetween(p.when_text, from, to)).length }; }),
+    dates: Object.keys(DATE_FILTERS).map(key => { const [from, to] = dateFilterRange(key); return { key, count: posts.filter(p => occursBetween(p.when_text, from, to, p.end_text)).length }; }),
     distances: near ? RADII.map(r => ({ km: r * kmPerUnit(), count: posts.filter(p => distanceKm(near, p.location) <= r * kmPerUnit()).length })) : [],
     online: posts.filter(p => p.online > 0).length,
   };
@@ -1104,6 +1115,14 @@ async function viewDiscover(v) {
       items: pileCards, renderCard: eventCard, yesLabel: "I'm in", noLabel: 'Pass',
       label: (c) => c.yes ? ['in', c.request === 'waitlisted' ? "I'm in · waitlist" : "I'm in"] : ['pass', 'Pass'],
       onChange: async (c, yes) => { await reswipe(c.post, c, yes); drawPile(); },
+      // Deleting a request I'm still waiting on takes it back first (the host hasn't answered yet).
+      onDelete: async (c) => {
+        if (c.yes && !confirm(`Delete “${c.title}” from your discard pile? Your request to join it is taken back.`)) return false;
+        if (c.yes) await reswipe(c.post, c, false);
+        await deletePassed(c.pid);
+        toast(`Deleted “${c.title}” from your discard pile`);
+        drawPile();
+      },
     });
   }
   // Change a swipe: pass → I'm in asks to join; I'm in → pass takes the request back (while the host hasn't
@@ -1432,7 +1451,7 @@ function mailMatches(view) {
     const other = r.hello[role === 'host' ? 'attendee' : 'host']?.guid || (role === 'attendee' ? post.host : null) || null;
     const last = [...r.timeline].reverse().find(t => t.event === 'chat');
     return { id: `m:${r.id}`, ch: r.id, role, status: r.status, reconfirm: r.reconfirm, other, state: r, post,
-      title: post.title, when_text: post.when_text, location: post.location, location_name: post.location_name, online: post.online,
+      title: post.title, when_text: post.when_text, end_text: post.end_text, location: post.location, location_name: post.location_name, online: post.online,
       last_message: last?.text || '' };
   };
   return [
@@ -1533,7 +1552,7 @@ async function viewChat(v, id) {
         ${personAvatar(m.other)}
         <div class="grow" style="flex:1;min-width:0">
           <b>${esc(name)}</b>
-          <div class="sub" style="color:var(--muted);font-size:.85rem">${esc(m.title)}${m.when_text ? ` · <button type="button" class="link cal-link" id="addCal" title="Add to your calendar">${esc(whenLabel(m.when_text))}</button>` : ''}${whereHtml(m) ? ' · ' + whereHtml(m) : ''}</div>
+          <div class="sub" style="color:var(--muted);font-size:.85rem">${esc(m.title)}${m.when_text ? ` · <button type="button" class="link cal-link" id="addCal" title="Add to your calendar">${esc(whenLabel(m.when_text, m.end_text))}</button>` : ''}${whereHtml(m) ? ' · ' + whereHtml(m) : ''}</div>
         </div>
         ${m.role === 'host' && m.status === 'accepted' ? `<button class="btn small" id="happened">It happened</button>` : ''}
         ${m.role === 'attendee' && m.status === 'accepted' && !m.reconfirm ? `<button class="btn ghost small" id="leave">Can't make it</button>` : ''}
@@ -1560,7 +1579,7 @@ async function viewChat(v, id) {
   v.querySelector('#unblockChat')?.addEventListener('click', async () => {
     try { await setBlocked({ guid: m.other }, false); toast(`Unblocked ${name}`); render(); } catch (err) { toast(err.message); }
   });
-  v.querySelector('#addCal')?.addEventListener('click', () => addToCalendar({ id: m.id, title: m.title, location: m.location, location_name: m.location_name, online: m.online, when_text: m.when_text }));
+  v.querySelector('#addCal')?.addEventListener('click', () => addToCalendar({ id: m.id, title: m.title, location: m.location, location_name: m.location_name, online: m.online, when_text: m.when_text, end_text: m.end_text }));
 
   const msgsEl = v.querySelector('#msgs');
   let drawn = '';
@@ -1639,12 +1658,12 @@ function eventFormFields(t = {}) {
         <label for="${locId}">Place</label>
         <div class="loc-field">
           <input id="${locId}" name="location_name" maxlength="100" value="${val('location_name')}" autocomplete="off"
-            placeholder="${t.location && !t.location_name ? 'Spot picked on the map (no name yet)' : 'e.g. Ocean Beach Pier'}">
+            placeholder="${t.location && !t.location_name ? 'Spot picked on the map (no name yet)' : 'Type a place and press Enter to search'}" enterkeyhint="search">
           <input type="hidden" name="location" value="${val('location')}">
           <button type="button" class="loc-pick" aria-label="Pick on a map" title="Pick on a map">${PIN_SVG}</button>
         </div>
       </div>
-      ${whenInputs(t.when_text)}
+      ${whenInputs(t.when_text, t.end_text)}
       ${costInputs(t)}
       ${audienceInputs(t)}
       <label>Max attendees
@@ -1652,24 +1671,34 @@ function eventFormFields(t = {}) {
           placeholder="e.g. 4, or blank for no limit" value="${t.max_attendees ?? ''}"></label>`;
 }
 
-// "When": the browser's date and time picker for the first (or only) time, plus a Repeats menu whose choices
-// follow the date picked (see public/when.js).
+// "When": the browser's date and time picker for the first (or only) time, an optional end, and a Repeats menu whose
+// choices follow the date picked (see public/when.js).
 const repeatOptionsHtml = (start, selected) => repeatOptions(start)
   .map(o => `<option value="${o.rule}" data-kind="${o.kind}" ${o.kind === selected ? 'selected' : ''}>${esc(o.label)}</option>`).join('');
-function whenInputs(v = '') {
-  const w = parseWhen(v);
+function whenInputs(v = '', end = '') {
+  const w = parseWhen(v), e = parseEnd(v, end);
   return `
-      <label>When
+      <label>Starts
         <input name="when_text" type="datetime-local" value="${esc(w?.start ?? '')}"></label>
+      <label>Ends (optional)
+        <input name="end_text" type="datetime-local" value="${esc(e?.end ?? '')}" min="${esc(w?.start ?? '')}"></label>
       <label>Repeats
         <select name="when_repeat" ${w ? '' : 'disabled'}>${repeatOptionsHtml(w?.start, w?.repeat.kind)}</select></label>`;
 }
 // New date → new repeat choices, keeping the same kind of repeat where it still exists. "The Nth weekday" and
 // "the last weekday" stand in for each other, since a date near the end of a month may offer only one of them.
+// Moving the start moves the end with it, so the length stays the same.
 function mountWhenFields(form) {
   const input = form.querySelector('input[name=when_text]'), sel = form.querySelector('select[name=when_repeat]');
+  const endIn = form.querySelector('input[name=end_text]');
   if (!input || !sel) return;
+  let before = input.value;
   input.addEventListener('input', () => {
+    if (endIn) {
+      if (endIn.value) endIn.value = shiftEnd(before, input.value, endIn.value);
+      endIn.min = input.value;
+    }
+    before = input.value;
     const kind = sel.selectedOptions[0]?.dataset.kind || 'once', kinds = repeatOptions(input.value).map(o => o.kind);
     const keep = kinds.includes(kind) ? kind
       : ['nthday', 'lastday'].includes(kind) ? kinds.find(k => k === 'nthday' || k === 'lastday') : 'once';

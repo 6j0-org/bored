@@ -1,7 +1,7 @@
 // A post's fields: checking what the post form sends, and what changed between two versions.
 // Encrypted posts never reach the server as plaintext, so the browser checks them, with the same rules the server
 // uses for the posts it still stores (eventFields in server.js).
-import { composeWhen } from './when.js';
+import { composeWhen, composeEnd } from './when.js';
 import { parseCost } from './cost.js';
 
 export const MAX_TAGS = 5, MAX_TAG_LENGTH = 24, MAX_ATTENDEES_LIMIT = 500; // the same as db.js
@@ -27,9 +27,9 @@ function location(v) {
   return `${lat.toFixed(6)},${lon.toFixed(6)}`;
 }
 function when(start, repeat) {
-  const s = str(start, 100, 'When'), rule = str(repeat, 100, 'Repeats');
+  const s = str(start, 100, 'Starts'), rule = str(repeat, 100, 'Repeats');
   if (!s) return s;
-  return composeWhen(s, rule) ?? fail(rule ? "That repeat doesn't fit the date picked" : 'When must be a date and time');
+  return composeWhen(s, rule) ?? fail(rule ? "That repeat doesn't fit the date picked" : 'Starts must be a date and time');
 }
 function maxAttendees(v, min = 1) {
   if (v === undefined || v === null || String(v).trim() === '') return null;
@@ -59,6 +59,7 @@ export async function postFields(body, { matched = 0 } = {}) {
     when_text: when(body.when_text, body.when_repeat),
     max_attendees: maxAttendees(body.max_attendees, Math.max(1, matched)),
   };
+  f.end_text = composeEnd(f.when_text, str(body.end_text, 100, 'Ends')); // optional: '' for none
   if (f.online === 1) { f.location = ''; f.location_name = ''; } // an online-only post has no place
   // No contact info or ID numbers: people share contact info in chat after they match.
   const { piiProblems } = await import('./pii.js');
@@ -71,6 +72,7 @@ export async function postFields(body, { matched = 0 } = {}) {
 // What attendees are asked to re-confirm after: the fields that changed, by key, with labels to show.
 export const FIELD_LABELS = { title: 'Title', details: 'Details', tags: 'Tags', location: 'Where', when_text: 'When', cost: 'Cost', max_attendees: 'Max attendees' };
 const fieldValue = (p, k) => k === 'cost' ? [p.cost_amount, p.cost_currency]
+  : k === 'when_text' ? [p.when_text, p.end_text || ''] // posts from before end times have none
   : k === 'location' ? [p.location, p.location_name, p.online] : p[k];
 export const changedFields = (before, after) =>
   Object.keys(FIELD_LABELS).filter(k => JSON.stringify(fieldValue(before, k) ?? null) !== JSON.stringify(fieldValue(after, k) ?? null));

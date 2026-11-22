@@ -1,6 +1,6 @@
 // "Add to calendar": an iCalendar file (RFC 5545, .ics) for one post. It's the format every major calendar app
 // imports (Apple, Google, Outlook, Thunderbird…); opening the downloaded file hands it to the default one.
-import { parseWhen } from './when.js';
+import { parseWhen, parseEnd } from './when.js';
 
 // Text values escape backslash, semicolon, comma, and newlines.
 const text = (s) => String(s).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
@@ -20,12 +20,14 @@ function fold(line) {
 
 const stamp = (d) => d.toISOString().replace(/[-:]/g, '').replace(/\.\d+/, ''); // 20261115T203000Z
 
-// e: { id, title, details?, location? ("lat,lon"), location_name?, online? (0 in person, 1 online, 2 both), when_text }. Returns the file's text, or null without a valid time.
-// Times are "floating" (no zone), like the post itself: 6:30 PM wherever you are. Posts have no end time, so the
-// calendar entry gets an hour.
+// e: { id, title, details?, location? ("lat,lon"), location_name?, online? (0 in person, 1 online, 2 both), when_text,
+// end_text? }. Returns the file's text, or null without a valid time.
+// Times are "floating" (no zone), like the post itself: 6:30 PM wherever you are. A post without an end time gets an
+// hour. With a repeat, each occurrence lasts as long as the first (DTEND sets the length).
 export function icsFor(e, { origin = location.origin } = {}) {
   const w = parseWhen(e.when_text);
   if (!w) return null;
+  const end = parseEnd(e.when_text, e.end_text);
   const geo = /^(-?\d+(?:\.\d+)?),(-?\d+(?:\.\d+)?)$/.exec(e.location || '');
   const lines = [
     'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Bored//Bored//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
@@ -33,7 +35,7 @@ export function icsFor(e, { origin = location.origin } = {}) {
     `UID:event-${e.id}@${new URL(origin).host}`,
     `DTSTAMP:${stamp(new Date())}`,
     `DTSTART:${w.start.replace(/[-:]/g, '')}00`,
-    'DURATION:PT1H',
+    end ? `DTEND:${end.end.replace(/[-:]/g, '')}00` : 'DURATION:PT1H',
     ...(w.rule ? [`RRULE:${w.rule}`] : []),
     `SUMMARY:${text(e.title)}`,
     ...(e.details ? [`DESCRIPTION:${text(e.details)}`] : []),

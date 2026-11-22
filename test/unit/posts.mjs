@@ -198,6 +198,10 @@ const ID = (id) => ({ guid: id, chat: { x: id }, sign: { x: id }, inbox: id + '-
     passed: ['b', 'd'], passedAt: { b: 100 },
   });
   assert.deepEqual(r.swiped.map(p => [p.pid, p.swipe, p.request]), [['a', 'in', 'pending'], ['b', 'pass', null], ['d', 'in', 'pending']]);
+  // A pass deleted from the pile leaves it, and stays out of the deck.
+  const r2 = derive({ me: { sign: GUEST }, posts: [a, b].map(p => ({ post: p, signer: HOST })), passed: ['a', 'b'], deleted: ['b'] });
+  assert.deepEqual(r2.swiped.map(p => p.pid), ['a']);
+  assert.deepEqual(r2.deck.map(p => p.pid), []);
   assert.equal(r.swiped[0].ch, 'ca');
   assert.equal(r.deck.length, 0);
 }

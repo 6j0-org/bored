@@ -11,6 +11,9 @@
 //   2026-11-14T10:00;FREQ=MONTHLY;BYDAY=2SA           the 2nd Saturday of every month
 //   2026-11-28T10:00;FREQ=MONTHLY;BYDAY=-1SA          the last Saturday of every month
 // All date math uses UTC Dates as plain wall-clock values, so DST and the viewer's zone never shift anything.
+//
+// An optional end (end_text on a post) is stored the same way, "YYYY-MM-DDTHH:MM": when the first occurrence ends.
+// It comes after the start and at most MAX_EVENT_DAYS later; repeats each last as long as the first one.
 
 const DAYS = ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'];
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -62,16 +65,56 @@ export function composeWhen(start, rule = '') {
   return parseWhen(rule ? `${s};${rule}` : s) ? (rule ? `${s};${rule}` : s) : null;
 }
 
-// Human label, e.g. "Fri, Nov 20, 6:30 PM" or "Every Wednesday, 6:30 PM (from Nov 18)". Anything else is returned as-is.
+export const MAX_EVENT_DAYS = 14;
+const MINUTE = 60000, DAY = 86400000;
+const trimSeconds = (v) => String(v ?? '').trim().replace(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}):\d{2}(\.\d+)?$/, '$1');
+const wallString = (d) => d.toISOString().slice(0, 16);
+
+// The end for a stored when value → { end, date } (end: "YYYY-MM-DDTHH:MM"), or null if missing or invalid.
+export function parseEnd(s, end) {
+  const w = parseWhen(s), date = wallDate(trimSeconds(end));
+  return w && date && date > w.date && date - w.date <= MAX_EVENT_DAYS * DAY ? { end: wallString(date), date } : null;
+}
+
+// A stored when value and an end from the form → the stored end ('' for none), or throws an Error saying what's wrong.
+export function composeEnd(s, end) {
+  const e = trimSeconds(end);
+  if (!e) return '';
+  const w = parseWhen(s);
+  if (!w) throw new Error('Pick a start time before an end time');
+  const date = wallDate(e);
+  if (!date) throw new Error('Ends must be a date and time');
+  if (date <= w.date) throw new Error('Ends must be after the start');
+  if (date - w.date > MAX_EVENT_DAYS * DAY) throw new Error(`Ends must be within ${MAX_EVENT_DAYS} days of the start`);
+  return wallString(date);
+}
+
+// The start moved from `before` to `after` ("YYYY-MM-DDTHH:MM"): the end moved with it, so the length stays the
+// same. The end unchanged if either start isn't valid.
+export function shiftEnd(before, after, end) {
+  const a = wallDate(trimSeconds(before)), b = wallDate(trimSeconds(after)), e = wallDate(trimSeconds(end));
+  return a && b && e ? wallString(new Date(e.getTime() + (b - a))) : end;
+}
+
+// Human label, e.g. "Fri, Nov 20, 6:30 PM" or "Every Wednesday, 6:30 PM (from Nov 18)", with the end when there is
+// one: "Fri, Nov 20, 6:30 – 9:00 PM", "Every Wednesday, 6:30 – 9:00 PM". Anything else is returned as-is.
 // today: "YYYY-MM-DD" in the viewer's (or host's) zone, to decide whether to say the year / "from".
-export function whenLabel(s, { locale, today } = {}) {
+export function whenLabel(s, { locale, today, end } = {}) {
   const w = parseWhen(s);
   if (!w) return s ?? '';
+  const e = parseEnd(s, end);
   const fmt = (o) => w.date.toLocaleString(locale, { timeZone: 'UTC', ...o });
+  const range = (o) => new Intl.DateTimeFormat(locale, { timeZone: 'UTC', ...o }).formatRange(w.date, e.date);
   const thisYear = today ? today.slice(0, 4) : String(new Date().getFullYear());
-  const year = w.start.slice(0, 4) !== thisYear ? { year: 'numeric' } : {};
-  const time = fmt({ hour: 'numeric', minute: '2-digit' });
-  if (!w.rule) return fmt({ weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', ...year });
+  const year = w.start.slice(0, 4) !== thisYear || (e && e.end.slice(0, 4) !== thisYear) ? { year: 'numeric' } : {};
+  const clock = { hour: 'numeric', minute: '2-digit' };
+  if (!w.rule) return (e ? range : fmt)({ weekday: 'short', month: 'short', day: 'numeric', ...clock, ...year });
+  // A repeat that ends on a later day says how many days later.
+  const days = e ? Math.round((Date.UTC(e.date.getUTCFullYear(), e.date.getUTCMonth(), e.date.getUTCDate())
+    - Date.UTC(w.date.getUTCFullYear(), w.date.getUTCMonth(), w.date.getUTCDate())) / DAY) : 0;
+  const time = !e ? fmt(clock)
+    : !days ? range(clock)
+    : `${fmt(clock)} – ${e.date.toLocaleString(locale, { timeZone: 'UTC', ...clock })} ${days === 1 ? 'the next day' : `${days} days later`}`;
   const from = today && w.start.slice(0, 10) > today ? ` (from ${fmt({ month: 'short', day: 'numeric', ...year })})` : '';
   return `${w.repeat.label}, ${time}${from}`;
 }
@@ -81,13 +124,17 @@ export const localToday = (d = new Date()) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 // Does the event happen on any day from `from` to `to` ("YYYY-MM-DD", inclusive)? Repeats count on each day they
-// recur. Invalid values and invalid ranges are false.
-export function occursBetween(s, from, to) {
+// recur, and an event with an end (see parseEnd) counts on every day it runs into (a minute past midnight counts;
+// ending at midnight doesn't). Invalid values and invalid ranges are false.
+export function occursBetween(s, from, to, end) {
   const w = parseWhen(s);
   const a = wallDate(`${from}T00:00`), b = wallDate(`${to}T00:00`);
   if (!w || !a || !b || b < a) return false;
   const first = new Date(Date.UTC(w.date.getUTCFullYear(), w.date.getUTCMonth(), w.date.getUTCDate()));
-  const DAY = 86400000, dow = first.getUTCDay(), dom = first.getUTCDate(), nth = Math.ceil(dom / 7);
+  const e = parseEnd(s, end);
+  // How many days after its start day an occurrence still runs: start days that many days before the range count.
+  const span = e ? Math.floor((e.date.getTime() - MINUTE - first.getTime()) / DAY) : 0;
+  const dow = first.getUTCDay(), dom = first.getUTCDate(), nth = Math.ceil(dom / 7);
   const on = (d) => {
     if (d < first) return false;
     const sameDow = d.getUTCDay() === dow, dDom = d.getUTCDate();
@@ -103,7 +150,7 @@ export function occursBetween(s, from, to) {
     }
   };
   // Walk the days of the range (capped at a year), from the first occurrence on.
-  const start = Math.max(a.getTime(), first.getTime()), end = Math.min(b.getTime(), start + 366 * DAY);
-  for (let t = start; t <= end; t += DAY) if (on(new Date(t))) return true;
+  const start = Math.max(a.getTime() - span * DAY, first.getTime()), last = Math.min(b.getTime(), start + 366 * DAY);
+  for (let t = start; t <= last; t += DAY) if (on(new Date(t))) return true;
   return false;
 }

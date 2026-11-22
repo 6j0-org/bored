@@ -225,7 +225,7 @@ nav.tabs svg { width: 26px; height: 26px; filter: drop-shadow(0 1px 0 rgba(40, 1
 }
 
 /* ---------- lists, forms ---------- */
-.section-title { font-size: 1.1rem; font-weight: 700; margin: 18px 0 8px; }
+.section-title { font-size: 1.1rem; font-weight: 700; margin: 18px 0 8px; text-align: center; }
 .section-title:first-child { margin-top: 4px; }
 .list { display: flex; flex-direction: column; gap: 10px; }
 .row {
@@ -314,7 +314,6 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
 /* ---------- discard pile (Discover) ---------- */
 .pile-hint { margin: 0 0 8px; }
 .pile { margin-top: 8px; }
-.pile-title { text-align: center; }
 .pile-list { display: flex; flex-direction: column; gap: 10px; }
 /* A full card (.card) in the page instead of the deck (the discard pile, Plans), with a label in its corner. */
 .card.flat { position: relative; inset: auto; touch-action: pan-y; will-change: auto; }
@@ -532,6 +531,7 @@ a.chip.map-link { text-decoration: none; color: var(--accent); }
 }
 .map-results button:hover, .map-results button:focus-visible { background: var(--accent-soft); }
 .map-results button span { color: var(--muted); font-size: .85rem; }
+.place-results { margin-top: 6px; }
 .map-status { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-variant-numeric: tabular-nums; }
 .map-status .coords { color: var(--muted); font-size: .9rem; }
 
@@ -554,7 +554,9 @@ a.chip.map-link { text-decoration: none; color: var(--accent); }
 .who .report-link:hover { color: var(--text); text-decoration: underline; }
 .mod-note { margin: 0 0 10px; }
 .msg.hidden-msg { color: var(--muted); font-style: italic; }
-.sub-title { font-size: .95rem; font-weight: 700; margin: 14px 0 0; }
+.sub-title { font-size: .95rem; font-weight: 700; margin: 14px 0 0; text-align: center; }
+/* A sheet's heading (New post, Report or block, the map picker, ...), centered like the page's other headings. */
+.sheet .panel > h2 { text-align: center; }
 label.check { flex-direction: row; align-items: flex-start; gap: 10px; color: var(--text); font-size: .95rem; cursor: pointer; }
 label.check input { width: auto; flex: none; margin: 3px 0 0; accent-color: var(--accent); }
 label.check small { display: block; color: var(--muted); font-size: .82rem; margin-top: 2px; }

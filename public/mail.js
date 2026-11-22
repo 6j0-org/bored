@@ -17,6 +17,7 @@
 //   requests: { [channel secret]: { pid, join, reply: { chat, inbox }, at } }            my requests to join
 //   passed:   [pid]                                                                     posts I swiped no on
 //   passedAt: { [pid]: ms }                                    when, for the discard pile's order (older ones lack it)
+//   deleted:  [pid]                                   passes I deleted from the discard pile (a subset of passed)
 //   invitesSeen: [token]                         invitations to connect sent to me that I've answered (newest last)
 //   invitesDeclined: { [token]: { token, key, name, at } }       the ones I said no to, for Confirm's discard pile
 //   removedContacts: { [guid]: ms }             contacts I deleted, and when, so an old match doesn't add them back
@@ -215,6 +216,7 @@ function replay() {
     channels: [...box.channels.values()].map(c => ({ ...c, messages: [...c.messages.values()] })),
     passed: hasKeys() ? vault.data.passed || [] : [],
     passedAt: hasKeys() ? vault.data.passedAt || {} : {},
+    deleted: hasKeys() ? vault.data.deleted || [] : [],
   });
 }
 
@@ -341,10 +343,18 @@ export const pass = (pid) => vault.update(api, (d) => {
   const keep = new Set(d.passed);
   d.passedAt = Object.fromEntries(Object.entries(d.passedAt || {}).filter(([p]) => keep.has(p)));
   d.passedAt[pid] = Date.now();
+  d.deleted = (d.deleted || []).filter(p => keep.has(p));
 }).then(() => { view = replay(); });
 export const unpass = (pid) => vault.update(api, (d) => {
   d.passed = (d.passed || []).filter(p => p !== pid);
   if (d.passedAt) delete d.passedAt[pid];
+  d.deleted = (d.deleted || []).filter(p => p !== pid);
+}).then(() => { view = replay(); });
+// Delete a pass from the discard pile: it stays passed (out of the deck), and leaves the pile for good.
+export const deletePassed = (pid) => vault.update(api, (d) => {
+  d.passed = [...(d.passed || []).filter(p => p !== pid), pid].slice(-MAX_PASSED);
+  const keep = new Set(d.passed);
+  d.deleted = [...(d.deleted || []).filter(p => p !== pid && keep.has(p)), pid];
 }).then(() => { view = replay(); });
 
 // Create or change a post I host. Each save is a new, signed version.

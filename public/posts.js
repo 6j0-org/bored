@@ -6,7 +6,7 @@
 // (signatures, senders, and the identities in `hello`) and hands derive() plain objects.
 //
 // Posts are signed by their host: { pid, v, kind: 'public' | 'private', status, title, details, tags, location,
-// location_name, online, when_text, max_attendees, cost_amount, cost_currency, reply: { chat, inbox } }.
+// location_name, online, when_text, end_text (optional), max_attendees, cost_amount, cost_currency, reply: { chat, inbox } }.
 // - pid is random; v goes up with every change (the newest wins).
 // - status: open | full (every spot is taken) | past (it happened) | cancelled (the host removed it).
 // - reply is where requests to join go: the host's chat public key and main inbox.
@@ -157,6 +157,7 @@ export function nextMessage(channelMessages, role, fields) {
 //   channels: [{ id, role: 'host' | 'attendee', opened, messages }], id is the channel secret, opened sorts
 //             requests first come, first served (when the join arrived)
 //   passed:   pids I swiped no on
+//   deleted:  pids I passed on and then deleted from the discard pile (still passed, so they stay out of the deck)
 //
 // Returns { posts, deck, requests, hosting, todo, badges, together }:
 //   posts:    Map pid → newest version, with .signer and .hidden (unshared from me)
@@ -173,7 +174,7 @@ export function nextMessage(channelMessages, role, fields) {
 //   together: { guid: times we've done something together } (attended, either side)
 //   stats:    { hosted: my posts that happened with someone, attended: posts I went to, helped: different hosts of
 //             posts tagged "help" I went to }
-export function derive({ me, posts = [], channels = [], passed = [], passedAt = {} }) {
+export function derive({ me, posts = [], channels = [], passed = [], passedAt = {}, deleted = [] }) {
   // Posts: per pid, the first signer seen owns it (mine always wins), and the newest version counts.
   const owner = new Map(), latest = new Map(), unshared = new Map();
   for (const e of posts) {
@@ -231,7 +232,7 @@ export function derive({ me, posts = [], channels = [], passed = [], passedAt = 
     };
   });
 
-  const passedSet = new Set(passed);
+  const passedSet = new Set(passed), deletedSet = new Set(deleted);
   const deck = [...latest.values()].filter(p =>
     LIVE.includes(p.status) && !mine(p) && !p.hidden && !passedSet.has(p.pid) && !asked.has(p.pid));
   const swipeable = (p) => p && LIVE.includes(p.status) && !mine(p) && !p.hidden;
@@ -239,7 +240,8 @@ export function derive({ me, posts = [], channels = [], passed = [], passedAt = 
     ...requests.filter(r => ['pending', 'waitlisted'].includes(r.status) && swipeable(r.post))
       .map(r => ({ ...r.post, swipe: 'in', ch: r.id, request: r.status, at: r.joinedAt })),
     // A request counts over a pass for the same post (asked after passing, from a share link or a second device).
-    ...passed.map(pid => latest.get(pid)).filter(p => swipeable(p) && !asked.has(p.pid))
+    // A pass I deleted from the pile stays out of it.
+    ...passed.map(pid => latest.get(pid)).filter(p => swipeable(p) && !asked.has(p.pid) && !deletedSet.has(p.pid))
       .map(p => ({ ...p, swipe: 'pass', ch: null, request: null, at: Number(passedAt[p.pid]) || 0 })),
   ].sort((a, b) => b.at - a.at);
 

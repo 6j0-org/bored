@@ -257,7 +257,7 @@ function notifyAuthor(user, id, body) {
   const author = feedback.authorOf(id);
   if (!author || author === user.guid) return;
   const to = q('SELECT id FROM users WHERE guid = ?').get(author);
-  if (to) notify(to.id, { body, tag: `feedback-${id}`, open: 'feedback' });
+  if (to) notify(to.id, { body, tag: `feedback-${id}`, open: `feedback:${id}` });
 }
 const STATUS_NEWS = { done: 'A developer marked your feedback as done. Thank you!', wontdo: "A developer closed your feedback as won't do.", open: 'A developer reopened your feedback.' };
 route('GET', '/api/feedback', async ({ user, res }) => {
@@ -269,10 +269,17 @@ route('POST', '/api/feedback', async ({ user, body, res }) => {
 // Feedback IDs aren't numbers, which route()'s :params are, so these have their own patterns.
 const feedbackRoute = (method, suffix, handler) => routes.push({
   method, re: new RegExp(`^/api/feedback/([A-Za-z0-9_-]{1,32})${suffix}$`), keys: [], auth: true,
-  handler: (ctx) => handler({ ...ctx, id: new URL(ctx.req.url, 'http://x').pathname.split('/')[3] }),
+  handler: (ctx) => { const parts = new URL(ctx.req.url, 'http://x').pathname.split('/'); return handler({ ...ctx, id: parts[3], sub: parts[5] }); },
 });
 feedbackRoute('GET', '', async ({ user, id, res }) => {
   send(res, 200, feedbackCall(() => feedback.thread(feedbackWho(user), id)));
+});
+// Editing your own post, or one of your replies.
+feedbackRoute('PUT', '', async ({ user, id, body, res }) => {
+  send(res, 200, feedbackCall(() => feedback.edit(feedbackWho(user), id, body.body)));
+});
+feedbackRoute('PUT', '/replies/[A-Za-z0-9_-]{1,32}', async ({ user, id, sub, body, res }) => {
+  send(res, 200, feedbackCall(() => feedback.edit(feedbackWho(user), id, body.body, sub)));
 });
 feedbackRoute('DELETE', '', async ({ user, id, res }) => {
   feedbackCall(() => feedback.remove(feedbackWho(user), id));
@@ -534,7 +541,7 @@ route('POST', '/api/mail', async ({ user, body, res }) => {
   if (DEMO) await demoBot(items).catch(e => console.warn('demo bot:', e));
   for (const inbox of new Set(items.map(m => m.inbox))) {
     const owner = q('SELECT id FROM users WHERE inbox_id = ?').get(inbox);
-    if (owner && owner.id !== user.id) notify(owner.id, { body: 'New activity', tag: 'mail', open: '', throttle: true });
+    if (owner && owner.id !== user.id) notify(owner.id, { body: 'New activity', tag: 'mail', open: 'mail', throttle: true }); // the browser works out where
   }
   send(res, 200, { ids });
 });

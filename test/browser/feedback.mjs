@@ -64,6 +64,14 @@ await B.send('Input.insertText', { text: 'Especially the date filter.' });
 await B.ev(`document.querySelector('.fb-reply-send').click()`);
 await B.until(`document.querySelectorAll('.fb-msg').length === 2`);
 assert.equal(await B.ev(`document.querySelectorAll('.fb-msg')[1].textContent.includes('Especially the date filter.')`), true);
+
+// Editing my reply: Edit turns it into a text box; Save shows the new text, marked as edited.
+await B.ev(`document.querySelectorAll('.fb-msg')[1].querySelector('.fb-edit').click()`);
+await B.until(`document.getElementById('fbEditBox')`);
+assert.equal(await B.ev(`document.getElementById('fbEditBox').value`), 'Especially the date filter.');
+await B.ev(`document.getElementById('fbEditBox').value = 'Especially the distance filter.'; document.querySelector('.fb-edit-form').requestSubmit()`);
+await B.until(`document.querySelectorAll('.fb-msg')[1]?.querySelector('.fb-text')?.textContent === 'Especially the distance filter.'`);
+assert.equal(await B.ev(`document.querySelectorAll('.fb-msg')[1].querySelector('.fb-edited').textContent`), 'edited');
 await B.ev(`document.querySelector('.fb-back').click()`);
 await B.until(`document.querySelector('.fb-item .fb-replies')`);
 assert.equal(await B.ev(`document.querySelector('.fb-item .fb-replies').textContent`), '1 reply');
@@ -75,6 +83,11 @@ assert.equal(await B.ev(`document.querySelector('.fb-item .fb-delete').textConte
 await B.ev(`document.querySelector('.fb-item .fb-delete').click()`);
 await B.until(`document.querySelectorAll('.fb-item').length === 1`);
 await wait(200);
+
+// A tapped feedback notification (?open=feedback:<id>) opens that post's chat.
+const threadId = await B.ev(`fetch('/api/feedback').then(r => r.json()).then(d => d.items[0].id)`);
+await B.send('Page.navigate', { url: `${BASE}/?open=feedback:${threadId}` });
+await B.until(`document.querySelector('.fb-thread:not([hidden]) .fb-msg')?.textContent.includes('<b>bold?</b>')`);
 
 // The Profile page ends with the account's ID (the GUID developers are listed by).
 await B.tab('profile');

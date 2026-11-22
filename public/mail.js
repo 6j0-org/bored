@@ -20,7 +20,6 @@
 //   deleted:  [pid]                                   passes I deleted from the discard pile (a subset of passed)
 //   invitesSeen: [token]                         invitations to connect sent to me that I've answered (newest last)
 //   invitesDeclined: { [token]: { token, key, name, at } }       the ones I said no to, for Confirm's discard pile
-//   removedContacts: { [guid]: ms }             contacts I deleted, and when, so an old match doesn't add them back
 //   contacts[guid].keys: { chat, sign, inbox }  a contact's keys, saved the first time they're used (so the server
 //                                               can't swap them later)
 import {
@@ -77,8 +76,9 @@ function addChannel(id, role, opened, first) {
   return c;
 }
 
-// A contact's keys: saved ones first, otherwise asked from the server and saved (first use wins).
-async function keysFor(guids) {
+// A contact's keys: saved ones first, otherwise asked from the server and saved (first use wins). The app calls it
+// as contactKeys when someone becomes a contact, so their posts are recognized as theirs (hostContact) right away.
+export async function keysFor(guids) {
   const out = {}, missing = [];
   for (const g of new Set(guids)) { const k = vault.data.contacts[g]?.keys; if (k) out[g] = k; else missing.push(g); }
   for (let i = 0; i < missing.length; i += 200) {
@@ -108,7 +108,7 @@ async function readMainInbox(rows) {
     } else if (msg.type === 'invite' && [msg.token, msg.key].every(x => typeof x === 'string' && /^[A-Za-z0-9_-]{20,64}$/.test(x))) {
       // An invitation to connect, sent straight to me instead of shared as a link (see sendInvite). Anonymous: who it's
       // from shows only as their icon, from the server, and the name they suggest for themselves.
-      box.invites.set(msg.token, { token: msg.token, key: msg.key, name: String(msg.name || '').slice(0, 60) });
+      box.invites.set(msg.token, { token: msg.token, key: msg.key, name: String(msg.name || '').slice(0, 60), at: Number(msg.at) || 0 });
     } else if (msg.type === 'join' && vault.data.posts?.[msg.pid]) {
       // A join says who it's from only when the person asking has me as a contact (see requestJoin). I show who it
       // is only if they're in my contacts too, with the keys I saved for them; otherwise it's anonymous like any other.
@@ -224,14 +224,11 @@ function replay() {
 // move people off the waitlist and keep each post's status right. True if anything was sent.
 async function act_() {
   let sent = false;
-  const hellos = [], contacts = {};
+  // Matching doesn't make people contacts: both have to say yes to an invitation to connect (see inviteToConnect in
+  // app.js). The hellos only tell each side who the other is, for the chat.
+  const hellos = [];
   const each = (r, role) => {
-    const other = role === 'host' ? 'attendee' : 'host';
     if ((r.status === 'accepted' || r.status === 'attended') && !r.hello[role]) hellos.push(r.id);
-    const h = r.hello[other];
-    // Not someone I deleted, unless this is a new match since (their hello came after).
-    const gone = h && vault.data.removedContacts?.[h.guid];
-    if (h && !vault.data.contacts[h.guid] && !(gone && h.at <= gone)) contacts[h.guid] = h;
   };
   view.requests.forEach(r => each(r, 'attendee'));
   view.hosting.forEach(h => h.requests.forEach(r => each(r, 'host')));
@@ -239,15 +236,6 @@ async function act_() {
   for (const ch of hellos) {
     try { await sendOn(ch, { type: 'hello', guid: me.guid, sig: await sign('hello', await helloText(ch, me.guid)) }, { poke: false }); sent = true; }
     catch (e) { console.warn('hello', e); }
-  }
-  const add = Object.keys(contacts);
-  if (add.length) {
-    await vault.update(api, (d) => {
-      for (const g of add) {
-        const { chat, sign: s, inbox } = contacts[g];
-        d.contacts[g] ||= { nickname: '', tags: [], added: new Date().toISOString(), keys: { chat, sign: s, inbox } };
-      }
-    }).catch(e => console.warn('contacts', e));
   }
   for (const t of view.todo) {
     try {
@@ -329,12 +317,13 @@ export const answerInvite = (token, { declined = null } = {}) => vault.update(ap
   d.invitesDeclined = Object.fromEntries(keep.map(i => [i.token, i]));
 });
 export const declinedInvites = () => Object.values((hasKeys() && vault.data.invitesDeclined) || {}).sort((a, b) => b.at - a.at);
-// Send an invitation to connect straight to the host of a post (their main inbox, from the post's reply address),
-// sealed with no sender, like a request to join. invite: { token, key, name } (the vault entry).
-export async function sendInvite(post, invite) {
-  if (!post.reply?.chat || !post.reply?.inbox) throw new Error("This post's host can't be reached.");
-  const { body } = await sealTo(post.reply.chat, post.reply.inbox, { type: 'invite', token: invite.token, key: invite.key, name: invite.name });
-  await postMail([{ inbox: post.reply.inbox, body }]);
+// Send an invitation to connect straight to someone's main inbox, sealed with no sender, like a request to join.
+// to: { chat, inbox }, e.g. a post's reply address (its host) or what someone said in their hello (in a plan's chat).
+// invite: { token, key, name } (the vault entry).
+export async function sendInvite(to, invite) {
+  if (!to?.chat || !to?.inbox) throw new Error("They can't be reached.");
+  const { body } = await sealTo(to.chat, to.inbox, { type: 'invite', token: invite.token, key: invite.key, name: invite.name, at: Date.now() });
+  await postMail([{ inbox: to.inbox, body }]);
 }
 
 // Swiping no, and undoing it.

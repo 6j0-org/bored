@@ -56,7 +56,7 @@ assert.deepEqual(await host.api('/api/connections'), []);
 assert.equal((await a.api('/api/invites/accept', { method: 'POST', body: { token: inv.token, note } })).status, 'requested', 'can ask again');
 await a.api('/api/connections/remove', { method: 'POST', body: { guid: 'not-a-guid' } }); // nothing to remove: fine
 
-// A contact from a match: after deleting them, reading the old match again doesn't add them back (mail.js act_).
+// A match doesn't make contacts (mail.js act_): both have to say yes to an invitation.
 const { post: picnic } = await host.mail.savePost({ kind: 'public', fields: { ...fields, title: 'Picnic', details: 'Bring a blanket' } });
 let bv = await b.mail.loadMail();
 await b.mail.requestJoin(bv.posts.get(picnic.pid));
@@ -64,9 +64,9 @@ let hv = await host.mail.loadMail();
 const req = hv.hosting.find(h => h.post.pid === picnic.pid).requests[0];
 await host.mail.sendOn(req.id, { type: 'answer', status: 'accepted' });
 await host.mail.loadMail(); await b.mail.loadMail(); await host.mail.loadMail();
-assert.ok(host.sec.vault.data.contacts[b.guid], 'matched: B is a contact');
-await host.sec.vault.update(host.api, (v) => { delete v.contacts[b.guid]; v.removedContacts = { [b.guid]: Date.now() + 1 }; });
-await host.mail.loadMail();
-assert.equal(host.sec.vault.data.contacts[b.guid], undefined, 'not added back from the old match');
+assert.equal(hv.hosting.find(h => h.post.pid === picnic.pid).requests[0].status, 'pending');
+assert.equal((await host.mail.loadMail()).hosting.find(h => h.post.pid === picnic.pid).requests[0].hello.attendee?.guid, b.guid, 'matched, and B said who they are');
+assert.equal(host.sec.vault.data.contacts[b.guid], undefined, 'but B is not a contact');
+assert.equal(b.sec.vault.data.contacts[host.guid], undefined, 'nor the host B\'s');
 
 console.log('moderation: ok');

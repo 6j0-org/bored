@@ -277,7 +277,7 @@ sequenceDiagram
   A->>S: read both channel inboxes
   A->>S: hello {GUID, signature} → channel
   H->>S: hello {GUID, signature} → channel
-  Note over A,H: each checks the other's hello against the keys for that GUID,<br/>and adds the other to contacts
+  Note over A,H: each checks the other's hello against the keys for that GUID<br/>(matching doesn't make them contacts: that takes an invitation both accept)
   A->>S: chat → channel (+ poke to the host's main inbox)
   H->>S: chat → channel (+ poke to the attendee's main inbox)
 ```
@@ -286,7 +286,9 @@ sequenceDiagram
 - **The `hello` signs the claimed GUID and a hash of the channel secret**, so it can't be replayed on another channel,
   and it's checked against the keys pinned for that GUID.
 - **Everything after the join** (answers, the waitlist, `update` and `reconfirm` after an edit, `leave`, `happened`,
-  and chat) is a channel message.
+  chat, and edits to chat messages) is a channel message. An edit names one of its sender's own chat messages by
+  that sender's message counter, so every browser applies it to the same message, and nobody can edit the other
+  side's.
 
 ### 6.4 The waitlist
 

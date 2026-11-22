@@ -40,7 +40,21 @@ await A.ev(`document.querySelector('.round.yes').click()`);
 await A.until(`document.querySelector('.overlay h1')`);
 await B.tab('plans');
 await B.until(`document.getElementById('view').innerText.includes('${TITLE}')`, 25000);
-r.strangerPlans = (await B.text()).slice(0, 160);
+r.strangerPlans = (await B.text()).slice(0, 300);
+r.overlay = await A.ev(`document.querySelector('.overlay').innerText.replace(/\\s+/g, ' ')`);
+await A.ev(`document.getElementById('mKeep').click()`);
+
+// Matching doesn't connect them: the stranger's chat offers an invitation, which needs both nicknames, and it shows
+// up in the host's Confirm tab.
+await B.ev(`[...document.querySelectorAll('.plan-card[data-id^="m:"]')].find(c => c.innerText.includes('${TITLE}')).querySelector('h2').click()`);
+await B.until(`document.getElementById('connectChat')`, 20000);
+r.connectNote = await B.ev(`document.querySelector('.connect-note').innerText.replace(/\\s+/g, ' ')`);
+await B.ev(`document.getElementById('connectChat').click()`);
+await B.until(`document.querySelector('.sheet input[name=their]')`);
+await B.ev(`(() => { const f = document.querySelector('.sheet form'); f.their.value = 'Kite host'; f.name.value = 'Kite fan'; f.requestSubmit(); })()`);
+await B.until(`document.getElementById('toast').textContent.includes('Invitation sent')`);
+await A.tab('discover'); await A.tab('confirm');
+await A.until(`document.getElementById('view').innerText.includes('Kite fan')`, 25000);
 console.log(JSON.stringify(r, null, 2));
 assert.equal(r.form, false, 'a new post can be public');
 assert.match(r.posted, /Anyone can now swipe on it/);
@@ -50,5 +64,7 @@ assert.match(r.strangerCard, new RegExp(TITLE));
 assert.match(r.asked, /^Asked to join/);
 assert.match(r.request, /Someone you don't know yet/);
 assert.match(r.strangerPlans, new RegExp(`${TITLE}[\\s\\S]*Hosted by`));
+assert.match(r.overlay, /teaming up[\s\S]*Invite them to connect from the chat/, "the match screen doesn't say they're contacts");
+assert.match(r.connectNote, /not connected/);
 A.close(); B.close();
 finish('browser public');

@@ -3,7 +3,7 @@
 A local event board that works like a dating app.
 Host an event. Users swipe through posts in **Discover**, and **right = "I'm in"**.
 In **Confirm**, the host swipes through the requests to join (anonymous, unless they're from one of the host's contacts), and **right = "Let's do it"**. When both sides say yes, it's on:
-it shows up in **Plans**, where you chat and sort out details. Afterwards the host marks it as happened.
+it shows up in **Plans**, where you chat and sort out details. Afterwards the host marks it as done.
 
 Accounts are anonymous: a random GUID. Depending on how the server is set up, you sign in with a passkey or with a
 6j0.org identity (see [Sign-in](#sign-in-standalone-or-with-a-6j0org-identity)). Bored itself never asks for a name,
@@ -77,8 +77,8 @@ or reopen it, and the person who posted it gets a push notification when someone
 Posts and replies show their author's profile icon, and the name you gave them if they're one of your contacts
 (the post's author is also labeled "Tester" in its thread). The server sends the icon hash (the SHA-1 of the GUID),
 never the GUID itself, so strangers stay unnamed; it files each post under the account's GUID so people can delete
-their own. Each account can post or reply 100 times a day, and
-everyone together 500 times a day. In the demo, each visitor sees only their own posts.
+their own. People can edit their own posts and replies from the
+post's chat. Each account can post, reply, or edit 100 times a day, and everyone together 500 times a day. In the demo, each visitor sees only their own posts.
 
 Developers are the accounts listed in `DEVELOPER_GUIDS` in `server.js` (plus `ADMIN_SUB` or `ADMIN_GUID`, if set).
 They can reply to, close, and delete anyone's feedback, their posts are labeled "Developer", and their Profile page
@@ -87,8 +87,9 @@ list. Anyone with feedback marked Done gets a Tester badge on their Profile page
 
 Feedback is shared, so it isn't encrypted, and the page says so. It's kept in a JSON Lines file (`FEEDBACK_PATH`): one
 JSON object per line, appended to and never edited in place: posts, replies (`{"reply": post id, …}`), status changes
-(`{"status": post id, "value": "done"}`), and deletions (`{"delete": id}`). The server loads it at startup and, if
-anything was deleted, rewrites it without the deleted posts and their replies. `feedback.js` and
+(`{"status": post id, "value": "done"}`), edits (`{"edit": post or reply id, "body": …}`), and deletions
+(`{"delete": id}`). The server loads it at startup and, if anything was deleted or edited, rewrites it without the
+deleted posts and their replies, and with edits folded in, so old text doesn't stay on disk. `feedback.js` and
 `public/feedback.js` are the same files as in Glaze Journal, which has the feature too; keep them identical. Bored
 shows authors by passing `authorKey` (server) and `author` (page); Glaze Journal leaves them out, so its feedback is
 anonymous.
@@ -99,6 +100,13 @@ Web Push, opt-in per device from Profile: Chrome on Android, and desktop Chrome,
 and iPad (iOS 16.4+) only after adding the app to the Home Screen. `push.js` encrypts each notification for the device
 (RFC 8291) and signs requests with this server's VAPID key (RFC 8292, generated on first use and kept in the
 database), using `node:crypto` only. Push needs HTTPS (or `localhost`).
+
+Tapping a notification opens what it's about. Most are "New activity" for encrypted mail, which the server can't
+read, so the app opens the newest thing in the mail once it's loaded: that plan's chat, a request waiting in Confirm,
+or Discover. Feedback notifications open the post's chat.
+
+On Android, Chromium-based browsers deliver web notifications through Google Play services, so phones without them
+(such as GrapheneOS without sandboxed Google Play) can't turn notifications on; the app says so.
 
 ### Sign-in: standalone or with a 6j0.org identity
 
@@ -135,8 +143,8 @@ the server says so on startup, and you delete it to start fresh.
 | Post an event (title, details, up to 5 tags, where (map pin), when (date, time, optional repeat), cost and currency, max attendees or no limit, public or shared with chosen contacts/groups) | Host | **Post** |
 | Swipe right on events you're in for (filter by date, distance, tags, and free/paid); scroll down to the discard pile to change a swipe | Attendee | **Discover** |
 | Swipe right on the people who want to join (anonymous, except your contacts) | Host | **Confirm** |
-| Match → you learn who each other are, become contacts, and chat to sort out details | Both | **Plans** |
-| "It happened" to close it out | Host | Plan chat |
+| Match → you learn who each other are and chat to sort out details (matching doesn't make you contacts) | Both | **Plans** |
+| "Mark as done" to close it out | Host | Plan chat |
 
 Discover, Confirm, and Plans refresh when you scroll back up to the top of the page, or pull down (or scroll up)
 while you're already there; the page gives a little bump when it does. Refreshing never resets a deck, and swiped
@@ -151,7 +159,7 @@ match; click one to open its chat, which is also where a match is changed once y
 A post stays in the deck until it reaches its max attendees; after that, saying yes joins its waitlist, and people
 move off the waitlist in order as spots open. Posts with no limit stay open until the host removes them. Posts are
 **private** by default: only the contacts and groups (contact tags) the host picks can see them. Until someone has a
-contact (from matching or an invitation), new posts are public. **Public** posts show for everyone, including
+contact (both people said yes to an invitation), new posts are public. **Public** posts show for everyone, including
 signed-out guests. A post stays public or private once it's posted.
 
 ## Moderation
@@ -234,9 +242,11 @@ of. Everything else happens in the browser: filtering Discover, who's in, the wa
   its own public GUID, so people can't link your Bored account to your accounts in other apps.
 - **Invitations to connect** are links (`/#invite=<token>`). The token stays in the URL fragment, so it isn't sent
   in requests or logged; the server stores only its SHA-256, and the owner's encrypted vault keeps the link to share
-  again. Connecting makes two people contacts, the same as matching (the server records the pair in `connections`).
-  Clicking the avatar of a post's host you aren't connected with sends them an invitation directly instead: it's
-  mailed to their main inbox, sealed with no sender, and shows in their Confirm tab. When they say yes, the inviter's
+  again. Connecting is the only way two people become contacts: both say yes, and each picks a nickname for the
+  other (the server records the pair in `connections`). Matching on a post doesn't connect anyone. Clicking the
+  avatar of a post's host you aren't connected with, or "Invite them to connect" in a plan's chat, sends them an
+  invitation directly instead, with your nickname for them and the name you suggest for yourself: it's mailed to
+  their main inbox (from the post, or from their hello), sealed with no sender, and shows in their Confirm tab. When they say yes, the inviter's
   browser confirms it on its own (sending it already said yes) and deletes the invitation. Clicking a contact's avatar
   edits the nickname and tags you keep for them. The name you set in **Profile** is what invitations offer as what new
   people should call you; it's kept in your vault, like everything else about you.

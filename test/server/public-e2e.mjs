@@ -39,7 +39,7 @@ await rejects(async () => put(erin, await erin.sec.signRecord('post', { ...post,
 await rejects(async () => realFetch(BASE + '/api/public', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ record: await signed({ v: 2 }) }) })
   .then(r => { if (!r.ok) throw Object.assign(new Error('no'), { status: r.status }); }), 401);
 
-// Erin asks to join, anonymously; Dave accepts; they say hello and Erin becomes Dave's contact.
+// Erin asks to join, anonymously; Dave accepts; they say hello, but matching doesn't make them contacts.
 const ch = await erin.mail.requestJoin(own(ev)[0], 'I bring Catan');
 dv = await dave.mail.loadMail();
 const req = dv.hosting[0].requests[0];
@@ -50,14 +50,26 @@ ev = await erin.mail.loadMail();
 assert.equal(ev.requests[0].status, 'accepted'); assert.equal(ev.requests[0].hello.host.guid, dave.guid);
 dv = await dave.mail.loadMail();
 assert.equal(dv.hosting[0].requests[0].hello.attendee.guid, erin.guid);
-assert.ok(dave.sec.vault.data.contacts[erin.guid]?.keys, 'Erin is a contact, keys saved');
-assert.ok(erin.sec.vault.data.contacts[dave.guid]?.keys, 'Dave is a contact, keys saved');
+assert.equal(dave.sec.vault.data.contacts[erin.guid], undefined, "matching doesn't make Erin Dave's contact");
+assert.equal(erin.sec.vault.data.contacts[dave.guid], undefined, 'nor Dave hers');
+
+// Dave invites Erin to connect from the chat: the invitation goes to the address in her hello, and shows up for her.
+const erinHello = dv.hosting[0].requests[0].hello.attendee;
+const dInv = await dave.api('/api/invites', { method: 'POST' });
+await dave.mail.sendInvite({ chat: erinHello.chat, inbox: erinHello.inbox }, { token: dInv.token, key: dave.sec.newInviteKey(), name: 'Dave' });
+await erin.mail.loadMail();
+assert.deepEqual(erin.mail.invitesForMe().map(i => [i.token, i.name]), [[dInv.token, 'Dave']]);
+// As if they'd both said yes (the rest of that flow is in test/server/moderation.mjs and the browser).
+await dave.sec.vault.update(dave.api, d => { d.contacts[erin.guid] = { nickname: 'Erin', tags: [], added: '' }; });
+await erin.sec.vault.update(erin.api, d => { d.contacts[dave.guid] = { nickname: 'Dave', tags: [], added: '' }; });
+await erin.mail.keysFor([dave.guid]); // as addContacts does: saves Dave's keys, so his posts show as his
 
 // Now that they're contacts, Erin's request to Dave's next post says it's her. Frank has Dave as a contact, but Dave
 // doesn't have him: his request says who he is, and Dave still sees it as anonymous.
 const second = await dave.mail.savePost({ kind: 'public', fields: { ...fields, title: 'Chess', details: `Bring a board ${RUN}` } });
 const frank = await person('frank');
-await frank.sec.vault.update(frank.api, d => { d.contacts[dave.guid] = { nickname: 'Dave', tags: [], added: '', keys: erin.sec.vault.data.contacts[dave.guid].keys }; });
+await frank.sec.vault.update(frank.api, d => { d.contacts[dave.guid] = { nickname: 'Dave', tags: [], added: '' }; });
+await frank.mail.keysFor([dave.guid]);
 for (const who of [erin, frank]) {
   const p = (await who.mail.loadMail()).deck.find(x => x.pid === second.post.pid);
   assert.equal(who.mail.hostContact(p), dave.guid);

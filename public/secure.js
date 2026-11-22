@@ -309,9 +309,10 @@ export async function addPasskey(api, nextStep) {
 //   prefs: { distanceUnit: 'km' | 'mi' },  (settings from Profile)
 //   moderation: { builtin, lists, reports, blocked, reported },  (my word lists, report thresholds, who I've blocked,
 //     and what I reported; see public/moderation.js)
-//   removedContacts: { [guid]: ms },  (contacts I deleted, so an old match doesn't add them back; public/mail.js)
 //   invites: { [inviteId]: { token, key, name } },  (my invitation links, so I can share them again; the server has
-//     only hashes. name is the nickname I suggested; key decrypts the nicknames people suggest when they ask)
+//     only hashes. name is the nickname I suggested; key decrypts the nicknames people suggest when they ask. One I
+//     mailed to someone (inviteToConnect in app.js) also has direct: true, to (who it's for), and their (my nickname
+//     for them))
 //   pendingNames: { [iconHash]: nickname },  (nicknames for inviters I've asked to connect with, applied once they confirm)
 //   inbox: token }  (my main inbox's read token; its SHA-256 is public, see "mail" below)
 const emptyVault = () => ({ v: 1, contacts: {} });

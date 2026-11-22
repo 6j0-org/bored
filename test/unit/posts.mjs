@@ -214,4 +214,23 @@ const ID = (id) => ({ guid: id, chat: { x: id }, sign: { x: id }, inbox: id + '-
     channels: [{ id: 'k', role: 'host', opened: 1, messages: c.msgs }] });
   assert.deepEqual(r.together, { 'guest-guid': 1 });
 }
+// Editing chat: only your own messages, only while matched, and later messages still count.
+{
+  const c = channel('pe');
+  c.send('attendee', { type: 'chat', text: 'too early' });            // before accepted: ignored, can't be edited
+  c.send('host', { type: 'answer', status: 'accepted' });
+  const mine = c.send('attendee', { type: 'chat', text: 'see you at 7' });
+  const theirs = c.send('host', { type: 'chat', text: 'great' });
+  const e = c.send('attendee', { type: 'edit', of: mine.n, text: 'see you at 8' });
+  c.send('attendee', { type: 'edit', of: theirs.n, text: 'hacked' });  // n counts per side: my n of that number isn't a chat
+  c.send('host', { type: 'edit', of: mine.n, text: 'hacked' });        // nor is the host's
+  c.send('attendee', { type: 'edit', of: 99, text: 'nothing' });
+  c.send('attendee', { type: 'edit', of: mine.n, text: '  ' });         // empty: ignored
+  c.send('attendee', { type: 'chat', text: 'after' });
+  const t = c.state().timeline.filter(x => x.event === 'chat');
+  assert.deepEqual(t.map(x => [x.role, x.text, x.edited || 0]), [['attendee', 'see you at 8', e.at], ['host', 'great', 0], ['attendee', 'after', 0]]);
+  c.send('host', { type: 'happened' });
+  const e2 = c.send('attendee', { type: 'edit', of: mine.n, text: 'see you at 9' });
+  assert.equal(c.state().timeline.find(x => x.n === mine.n && x.role === 'attendee').edited, e2.at, 'still editable after it happened');
+}
 console.log('posts.js: all scripted sequences pass');

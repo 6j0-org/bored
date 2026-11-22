@@ -29,15 +29,21 @@ assert.deepEqual([th.author, th.messages[0].author, th.messages[0].op], [aIcon, 
 await assert.rejects(a.api(`/api/feedback/${f1.id}/status`, { method: 'POST', body: { status: 'done' } }), { status: 403 });
 await assert.rejects(b.api(`/api/feedback/${f1.id}`), { status: 404 }, "another demo visitor can't open it");
 await assert.rejects(b.api(`/api/feedback/${f1.id}/replies`, { method: 'POST', body: { body: 'hi' } }), { status: 404 });
+// Editing your own post and replies.
+th = await a.api(`/api/feedback/${f1.id}`, { method: 'PUT', body: { body: 'Could Discover remember my filters?' } });
+assert.equal(th.body, 'Could Discover remember my filters?');
+th = await a.api(`/api/feedback/${f1.id}/replies/${th.messages[0].id}`, { method: 'PUT', body: { body: 'Also the date one.' } });
+assert.deepEqual([th.messages[0].body, th.messages[0].edited > 0], ['Also the date one.', true]);
+await assert.rejects(b.api(`/api/feedback/${f1.id}`, { method: 'PUT', body: { body: 'x' } }), { status: 404 });
 assert.deepEqual((await a.api('/api/me')).badges, { developer: false, tester: 0 });
 const raw = await fetch(BASE + `/api/feedback/${f1.id}`, { method: 'DELETE' });
 assert.equal(raw.status, 401, 'deleting needs an account too');
 
-// 100 posts and replies a day per account, deleted ones included (the reply above is one).
-for (let i = 3; i <= 100; i++) await a.api('/api/feedback', { method: 'POST', body: { body: `Idea ${i}` } });
+// 100 posts, replies, and edits a day per account, deleted ones included (there are 4 above).
+for (let i = 5; i <= 100; i++) await a.api('/api/feedback', { method: 'POST', body: { body: `Idea ${i}` } });
 await assert.rejects(a.api('/api/feedback', { method: 'POST', body: { body: 'Idea 101' } }), { status: 429 });
 await a.api(`/api/feedback/${f1.id}`, { method: 'DELETE' });
-assert.equal((await a.api('/api/feedback')).items.length, 98);
+assert.equal((await a.api('/api/feedback')).items.length, 96);
 await assert.rejects(a.api('/api/feedback', { method: 'POST', body: { body: 'Idea 101' } }), { status: 429 }, 'deleting one does not make room');
 
 // A client without the account's cookie is turned away.

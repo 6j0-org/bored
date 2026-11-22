@@ -129,6 +129,11 @@ main { flex: 1; padding: 8px 16px 96px; display: flex; flex-direction: column; }
 .fb-avatar .avatar { width: 26px; height: 26px; border: 1px solid var(--line); }
 .fb-name { color: var(--text); font-weight: 700; }
 .fb-hidden { color: var(--muted); font-style: italic; }
+.fb-edit { margin-left: auto; }
+.fb-edited { font-style: italic; }
+.fb-edit-form { display: grid; gap: 6px; }
+.fb-edit-body { width: 100%; color: var(--text); }
+.fb-edit-status { margin-right: auto; font-size: .85rem; }
 .fb-thread { display: grid; gap: 10px; }
 .fb-thread-head { display: flex; align-items: center; gap: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
 .fb-back { background: none; border: 0; color: var(--text); font-size: 1.4rem; padding: 4px 8px 4px 0; cursor: pointer; }
@@ -245,8 +250,9 @@ nav.tabs svg { width: 26px; height: 26px; filter: drop-shadow(0 1px 0 rgba(40, 1
 }
 
 /* ---------- lists, forms ---------- */
-.section-title { font-size: 1.1rem; font-weight: 700; margin: 18px 0 8px; text-align: center; }
-.section-title:first-child { margin-top: 4px; }
+/* Every section after the first on a page starts with a rule, so sections (like Posts' "Your posts") stand apart. */
+.section-title { font-size: 1.1rem; font-weight: 700; margin: 28px 0 10px; padding-top: 20px; border-top: 2px solid var(--line); text-align: center; }
+.section-title:first-child { margin-top: 4px; padding-top: 0; border-top: 0; }
 .list { display: flex; flex-direction: column; gap: 10px; }
 .row {
   background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
@@ -301,6 +307,13 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
 .msgs { flex: 1; display: flex; flex-direction: column; gap: 6px; padding: 12px 0; overflow: auto; }
 .msg { max-width: 78%; padding: 8px 12px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); white-space: pre-wrap; word-wrap: break-word; }
 .msg.mine { align-self: flex-end; background: var(--accent); color: #fff; border-color: transparent; }
+.msg.editable { cursor: pointer; }
+.msg.editable:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.msg.editing { width: 78%; }
+.msg-edit { display: grid; gap: 6px; }
+.msg-edit textarea { width: 100%; color: var(--text); }
+.msg-edit .btns { display: flex; gap: 6px; justify-content: flex-end; }
+.msg-edited { display: block; font-size: .7rem; opacity: .75; text-align: right; }
 .msg.sys { align-self: center; background: none; border: 0; color: var(--muted); font-size: .85rem; text-align: center; }
 .composer { display: flex; gap: 8px; position: sticky; bottom: 80px; background: var(--bg); padding-top: 6px; }
 
@@ -496,6 +509,8 @@ button.chip { font: inherit; font-size: .82rem; cursor: pointer; }
   padding: 12px 14px; font-size: .9rem; color: var(--text); line-height: 1.5;
 }
 .notice.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn-text); }
+.guest-warning { display: grid; gap: 8px; margin-bottom: 12px; font-size: 1rem; border-width: 2px; }
+.guest-warning .btn { justify-self: start; }
 .pii-notice { margin: 0; } /* under a post form field: contact info or an address (mountPiiCheck in app.js) */
 .note { color: var(--muted); font-size: .85rem; margin: 0 0 10px; }
 button.link { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-size: .9rem; cursor: pointer; text-align: left; }

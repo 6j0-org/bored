@@ -9,7 +9,7 @@ import { mountFeedback } from './feedback.js';
 import { parseWhen, parseEnd, shiftEnd, repeatOptions, whenLabel as fmtWhen, localToday, occursBetween } from './when.js';
 import {
   initMail, resetMail, loadMail, mailView, requestJoin, sendOn, pass, unpass, deletePassed, savePost, setPostStatus, reshare,
-  invitesForMe, answerInvite, sendInvite, declinedInvites,
+  invitesForMe, answerInvite, sendInvite, declinedInvites, keysFor,
 } from './mail.js';
 import { LIVE } from './posts.js';
 import { postFields, FIELD_LABELS } from './postfields.js';
@@ -297,9 +297,9 @@ async function addContacts(guids, names = {}) {
   await vault.update(api, (d) => {
     for (const g of missing) d.contacts[g] ||= { nickname: names[g] || '', tags: [], added: new Date().toISOString() };
   });
+  await keysFor(missing).catch(() => {}); // save their keys now, so their posts show as theirs
 }
-// Anyone I've matched with…
-// …or connected with through an invitation (theirs or mine). An inviter I asked to connect with gets the nickname I
+// People I've connected with through an invitation (theirs or mine): both of us said yes. An inviter I asked to connect with gets the nickname I
 // picked when I asked (pendingNames, keyed by their icon, since I didn't know their GUID yet).
 async function syncConnections() {
   if (!state.me || !hasKeys()) return;
@@ -432,13 +432,18 @@ function connectSheet({ token, key, name, info, ready }) {
   });
 }
 
-// Invite the host of a post (a stranger: their avatar in Discover) to connect. The invitation is mailed to them
-// (sendInvite) and shows in their Confirm tab. It's only for them: when they say yes, my browser confirms it for me
-// (confirmDirectInvites), since sending it already said yes.
+// Nobody becomes a contact without both saying yes. Inviting someone to connect: the host of a post (a stranger:
+// their avatar in Discover), or the person in a plan's chat (matching doesn't connect anyone). The invitation is
+// mailed to them (sendInvite) and shows in their Confirm tab, where they pick their nickname for me. It's only for
+// them: when they say yes, my browser confirms it for me (confirmDirectInvites), since sending it already said yes,
+// and they get the nickname I picked for them here.
 function inviteHost(pid) {
   const post = mailView()?.posts.get(pid);
   if (!post) return toast('That post is gone.');
-  const to = post.signer?.x;
+  inviteToConnect({ reply: post.reply, to: post.signer?.x, icon: post.signer ? `${post.signer.x}.${post.signer.y}` : null,
+    about: `The host of <b>${esc(post.title)}</b>` });
+}
+function inviteToConnect({ reply, to, icon, about }) {
   if (Object.values(vault.data.invites || {}).some(i => i?.direct && i.to === to)) {
     return toast("You've already invited them. They'll see it in their Confirm tab.");
   }
@@ -447,12 +452,15 @@ function inviteHost(pid) {
   sheet.innerHTML = `
     <form class="stack panel">
       <h2>Invite them to connect</h2>
-      <div class="invite-from">${avatar(post.signer ? `${post.signer.x}.${post.signer.y}` : null, 'big')}</div>
-      <p>The host of <b>${esc(post.title)}</b> gets your invitation in their Confirm tab. If they say yes, you'll be in
-        each other's contacts and can share private posts with each other.</p>
+      <div class="invite-from">${avatar(icon, 'big')}</div>
+      <p>${about} gets your invitation in their Confirm tab. If they say yes, you'll be in each other's contacts and
+        can share private posts with each other.</p>
+      <label>Your nickname for them
+        <input name="their" required maxlength="60" placeholder="e.g. Sam from book club" autocomplete="off"></label>
       <label>What should they call you?
         <input name="name" required maxlength="60" placeholder="e.g. Evan from the garden club" value="${esc(myName())}" autocomplete="off"></label>
-      <p class="note">Only they see it, and they can change it.</p>
+      <p class="note">Nicknames are private: only you see the one you give them, and only they see the one you
+        suggest (they can change it).</p>
       <div class="two">
         <button type="button" class="btn ghost" data-cancel>Cancel</button>
         <button class="btn">Send invitation</button>
@@ -463,15 +471,15 @@ function inviteHost(pid) {
   sheet.onclick = (e) => { if (e.target === sheet) sheet.remove(); };
   sheet.querySelector('form').onsubmit = async (e) => {
     e.preventDefault();
-    const name = e.target.name.value.trim();
-    if (!name) return;
+    const name = e.target.name.value.trim(), their = e.target.their.value.trim();
+    if (!name || !their) return;
     let id = null;
     try {
       const inv = await api('/api/invites', { method: 'POST' });
       id = inv.id;
-      const entry = { token: inv.token, key: newInviteKey(), name, direct: true, to };
+      const entry = { token: inv.token, key: newInviteKey(), name, direct: true, to, their };
       await vault.update(api, (d) => { d.invites ||= {}; d.invites[id] = entry; });
-      await sendInvite(post, entry);
+      await sendInvite(reply, entry);
       sheet.remove();
       toast('Invitation sent.');
     } catch (err) {
@@ -484,8 +492,9 @@ function inviteHost(pid) {
   };
   sheet.querySelector('input').focus();
 }
-// Requests to connect through invitations I mailed to someone (inviteHost): confirm them, add them to my contacts,
-// and delete the invitation (it was only for them). Returns the other requests.
+// Requests to connect through invitations I mailed to someone (inviteToConnect): confirm them, add them to my
+// contacts with the nickname I picked (or, for invitations from before that, the one they suggested), and delete the
+// invitation (it was only for them). Returns the other requests.
 async function confirmDirectInvites(requests) {
   const rest = [];
   for (const c of requests) {
@@ -495,8 +504,9 @@ async function confirmDirectInvites(requests) {
       const suggested = inv.key && c.note ? await openForInvite(inv.key, c.note) : null;
       const r = await api(`/api/connection-requests/${c.id}/respond`, { method: 'POST', body: { yes: true } });
       if (r.connected) {
-        await addContacts([r.guid], suggested ? { [r.guid]: suggested } : {});
-        toast(`Connected with ${suggested || 'the host you invited'}!`);
+        const nickname = inv.their || suggested;
+        await addContacts([r.guid], nickname ? { [r.guid]: nickname } : {});
+        toast(`Connected with ${nickname || 'someone you invited'}!`);
       }
       await api(`/api/invites/${c.invite_id}`, { method: 'DELETE' }).catch(() => {});
       await vault.update(api, (d) => { const e = d.invites?.[c.invite_id]; if (e) d.invites[c.invite_id] = { key: e.key, name: e.name, direct: true, to: e.to }; });
@@ -755,8 +765,10 @@ async function viewFeedback(v) {
         : "Ideas, problems, or questions? Everyone signed in can read what's posted here and see your profile icon, and people you're connected with see the name they gave you. It isn't encrypted, so please don't include anything personal. Tap a post to open its chat, where anyone can reply.",
     });
     feedbackPage = { guid: state.me.guid, el, page };
-  } else feedbackPage.page.refresh();
+  } else if (!state.feedbackThread) feedbackPage.page.refresh();
   v.replaceChildren(feedbackPage.el);
+  // From a notification: open that post's chat.
+  if (state.feedbackThread) { feedbackPage.page.open(state.feedbackThread); state.feedbackThread = null; }
 }
 
 // After any successful sign-in/sign-up/unlock.
@@ -789,7 +801,17 @@ async function turnOnPush() {
   if (await Notification.requestPermission() !== 'granted') throw new Error('Notifications are blocked for this site.');
   const reg = await swRegistration();
   const { publicKey } = await api('/api/push/key');
-  const sub = await reg.pushManager.getSubscription() || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u.dec(publicKey) });
+  let sub;
+  try {
+    sub = await reg.pushManager.getSubscription() || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64u.dec(publicKey) });
+  } catch (e) {
+    // The browser couldn't reach its push service. On Android, Chromium-based browsers deliver web notifications
+    // through Google Play services, so phones without them (e.g. GrapheneOS) get "push service error".
+    if (e?.name === 'AbortError' || /push service/i.test(e?.message || '')) {
+      throw new Error("This browser couldn't reach its push service. On Android, most browsers need Google Play services for notifications: on GrapheneOS, turn on sandboxed Google Play and use a browser that supports it, like Chrome.");
+    }
+    throw e;
+  }
   await api('/api/push/subscribe', { method: 'POST', body: sub.toJSON() });
 }
 async function turnOffPush() {
@@ -804,11 +826,38 @@ async function syncPush() {
   const sub = await pushSubscription().catch(() => null);
   if (sub) api('/api/push/subscribe', { method: 'POST', body: sub.toJSON() }).catch(() => {});
 }
-// Go where a tapped notification says: 'confirm', 'plans', 'profile', or 'discover'.
+// Go where a tapped notification says: 'confirm', 'plans', 'profile', 'discover', 'feedback' (also the About page's
+// Feedback button), 'feedback:<id>' (that post's chat), or 'mail' (see mailDestination).
 function openScreen(open) {
-  if (open === 'feedback') return openFeedback(); // from the About page's Feedback button
+  if (open === 'feedback') return openFeedback();
+  if (open?.startsWith('feedback:')) { state.feedbackThread = open.slice(9); return openFeedback(); }
+  if (open === 'mail') return openMail();
   if (!open || !state.me || !['confirm', 'plans', 'profile', 'discover'].includes(open)) return;
   state.tab = open; state.chat = null;
+  render();
+}
+// Mail is encrypted, so the server's notification only says "New activity". The newest thing in my mail is almost
+// certainly what it was about: a match's chat (or what happened in it), a request waiting for my answer, or an
+// invitation to connect. Anything else, like a private post shared with me, is in Discover.
+function mailDestination(view) {
+  const channels = [
+    ...(view?.requests || []).map(r => ({ r, host: false })),
+    ...(view?.hosting || []).flatMap(h => h.requests.map(r => ({ r, host: true }))),
+  ].sort((a, b) => b.r.updatedAt - a.r.updatedAt);
+  // Invitations sent before they carried a time count as oldest.
+  const newest = channels[0], invites = invitesForMe(), inviteAt = Math.max(0, ...invites.map(i => Number(i.at) || 0));
+  if (invites.length && (!newest || inviteAt >= newest.r.updatedAt)) return { tab: 'confirm' };
+  if (!newest) return { tab: 'discover' };
+  const { r, host } = newest;
+  if (['accepted', 'attended', 'withdrawn'].includes(r.status)) return { tab: 'plans', chat: `m:${r.id}` };
+  if (r.status === 'waitlisted') return { tab: 'plans' };
+  if (host && r.status === 'pending') return { tab: 'confirm' };
+  return { tab: 'discover' };
+}
+async function openMail() {
+  if (!state.me || !hasKeys()) return;
+  const { tab, chat = null } = mailDestination(await loadMail().catch(() => mailView()));
+  state.tab = tab; state.chat = chat;
   render();
 }
 // Profile's Notifications section, which depends on the browser and this device's state.
@@ -1052,13 +1101,18 @@ function postCounts(posts) {
 async function viewDiscover(v) {
   // The hint goes right under the heading: under the deck, the tab bar would cover it on a phone. Guests have no
   // discard pile (their passes aren't kept).
-  v.innerHTML = `<p class="hint pile-hint">${state.me ? 'Scroll up to refresh. Scroll down to see your discard pile.' : 'Scroll up to refresh.'}</p>
+  // Guests get a warning above everything: swiping looks like it does something, but nothing is saved or sent.
+  v.innerHTML = `${state.me ? '' : `<div class="notice warn guest-warning" role="note">
+      <b>You're not signed in, so swiping does nothing.</b> Passes aren't saved, and you can't ask to join anything.
+      <button type="button" class="btn small" id="guestSignIn">Sign in or create an account</button></div>`}
+    <p class="hint pile-hint">${state.me ? 'Scroll up to refresh. Scroll down to see your discard pile.' : 'Scroll up to refresh.'}</p>
     <div class="filters" id="filters"></div>
     <p class="note mod-note" id="modNote" hidden></p>
     <div class="deck-host" id="deckHost"></div>
     <section class="pile" id="pile" aria-labelledby="pileTitle" hidden></section>`;
   const filtersEl = v.querySelector('#filters'), host = v.querySelector('#deckHost'), pileEl = v.querySelector('#pile');
   const modNote = v.querySelector('#modNote');
+  v.querySelector('#guestSignIn')?.addEventListener('click', () => go('account'));
   let options = { tags: [], costs: [], dates: [] }, events = [], deck = null;
   let hidden = new Map(); // posts my moderation settings hide, from the deck and the discard pile (moderatePosts)
 
@@ -1366,7 +1420,7 @@ async function viewConfirm(v) {
     await sendOn(o.ch, { type: 'answer', status });
     if (status === 'accepted') showMatch(o.from && isContact(o.from) ? o.from : null, o.title, `m:${o.ch}`);
     else if (status === 'waitlisted') toast(`Added them to the waitlist for “${o.title}”`);
-    loadMail().then(shellRefreshBadges, () => {}); // say hello, so they become a contact
+    loadMail().then(shellRefreshBadges, () => {}); // say hello, so each side knows who the other is
   };
   const connected = async (r, o) => {
     await refreshMe();
@@ -1438,8 +1492,8 @@ function showMatch(otherGuid, title, matchId) {
   o.innerHTML = `
     <h1>It's on!</h1>
     <div class="pair">${avatar(state.me.guid)}${avatar(otherGuid)}</div>
-    <p>You and <b>${esc(known ? displayName(otherGuid) : 'a new contact')}</b> are teaming up on<br><b>${esc(title)}</b></p>
-    ${known ? '' : `<p style="opacity:.8;font-size:.9rem">They're in your contacts now. Give them a nickname from the chat; only you will see it.</p>`}
+    <p>You and <b>${esc(known ? displayName(otherGuid) : 'someone new')}</b> are teaming up on<br><b>${esc(title)}</b></p>
+    ${known ? '' : `<p style="opacity:.8;font-size:.9rem">Want to stay in touch afterwards? Invite them to connect from the chat. You'll only be contacts if you both say yes.</p>`}
     <button class="btn" id="mChat">Send a message</button>
     <button class="btn ghost" id="mKeep">Keep swiping</button>`;
   document.body.appendChild(o);
@@ -1495,7 +1549,7 @@ async function viewPlans(v) {
   const past = matches.filter(m => !['accepted', 'waitlisted'].includes(m.status));
   // Full cards, like Discover's, each labelled with where the plan stands and who's in it. A card opens its chat.
   const label = (m) =>
-    m.status === 'attended' ? ['done', 'Happened']
+    m.status === 'attended' ? ['done', 'Done']
     : m.status === 'withdrawn' ? ['done', 'Dropped out']
     : m.reconfirm ? ['warn', m.role === 'attendee' ? 'Re-confirm?' : 'Awaiting OK']
     : ['in', "It's on"];
@@ -1518,7 +1572,7 @@ async function viewPlans(v) {
       <div class="card-actions"><button class="btn ghost small" data-leave-ch="${esc(m.ch)}">Leave</button></div>
     </div>`;
   v.innerHTML = `
-    ${active.length || past.length ? `<p class="hint plans-hint">Click a card to chat.</p>` : ''}
+    ${active.length || past.length ? `<p class="hint plans-hint">Click a card to chat. In a chat, tap one of your messages to edit it.</p>` : ''}
     ${active.length ? `<div class="section-title">Happening</div><div class="list">${active.map(card).join('')}</div>` : ''}
     ${waiting.length ? `<div class="section-title">Waitlist</div>
       <p class="note">These posts are full. You'll be matched automatically, in order, when a spot opens.</p>
@@ -1559,6 +1613,9 @@ async function viewChat(v, id) {
   const m = find();
   if (!m || m.status === 'waitlisted') { state.chat = null; return viewPlans(v); }
   const name = nameOrSomeone(m.other);
+  // Matching doesn't connect anyone: either side can invite the other, from what they said in their hello.
+  const theirHello = m.state.hello[m.role === 'host' ? 'attendee' : 'host'];
+  const canConnect = Boolean(m.other && theirHello?.chat && theirHello?.inbox && !isContact(m.other));
   v.innerHTML = `
     <div class="chat">
       <div class="chat-head">
@@ -1568,11 +1625,13 @@ async function viewChat(v, id) {
           <b>${esc(name)}</b>
           <div class="sub" style="color:var(--muted);font-size:.85rem">${esc(m.title)}${m.when_text ? ` · <button type="button" class="link cal-link" id="addCal" title="Add to your calendar">${esc(whenLabel(m.when_text, m.end_text))}</button>` : ''}${whereHtml(m) ? ' · ' + whereHtml(m) : ''}</div>
         </div>
-        ${m.role === 'host' && m.status === 'accepted' ? `<button class="btn small" id="happened">It happened</button>` : ''}
+        ${m.role === 'host' && m.status === 'accepted' ? `<button class="btn small" id="happened">Mark as done</button>` : ''}
         ${m.role === 'attendee' && m.status === 'accepted' && !m.reconfirm ? `<button class="btn ghost small" id="leave">Can't make it</button>` : ''}
       </div>
       ${isBlocked({ guid: m.other }) ? `<div class="notice">You blocked ${esc(name)}, so their messages are hidden.
-        <button type="button" class="link" id="unblockChat">Unblock</button></div>` : ''}
+        <button type="button" class="link" id="unblockChat">Unblock</button></div>`
+      : canConnect ? `<div class="notice connect-note">You're not connected.
+        <button type="button" class="link" id="connectChat">Invite them to connect</button></div>` : ''}
       <div class="msgs" id="msgs"></div>
       ${m.status === 'accepted' && m.reconfirm && m.role === 'attendee' ? `
         <div class="reconfirm">
@@ -1590,21 +1649,30 @@ async function viewChat(v, id) {
         </form>` : ''}
     </div>`;
   v.querySelector('.back').onclick = () => { state.chat = null; render(); };
+  v.querySelector('#connectChat')?.addEventListener('click', () => inviteToConnect({
+    reply: { chat: theirHello.chat, inbox: theirHello.inbox }, to: m.other, icon: m.other, about: `The person you matched with on <b>${esc(m.title)}</b>`,
+  }));
   v.querySelector('#unblockChat')?.addEventListener('click', async () => {
     try { await setBlocked({ guid: m.other }, false); toast(`Unblocked ${name}`); render(); } catch (err) { toast(err.message); }
   });
   v.querySelector('#addCal')?.addEventListener('click', () => addToCalendar({ id: m.id, title: m.title, location: m.location, location_name: m.location_name, online: m.online, when_text: m.when_text, end_text: m.end_text }));
 
   const msgsEl = v.querySelector('#msgs');
-  let drawn = '';
+  let drawn = '', editing = false;
+  // My messages can be edited (tap one) while we're matched or after it happened.
+  const editable = (x) => ['accepted', 'attended'].includes(x.status);
+  const edited = (t) => t.edited ? '<span class="msg-edited">edited</span>' : '';
   function drawMsgs(x) {
+    if (editing) return; // don't wipe a message being edited; the next poll catches up
     const nm = esc(nameOrSomeone(x.other)), blocked = isBlocked({ guid: x.other });
     const html = `<div class="msg sys">${x.role === 'attendee' ? `You asked to join and ${nm} said yes!` : `${nm} asked to join and you said yes!`}</div>` +
       x.state.timeline.map(t => t.event === 'chat'
-        ? t.role === x.role ? `<div class="msg mine">${esc(t.text)}</div>`
-          : blocked ? '<div class="msg hidden-msg">Message hidden</div>' : `<div class="msg">${esc(clean(t.text))}</div>`
+        ? t.role === x.role
+          ? editable(x) && t.n ? `<div class="msg mine editable" role="button" tabindex="0" data-n="${t.n}" title="Edit this message">${esc(t.text)}${edited(t)}</div>`
+            : `<div class="msg mine">${esc(t.text)}${edited(t)}</div>`
+          : blocked ? '<div class="msg hidden-msg">Message hidden</div>' : `<div class="msg">${esc(clean(t.text))}${edited(t)}</div>`
         : mailSystemLine(t, x) ? `<div class="msg sys notice">${esc(mailSystemLine(t, x))}</div>` : '').join('') +
-      (x.status === 'attended' ? '<div class="msg sys">Marked as happened. Hope it was fun!</div>'
+      (x.status === 'attended' ? '<div class="msg sys">Marked as done. Hope it was fun!</div>'
         : x.status === 'accepted' && x.reconfirm && x.role === 'host' ? `<div class="msg sys">Waiting for ${nm} to re-confirm</div>` : '');
     if (html === drawn) return;
     drawn = html; msgsEl.innerHTML = html;
@@ -1612,6 +1680,33 @@ async function viewChat(v, id) {
     window.scrollTo(0, document.body.scrollHeight);
   }
   drawMsgs(m);
+  // Editing one of my messages: it turns into a text box, and saving sends an edit that replaces its text for both of us.
+  function startEdit(el) {
+    if (editing) return;
+    const x = find(), t = x?.state.timeline.find(e => e.event === 'chat' && e.role === x.role && e.n === Number(el.dataset.n));
+    if (!t) return;
+    editing = true;
+    el.classList.add('editing'); el.removeAttribute('role'); el.removeAttribute('tabindex');
+    el.innerHTML = `<form class="msg-edit"><label class="sr-only" for="msgEditBox">Edit message</label>
+      <textarea id="msgEditBox" maxlength="2000" rows="2" required>${esc(t.text)}</textarea>
+      <div class="btns"><button type="button" class="btn ghost small" data-cancel>Cancel</button><button class="btn small">Save</button></div></form>`;
+    const box = el.querySelector('textarea');
+    box.focus(); box.setSelectionRange(box.value.length, box.value.length);
+    const done = () => { editing = false; drawn = ''; drawMsgs(find()); };
+    el.querySelector('[data-cancel]').onclick = done;
+    el.querySelector('form').onsubmit = async (e) => {
+      e.preventDefault();
+      const text = box.value.trim();
+      if (!text || text === t.text) return done();
+      try { await loadMail().catch(() => {}); await sendOn(m.ch, { type: 'edit', of: t.n, text }); done(); }
+      catch (err) { toast(err.message); }
+    };
+  }
+  msgsEl.addEventListener('click', (e) => { const el = e.target.closest('.msg.editable'); if (el && !el.classList.contains('editing')) startEdit(el); });
+  msgsEl.addEventListener('keydown', (e) => {
+    const el = e.target.closest?.('.msg.editable');
+    if (el && e.target === el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); startEdit(el); }
+  });
   // Anything that changes the buttons (a re-confirm request, the other side leaving, …) redraws the whole chat.
   const shape = (x) => `${x?.status}|${x?.reconfirm}|${x?.other}`;
   const poll = setInterval(async () => {
@@ -1641,7 +1736,7 @@ async function viewChat(v, id) {
     if (confirm(`Drop out of “${m.title}”? ${name} will be told, and your spot goes to the next person on the waitlist.`)) act({ type: 'leave' }, "You've dropped out");
   });
   v.querySelector('#happened')?.addEventListener('click', () => {
-    if (confirm(`Mark “${m.title}” as happened with ${name}?`)) act({ type: 'happened' }, `Glad it happened! Thanks, ${name}.`);
+    if (confirm(`Mark “${m.title}” as done with ${name}?`)) act({ type: 'happened' }, `Glad it went well! Thanks, ${name}.`);
   });
 }
 
@@ -1988,7 +2083,7 @@ async function viewPost(v) {
   const label = (t) => ({
     open: t.pending ? ['warn', `${t.pending} interested`] : ['done', 'Looking'],
     full: ['in', "It's on"],
-    past: ['done', 'Happened'],
+    past: ['done', 'Done'],
   }[t.status] || ['done', t.status]);
   const who = (t) => `${avatar(state.me.guid)}
     <div><b>${t.visibility === 'public' ? 'Public' : t.viewers ? `${t.viewers} can see` : 'Only you'} · ${t.max_attendees == null ? `${t.matched} matched · no limit` : `${t.matched}/${t.max_attendees} matched`}</b>
@@ -2190,7 +2285,6 @@ async function deleteContact(guid) {
   await api('/api/connections/remove', { method: 'POST', body: { guid } });
   await vault.update(api, (d) => {
     delete d.contacts[guid];
-    d.removedContacts = { ...d.removedContacts, [guid]: Date.now() };
     for (const p of Object.values(d.posts || {})) if (p.audience?.contacts) p.audience.contacts = p.audience.contacts.filter(g => g !== guid);
   });
   syncAudiences().catch(err => toast(err.message));
@@ -2329,7 +2423,7 @@ async function viewProfile(v) {
     <button class="btn ghost" id="newInvite">Create an invitation</button>
 
     <div class="section-title">Contacts</div>
-    <p class="note">People you've matched or connected with. Names and tags here are yours alone: they're encrypted with your passkey, and nobody else, including the server, can read them.</p>
+    <p class="note">People you've connected with: you both said yes to an invitation. Names and tags here are yours alone: they're encrypted with your passkey, and nobody else, including the server, can read them.</p>
     ${allTags.length ? `<div class="filter-row" role="group" aria-label="Filter contacts by tag"><span class="label">Tags</span>
       ${allTags.map(t => `<button type="button" class="chip filter ${sel.has(t) ? 'on' : ''}" data-ctag="${esc(t)}" aria-pressed="${sel.has(t)}">#${esc(t)}</button>`).join('')}
       ${sel.size ? `<button type="button" class="chip filter clear" data-cclear>Clear</button>` : ''}</div>` : ''}
@@ -2339,7 +2433,7 @@ async function viewProfile(v) {
           <div class="grow"><div class="title">${esc(c.nickname || 'Unnamed contact')}</div>
             <div class="sub">${isBlocked({ guid: c.guid }) ? 'Blocked · ' : ''}${(c.tags || []).map(t => '#' + esc(t)).join(' ')}${c.tags?.length ? ' · ' : ''}${c.together || 0} event${c.together === 1 ? '' : 's'} together</div></div>
           </button>`).join('')
-        : `<p style="color:var(--muted)">${contacts.length ? 'No contacts with those tags.' : "Once you match with someone, they'll show up here for you to name and tag."}</p>`}
+        : `<p style="color:var(--muted)">${contacts.length ? 'No contacts with those tags.' : "No contacts yet. Invite someone to connect from a plan's chat, or share an invitation above. Once you both say yes, they'll show up here."}</p>`}
     </div>
 
     ${isDemo() ? `<div class="section-title">Demo</div>

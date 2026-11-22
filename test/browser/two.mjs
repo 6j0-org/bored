@@ -1,6 +1,6 @@
 // Two headless Chromium profiles (two demo accounts) through the whole flow in the real UI.
 import assert from 'node:assert/strict';
-import { browser, finish, wait } from '../lib.mjs';
+import { browser, finish, wait, BASE } from '../lib.mjs';
 const A = await browser('host'), B = await browser('guest');
 const guidOf = (x) => x.ev(`import('/secure.js').then(s => s.myPublicKeys().guid)`);
 const ga = await guidOf(A), gb = await guidOf(B);
@@ -50,6 +50,18 @@ await B.ev(`document.getElementById('chatBody').value = 'hi from the guest'; doc
 await A.until(`document.getElementById('msgs')?.innerText.includes('hi from the guest')`, 20000);
 await A.ev(`document.getElementById('chatBody').value = 'hi back'; document.getElementById('composer').requestSubmit()`);
 await B.until(`document.getElementById('msgs')?.innerText.includes('hi back')`, 20000);
+
+// The guest edits their message (tap it, change it, save); the host sees the new text, marked as edited.
+await B.ev(`document.querySelector('#msgs .msg.mine.editable').click()`);
+await B.until(`document.getElementById('msgEditBox')`);
+await B.ev(`document.getElementById('msgEditBox').value = 'hi from the guest, edited'; document.querySelector('.msg-edit').requestSubmit()`);
+await B.until(`document.querySelector('#msgs .msg.mine')?.innerText.includes('hi from the guest, edited')`, 10000);
+await A.until(`[...document.querySelectorAll('#msgs .msg')].some(m => m.innerText.includes('hi from the guest, edited') && m.querySelector('.msg-edited'))`, 20000);
+assert.equal(await A.ev(`document.querySelectorAll('#msgs .msg.editable').length`), 1, 'the host can edit only their own message');
+
+// A tapped "New activity" notification (?open=mail) opens the newest thing in the mail: this chat.
+await A.send('Page.navigate', { url: BASE + '/?open=mail' });
+await A.until(`document.getElementById('msgs')?.innerText.includes('hi back')`, 20000);
 await A.ev(`document.querySelector('.back').click()`); await wait(1500);
 r.hostPlans = (await A.text()).slice(0, 400);
 r.guestChat = await B.ev(`document.getElementById('msgs').innerText.replace(/\\s+/g, ' ')`);
@@ -66,7 +78,7 @@ assert.match(r.request, /Guesty One of your contacts/, 'a contact who asks is na
 assert.match(r.overlay, /^It's on! You and Guesty/);
 assert.match(r.guestPlans, /Two-browser picnic[\s\S]*Hosted by Hosty/);
 assert.match(r.hostPlans, /Two-browser picnic[\s\S]*Guesty is going hi back/);
-assert.match(r.guestChat, /hi from the guest hi back/);
+assert.match(r.guestChat, /hi from the guest, edited edited hi back/);
 assert.match(r.hostPostAfterLeave, /^LOOKING .*0\/1 matched/, 'the post opens up again when the guest leaves');
 A.close(); B.close();
 finish('browser two');

@@ -231,6 +231,7 @@ const route = (method, pattern, handler, { auth = true, mode } = {}) => {
 // label. They're the accounts in DEVELOPER_GUIDS (each account's GUID is at the bottom of its Profile page), plus
 // ADMIN_GUID (an account's GUID, in any mode) and ADMIN_SUB (a 6j0.org identity's sub, with AUTH_MODE=6j0) if set.
 const DEVELOPER_GUIDS = [
+  '182b0c35-5956-4e64-a881-e852c397c7f5',
 ];
 const FEEDBACK_PATH = DEMO ? (() => {
   const dir = mkdtempSync(join(tmpdir(), 'bored-demo-feedback-'));

@@ -25,7 +25,7 @@ npm start      # http://localhost:3000
 npm test               # all of them
 npm run test:unit      # HPKE against RFC 9180's test vectors, the request rules in posts.js, feedback.js, and moderation.js; no server
 npm run test:server    # real accounts in Node against a demo-mode server: mail, public posts, reports, and demo seeding
-npm run test:browser   # the real UI in two headless Chromium profiles: post, join, match, chat, and leave
+npm run test:browser   # the real UI in two headless Chromium profiles: post, join, match, chat, leave, and the tutorial
 ```
 
 The runner (`test/run.mjs`) starts its own `DEMO=1` server on a free port, so nothing touches `data.sqlite`. The
@@ -138,6 +138,11 @@ the server says so on startup, and you delete it to start fresh.
 
 ## How it works
 
+The first time someone signed in opens the app, a short tutorial walks through the five steps (Connect, Post,
+Discover, Confirm, and Plan), one box at a time above the tab bar. Each step rings its tab and, once you're there,
+the thing to use; "Show me", Next, and Back move between them. Finishing or skipping it is saved in the encrypted
+vault, so it shows once per account. "Show the tutorial" in Profile's settings turns it back on (or off).
+
 | Step | Who | Where |
 |---|---|---|
 | Post an event (title, details, up to 5 tags, where (map pin), when (date, time, optional repeat, with quick picks like "In an hour" and ends like "2 hours" or "Sunset"), cost and currency, max attendees or no limit, public or shared with chosen contacts/groups). A post idea fills in the form. The button says who'll see it ("Post it to 3 people"); a private post needs at least one person, and a public one asks first | Host | **Post** |
@@ -187,6 +192,19 @@ only change what that person sees. Guests get the defaults, and everything is on
   messages, says no to their requests to join, connect, and invitations without showing them, and stops sharing
   private posts with them. Requests from strangers are anonymous, so blocking only catches people who say who they
   are. Blocked people are listed in Moderation, to unblock.
+- **Deleting your account** (Profile → Delete account) takes the last 4 characters of the Account ID shown under it.
+  The browser first cancels the posts you're hosting that are still on (so the people they're shared with are told,
+  through their own inboxes), then sends the read tokens of the inboxes it writes to: its main inbox and its side of
+  every channel. The server (`POST /api/account/delete`) erases the account and everything that cascades from it
+  (keys, vault, passkeys, sessions, public posts and the reports on them, invitations, connections, connection
+  requests, and push subscriptions), the mail in those inboxes, the reports it filed, and its feedback posts and
+  replies (`eraseUser` in `feedback.js`; gone from disk at the next restart). There's no recovery. In the demo, a
+  fresh account follows. With `AUTH_MODE=6j0`, the account belongs to the 6j0.org identity: Profile explains that
+  deleting the identity deletes its accounts on every 6j0.org service and links to the identity server's "Delete your
+  identity" (`ID_ORIGIN/#delete`), and the endpoint refuses. Once the identity is deleted, the identity server POSTs
+  a signed deletion notice to `/api/id/deleted` (`verifyDeletionToken` in `idtoken.js`), and the account is erased
+  the same way, except for its side of each chat (the server doesn't know those inboxes without the browser) and
+  without cancelling its posts first, so Profile asks people to remove them before they go.
 - **Deleting a contact** removes them from your contacts (and any invitation connection on the server), and stops
   sharing private posts with them. Neither blocking nor deleting tells the other person.
 
@@ -277,6 +295,16 @@ of. Everything else happens in the browser: filtering Discover, who's in, the wa
 - **Two devices sending on the same request at the same instant** can lose one of the two messages.
 - **Spam:** anyone can send a request to a public post's host. Rate limits on the server, plus the browser ignoring
   anything the rules don't allow, are the only defense. Blocking can't catch a stranger's request, which is anonymous.
+- **Deleting an account leaves traces with other people.** Their side of each chat stays, and so does mail already
+  in their inboxes (shares of your private posts, marked cancelled, and your requests to join their posts). A plan
+  with someone who deleted their account still shows as on for the other person, with only their own messages. Mail
+  sent to a deleted account's inbox afterwards is stored like any other, sealed to a key nobody has. And since the
+  server can't tell which side of a channel is whose, someone deleting their account could erase the other side of
+  their own chats too.
+- **Deleting a 6j0.org identity leaves more behind**: its side of each chat (ciphertext only the other person can
+  read, no longer tied to any account), and its private posts, still showing as on for the people they were shared
+  with, unless they were removed first. If Bored is down for 30 days straight, the identity server gives up and
+  logs the identity so it can be erased by hand.
 - **Report counts can be gamed** by someone with many accounts, like any vote. Each person's own threshold, and
   being able to turn a reason off, limit the damage.
 

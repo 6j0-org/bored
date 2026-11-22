@@ -306,7 +306,8 @@ export async function addPasskey(api, nextStep) {
 //     time they're used, so the server can't swap them later)
 //   posts, requests, passed: my posts, my requests to join (with their channel secrets), and posts I passed on (see
 //     public/mail.js)
-//   prefs: { distanceUnit: 'km' | 'mi' },  (settings from Profile)
+//   prefs: { distanceUnit: 'km' | 'mi', tutorialSeen: true },  (settings from Profile; tutorialSeen once the
+//     first-visit tutorial is finished or skipped)
 //   moderation: { builtin, lists, reports, blocked, reported },  (my word lists, report thresholds, who I've blocked,
 //     and what I reported; see public/moderation.js)
 //   invites: { [inviteId]: { token, key, name } },  (my invitation links, so I can share them again; the server has

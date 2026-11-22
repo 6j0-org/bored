@@ -262,6 +262,17 @@ function peerOf(ch) {
   return hello ? { chat: hello.chat, inbox: hello.inbox } : null;
 }
 
+// The inboxes I write to, as read tokens: my main inbox and my side of every channel I'm on (the attendee writes to
+// the recipient inbox, the host to the opener inbox, as in sendOn). Only for deleting my account, which erases them.
+export async function myInboxTokens() {
+  const out = vault.data.inbox ? [vault.data.inbox] : [];
+  for (const c of box.channels.values()) {
+    const x = await channelOf(c.id);
+    out.push(c.role === 'attendee' ? x.recipientInbox : x.openerInbox);
+  }
+  return out;
+}
+
 // Send a message on a channel, as whichever side I am on it. poke: also wake up the other side's devices.
 export async function sendOn(ch, fields, { poke = true } = {}) {
   const c = box.channels.get(ch);

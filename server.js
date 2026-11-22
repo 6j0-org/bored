@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { createHash, createHmac, createPublicKey, randomBytes, randomUUID, verify as verifySignature } from 'node:crypto';
 import { newChallenge, takeChallenge, verifyRegistration, verifyAssertion, WebAuthnError } from './webauthn.js';
-import { verifyIdToken, IdTokenError } from './idtoken.js';
+import { verifyIdToken, verifyDeletionToken, IdTokenError } from './idtoken.js';
 import { postFields } from './public/postfields.js';
 import { REPORT_REASONS as MODERATION_REASONS } from './public/moderation.js';
 import { vapidPublicKey, validEndpoint, sendPush } from './push.js';
@@ -465,6 +465,57 @@ route('POST', '/api/logout', async ({ req, res }) => {
   if (sid) q('DELETE FROM sessions WHERE token = ?').run(sid);
   send(res, 200, { ok: true }, { 'Set-Cookie': 'sid=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0' });
 }, { auth: false });
+
+// ---------- deleting an account ----------
+// { confirm, inboxes } → everything this server holds for the account is erased, at once and for good: the users row
+// and everything that cascades from it (keys, the encrypted vault, passkeys, sessions, public posts and the reports on
+// them, invitations, connections, connection requests, and push subscriptions), the mail in its main inbox, the
+// reports it filed, and its feedback posts and replies. confirm is the last 4 characters of the account's GUID (shown
+// at the bottom of Profile), so a stray request can't do it. inboxes are read tokens for the inboxes the account
+// writes to, which only its browser knows: its side of every channel (and its main inbox, which the server knows
+// anyway). The server can't check that a channel inbox is the caller's side rather than the other person's, so
+// someone deleting their account could erase the other side of their own chats too; nobody else's.
+// With a 6j0.org identity the account is deleted there instead, with all of that identity's apps, and the identity
+// server tells us (/api/id/deleted, below).
+const MAX_ERASE_INBOXES = 10000;
+// Erases an account: everything above, plus the mail in `inboxes` (inbox IDs).
+function eraseAccount(user, inboxes = new Set()) {
+  if (user.inbox_id) inboxes.add(user.inbox_id);
+  tx(() => {
+    const delMail = q('DELETE FROM mail WHERE inbox = ?'), delReport = q('DELETE FROM post_reports WHERE pid = ? AND who = ?');
+    for (const inbox of inboxes) delMail.run(inbox);
+    for (const { pid } of q('SELECT DISTINCT pid FROM post_reports').all()) delReport.run(pid, reporterOf(user, pid));
+    q('DELETE FROM users WHERE id = ?').run(user.id);
+  });
+  feedback.eraseUser(user.guid);
+}
+route('POST', '/api/account/delete', async ({ user, body, res }) => {
+  if (ID) throw new HttpError(400, `Your account belongs to your 6j0.org identity: delete it at ${ID.origin}`);
+  if (String(body.confirm || '').trim().toLowerCase() !== user.guid.slice(-4).toLowerCase())
+    throw new HttpError(400, "That isn't the end of your Account ID. It's at the bottom of your Profile page.");
+  const tokens = Array.isArray(body.inboxes) ? body.inboxes : [];
+  if (tokens.length > MAX_ERASE_INBOXES) throw new HttpError(400, `Up to ${MAX_ERASE_INBOXES} inboxes`);
+  eraseAccount(user, new Set(tokens.map(t => inboxIdOf(inboxField(t, 'inbox token')))));
+  send(res, 200, { ok: true }, { 'Set-Cookie': 'sid=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0' });
+});
+
+// AUTH_MODE=6j0: the identity server says an identity was deleted ({ token }, a signed deletion notice; see
+// idtoken.js), so its account here is erased like above. Without the browser, the server doesn't know the account's
+// channel inboxes, so its side of each chat stays (ciphertext only the other person can read, no longer tied to any
+// account), and posts still on aren't cancelled first. Answers 200 also when there's no such account, so the identity
+// server stops retrying.
+route('POST', '/api/id/deleted', async ({ body, res }) => {
+  try {
+    const { sub } = await verifyDeletionToken(body.token, { issuer: ID.origin, audience: ID.app, jwksUrl: ID.jwksUrl });
+    const acct = q('SELECT user_id FROM id_accounts WHERE sub = ?').get(sub);
+    const user = acct && q('SELECT * FROM users WHERE id = ?').get(acct.user_id);
+    if (user) eraseAccount(user);
+  } catch (e) {
+    if (e instanceof IdTokenError) throw new HttpError(401, e.message);
+    throw e;
+  }
+  send(res, 200, { ok: true });
+}, { auth: false, mode: '6j0' });
 
 route('GET', '/api/me', async ({ user, res }) => {
   // Only connection requests: everything about posts is in encrypted mail, which the browser counts itself.

@@ -106,6 +106,10 @@ Cards can only be deleted in three places: a discard pile, Past in Plans, and yo
   buttons on the right.
 - **Sheets** (`.sheet`, `.panel`): forms that slide up over the page, like editing a post, a contact, or an
   invitation. Cancel (outlined) and the form's action (filled) sit side by side at the bottom (`.two`).
+- **Tutorial** (`.tour`): the first-visit tour, a surface box with a brown outline above the tab bar, under sheets
+  and toasts. Its step's tab, and once you're on that tab, the thing to use, get a pulsing brown ring (it holds
+  still under `prefers-reduced-motion`). Back, Next, Done, and "Show me" only move around, so they're outlined;
+  "Skip the tutorial" is a text link.
 - **Text links** (`button.link`): green text, for small in-line actions that open something, like "Share what you
   think" or "Invite them to connect".
 

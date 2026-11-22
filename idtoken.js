@@ -3,6 +3,7 @@
 // Tokens are compact JWTs signed with Ed25519 ("EdDSA"). The public keys come from the identity server's JWKS
 // (ID_JWKS_URL, default ID_ORIGIN + /.well-known/jwks.json), cached and re-fetched when an unknown kid shows up.
 // A token is accepted once: iss, aud, exp, and nonce must match, and its jti is remembered until it expires.
+// Deletion notices (an identity was deleted) are checked the same way, but have no nonce and carry an event instead.
 
 import { createPublicKey, verify } from 'node:crypto';
 
@@ -33,8 +34,9 @@ const part = (s) => {
   try { return JSON.parse(Buffer.from(s, 'base64url').toString('utf8')); } catch { throw new IdTokenError('Bad sign-in token'); }
 };
 
-// Returns the token's claims ({ sub, ... }) or throws IdTokenError.
-export async function verifyIdToken(token, { issuer, audience, nonce, jwksUrl }) {
+// The checks every token gets: signature, iss, aud, exp, iat, sub, and jti. Returns the claims; the caller checks
+// the rest, then calls use() to accept the token once.
+async function check(token, { issuer, audience, jwksUrl }) {
   if (typeof token !== 'string' || token.length > 4096) throw new IdTokenError('Bad sign-in token');
   const [h, b, s] = token.split('.');
   if (!h || !b || !s) throw new IdTokenError('Bad sign-in token');
@@ -51,12 +53,32 @@ export async function verifyIdToken(token, { issuer, audience, nonce, jwksUrl })
   if (claims.aud !== audience) throw new IdTokenError('Sign-in token is for a different app');
   if (typeof claims.exp !== 'number' || claims.exp + CLOCK_SKEW_S < now) throw new IdTokenError('Sign-in token expired. Please try again.');
   if (typeof claims.iat !== 'number' || claims.iat - CLOCK_SKEW_S > now) throw new IdTokenError('Sign-in token is from the future');
-  if (typeof nonce !== 'string' || claims.nonce !== nonce) throw new IdTokenError('Sign-in token does not match this sign-in');
   if (typeof claims.sub !== 'string' || !claims.sub || claims.sub.length > 64) throw new IdTokenError('Bad sign-in token subject');
   if (typeof claims.jti !== 'string' || !claims.jti) throw new IdTokenError('Bad sign-in token');
-
+  return claims;
+}
+function use(claims) {
+  const now = Math.floor(Date.now() / 1000);
   for (const [k, exp] of seen) if (exp + CLOCK_SKEW_S < now) seen.delete(k);
   if (seen.has(claims.jti)) throw new IdTokenError('Sign-in token was already used');
   seen.set(claims.jti, claims.exp);
   return claims;
+}
+
+// A sign-in token. Returns its claims ({ sub, ... }) or throws IdTokenError.
+export async function verifyIdToken(token, { issuer, audience, nonce, jwksUrl }) {
+  const claims = await check(token, { issuer, audience, jwksUrl });
+  if (claims.events !== undefined) throw new IdTokenError("That's not a sign-in token");
+  if (typeof nonce !== 'string' || claims.nonce !== nonce) throw new IdTokenError('Sign-in token does not match this sign-in');
+  return use(claims);
+}
+
+// A notice that an identity was deleted (the identity server POSTs it to /api/id/deleted): signed like a sign-in
+// token, but with no nonce and with events: { "6j0/v1/identity-deleted": {} }. Returns its claims or throws.
+export const DELETED_EVENT = '6j0/v1/identity-deleted';
+export async function verifyDeletionToken(token, { issuer, audience, jwksUrl }) {
+  const claims = await check(token, { issuer, audience, jwksUrl });
+  if (claims.nonce !== undefined || !claims.events || typeof claims.events !== 'object' || !Object.hasOwn(claims.events, DELETED_EVENT))
+    throw new IdTokenError("That's not a deletion notice");
+  return use(claims);
 }

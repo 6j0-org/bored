@@ -9,7 +9,7 @@ import { mountFeedback } from './feedback.js';
 import { parseWhen, parseEnd, shiftEnd, repeatOptions, whenLabel as fmtWhen, localToday, occursBetween, sunsetAt } from './when.js';
 import {
   initMail, resetMail, loadMail, mailView, requestJoin, sendOn, pass, unpass, deletePassed, savePost, setPostStatus, reshare,
-  invitesForMe, answerInvite, sendInvite, declinedInvites, keysFor,
+  invitesForMe, answerInvite, sendInvite, declinedInvites, keysFor, myInboxTokens,
 } from './mail.js';
 import { LIVE } from './posts.js';
 import { postFields, FIELD_LABELS } from './postfields.js';
@@ -721,6 +721,7 @@ function shell(content) {
   app.querySelectorAll('nav.tabs button').forEach(b => b.onclick = () => go(b.dataset.tab));
   document.getElementById('feedbackLink').onclick = openFeedback;
   content(document.getElementById('view'));
+  drawTour();
 }
 
 function go(tab) { state.tab = tab; state.chat = null; render(); }
@@ -746,6 +747,111 @@ async function render() {
     feedback: viewFeedback,
   };
   shell((v) => views[state.tab](v).catch(err => toast(err.message)));
+  maybeStartTour();
+}
+
+// ---------- tutorial ----------
+// A short tour the first time someone signed in opens the app (people skim the About page): the five steps from
+// the About page's "How it works", one at a time, in a box above the tab bar. Each step points at its tab and, once
+// you're there, at the thing to use. It doesn't move you around on its own: "Show me", Next, and Back do.
+// Finishing or skipping it is saved in the vault (prefs.tutorialSeen), so it shows once per account; a switch in
+// Profile's settings turns it back on. The highlighting is CSS keyed on <body data-tour-tab data-tour> (public/style.css), so it
+// survives views redrawing themselves.
+const TOUR = [
+  { tab: 'profile', target: '#newInvite', title: 'Connect', text: `Welcome to Bored! Here's how it works, in five steps. First, invite your
+    friends: on Profile, create an invitation and send them the link. Once you're connected, you can share posts with
+    just them.` },
+  { tab: 'post', target: '#postIdea', title: 'Post', text: `Post something you want to do or need help with. Tap an idea to fill in the
+    form, or write your own. When, where, and cost are optional: leave them blank and play it by ear.` },
+  { tab: 'discover', target: '#deckHost', title: 'Discover', text: `Swipe through what other people have posted: right means “I'm in,” and
+    left means pass. Open the filters to narrow it down by tags, distance, date, and more.` },
+  { tab: 'confirm', target: '#deckHost', title: 'Confirm', text: `When people want to join your posts, they show up here. Swipe right for
+    “Let's do it,” or left if you're not feeling it. There's no obligation.` },
+  { tab: 'plans', title: 'Plan', text: `When you both say yes, it's on, and it shows up in Plans. Chat to sort out the
+    details, tap When to add it to your calendar, and then go do the thing!` },
+];
+let tour = null; // { step, el }
+let tourDone = false; // finished or skipped in this session, even if saving that to the vault failed
+
+function maybeStartTour() {
+  if (tour || tourDone || !state.me || !hasKeys() || vault.data.prefs?.tutorialSeen) return;
+  if (pendingInvite()) return; // the invitation's sheet comes first; the tour starts on the next draw
+  startTour();
+}
+function startTour() {
+  tour = { step: 0, el: null };
+  drawTour();
+}
+async function tourGo(step) {
+  tour.step = step;
+  go(TOUR[step].tab); // draws the tour too (shell)
+  window.scrollTo(0, 0);
+  // Views load asynchronously: wait a moment for the step's target, then bring it into view (Connect's is far down).
+  const sel = TOUR[step].target;
+  for (let i = 0; sel && i < 30 && tour?.step === step; i++) {
+    const el = document.querySelector(`#view ${sel}`);
+    if (el) {
+      const smooth = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+      return el.scrollIntoView({ block: 'center', behavior: smooth ? 'smooth' : 'auto' });
+    }
+    await new Promise(r => setTimeout(r, 100));
+  }
+}
+async function endTour() {
+  tour?.el?.remove();
+  tour = null; tourDone = true;
+  drawTour();
+  const pref = document.getElementById('tutorialPref'); // Profile's switch, if it's showing
+  if (pref) pref.checked = false;
+  if (!vault.data.prefs?.tutorialSeen) {
+    try { await vault.update(api, (d) => { d.prefs = { ...d.prefs, tutorialSeen: true }; }); } catch (err) { console.warn('tutorial', err); }
+  }
+}
+// Profile's "Show the tutorial" switch: on starts it again from step 1 (and it shows until finished or skipped,
+// even after a reload); off ends it.
+async function setTutorial(on) {
+  if (!on) return endTour();
+  tourDone = false;
+  try { await vault.update(api, (d) => { d.prefs = { ...d.prefs, tutorialSeen: false }; }); } catch (err) { console.warn('tutorial', err); }
+  if (!tour) startTour();
+  tourGo(0);
+}
+function drawTour() {
+  const body = document.body;
+  // Hidden on the sign-in or unlock screen, and on the feedback page, which isn't one of the steps' tabs.
+  if (!tour || !state.me || !hasKeys() || state.tab === 'account') {
+    delete body.dataset.tourTab; delete body.dataset.tour;
+    if (tour?.el) tour.el.hidden = true;
+    return;
+  }
+  const s = TOUR[tour.step], here = state.tab === s.tab && !state.chat, last = tour.step === TOUR.length - 1;
+  body.dataset.tourTab = s.tab;
+  if (here) body.dataset.tour = s.tab; else delete body.dataset.tour;
+  if (!tour.el) {
+    tour.el = document.createElement('aside');
+    tour.el.className = 'tour';
+    tour.el.setAttribute('aria-labelledby', 'tourTitle');
+    tour.el.addEventListener('click', (e) => {
+      const a = e.target.closest('[data-tour-action]')?.dataset.tourAction;
+      if (a === 'skip' || a === 'done') endTour();
+      else if (a === 'next') tourGo(tour.step + 1);
+      else if (a === 'back') tourGo(tour.step - 1);
+      else if (a === 'show') tourGo(tour.step);
+    });
+    body.append(tour.el);
+  }
+  tour.el.hidden = false;
+  const tabName = TABS.find(t => t.id === s.tab).label;
+  tour.el.innerHTML = `
+    <p class="tour-count">Step ${tour.step + 1} of ${TOUR.length}</p>
+    <h2 id="tourTitle">${esc(s.title)}</h2>
+    <p>${s.text.replace(/\s+/g, ' ')}</p>
+    <div class="tour-actions">
+      <button type="button" class="link" data-tour-action="skip">Skip the tutorial</button>
+      ${here ? '' : `<button type="button" class="btn ghost small" data-tour-action="show">Show me ${esc(tabName)}</button>`}
+      ${tour.step ? '<button type="button" class="btn ghost small" data-tour-action="back">Back</button>' : ''}
+      <button type="button" class="btn ghost small" data-tour-action="${last ? 'done' : 'next'}">${last ? 'Done' : 'Next'}</button>
+    </div>`;
 }
 
 // The feedback page (public/feedback.js, first written for Glaze Journal). It's drawn once per account and kept, so
@@ -1010,6 +1116,62 @@ async function signOut() {
   await clearKeys();
   resetMail();
   state.me = null; state.tab = 'discover'; state.chat = null;
+  if (isDemo()) return startDemo();
+  render();
+}
+
+// ---------- deleting an account ----------
+// At the bottom of Profile. With Bored's own accounts (and in the demo), the server erases everything it holds for
+// the account (POST /api/account/delete in server.js) once you type the last 4 characters of your Account ID, which
+// is just below. With a 6j0.org identity, the account belongs to the identity, so it's deleted at the identity
+// server (its "Delete your identity", at /#delete), along with the identity's accounts on every other 6j0.org
+// service; the identity server then tells this server (/api/id/deleted), which erases the account.
+function deleteAccountHtml(idMode) {
+  if (idMode) return `<div class="section-title">Delete account</div>
+    <div class="notice warn">You sign in with a 6j0.org identity, so your Bored account is deleted along with it, at
+      ${esc(idHost())}. <b>Deleting your identity deletes all of your accounts on 6j0.org services</b>, Bored
+      included, and everything in them. There's no recovery. Bored erases your account as soon as it hears. Remove
+      the posts you're hosting first (in Post), so the people they're shared with are told.</div>
+    <button type="button" class="btn ghost" id="deleteAtId">Go to ${esc(idHost())}</button>`;
+  return `<div class="section-title">Delete account</div>
+    <div class="notice warn"><b>Deleting your account erases everything Bored's server has for it, right away, and
+      there's no recovery.</b> That's your keys and encrypted vault (contacts, nicknames, and settings), your posts,
+      your requests to join, your side of every chat, your invitations and connections, the posts you reported, your
+      feedback and replies, and your notifications. Posts you're hosting that are still on are cancelled first, so
+      the people they're shared with are told. People you've chatted with keep their own side of the chat.
+      ${isDemo() ? 'This demo account would be deleted after a day anyway; you get a fresh one right after.' : ''}</div>
+    <form class="stack" id="deleteAccount">
+      <label>To confirm, type the last 4 characters of your Account ID. It's at the very bottom of this page.
+        <input name="confirm" maxlength="4" autocomplete="off" autocapitalize="off" spellcheck="false" required></label>
+      <button class="btn" type="submit">Delete my account</button>
+    </form>`;
+}
+function mountDeleteAccount(v) {
+  v.querySelector('#deleteAtId')?.addEventListener('click', () => location.assign(`${state.config.idOrigin}/#delete`));
+  v.querySelector('#deleteAccount')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.currentTarget, code = form.confirm.value.trim(), btn = form.querySelector('button[type=submit]');
+    if (code.toLowerCase() !== state.me.guid.slice(-4).toLowerCase())
+      return toast("That doesn't match. Type the last 4 characters of the Account ID at the bottom of this page.");
+    btn.disabled = true; btn.textContent = 'Deleting…';
+    try { await deleteAccount(code); } catch (err) { toast(err.message); btn.disabled = false; btn.textContent = 'Delete my account'; }
+  });
+}
+async function deleteAccount(code) {
+  // Cancel the posts I'm hosting that are still on first: the cancellations reach the people they're shared with
+  // through their own inboxes, which aren't erased, so their Discover and Plans say it's off.
+  await loadMail().catch(err => console.warn(err));
+  for (const h of mailView()?.hosting || []) {
+    if (LIVE.includes(h.post.status)) await cancelPost(h.post.pid).catch(err => console.warn('cancel', err));
+  }
+  const inboxes = await myInboxTokens();
+  await turnOffPush().catch(() => {});
+  await api('/api/account/delete', { method: 'POST', body: { confirm: code, inboxes } });
+  await clearKeys();
+  resetMail();
+  tour?.el?.remove(); tour = null;
+  state.me = null; state.tab = 'discover'; state.chat = null;
+  toast('Your account is deleted.');
   if (isDemo()) return startDemo();
   render();
 }
@@ -2592,6 +2754,8 @@ async function viewProfile(v) {
           <option value="km" ${useMiles() ? '' : 'selected'}>Kilometers</option>
           <option value="mi" ${useMiles() ? 'selected' : ''}>Miles</option>
         </select></label>
+      <label class="check"><input type="checkbox" name="tutorial" id="tutorialPref" ${tour || !vault.data.prefs?.tutorialSeen ? 'checked' : ''}>
+        <span>Show the tutorial<small>The five steps, from Connect to Plan, in a box above the tabs.</small></span></label>
     </form>
 
     ${moderationHtml()}
@@ -2620,7 +2784,8 @@ async function viewProfile(v) {
     </div></fieldset>
 
     <button class="btn" id="logout" style="margin-top:24px">${isDemo() ? 'Start over' : 'Sign out'}</button>
-    <p class="note account-id">Account ID: <code>${esc(me.guid)}</code></p>`;
+    ${deleteAccountHtml(idMode)}
+    <p class="note account-id" id="accountId">Account ID: <code>${esc(me.guid)}</code></p>`;
 
   v.querySelector('#newInvite').addEventListener('click', createInvite);
   v.querySelector('#myName').addEventListener('change', async (e) => {
@@ -2646,6 +2811,7 @@ async function viewProfile(v) {
   // The theme stays on this device (public/theme.js), unlike the settings below, which are saved in your vault.
   v.querySelector('#themePick').addEventListener('change', (e) => window.boredTheme?.set(e.target.value));
   v.querySelector('#prefsForm').addEventListener('change', async (e) => {
+    if (e.target.name === 'tutorial') return setTutorial(e.target.checked);
     const { distanceUnit } = formData(e.currentTarget);
     try { await vault.update(api, (d) => { d.prefs = { ...d.prefs, distanceUnit }; }); toast('Saved'); }
     catch (err) { toast(err.message); }
@@ -2670,6 +2836,7 @@ async function viewProfile(v) {
     try { await api(`/api/passkeys/${b.dataset.rmkey}`, { method: 'DELETE' }); render(); } catch (e) { toast(e.message); }
   });
   v.querySelector('#logout').onclick = signOut;
+  mountDeleteAccount(v);
   mountModeration(v);
   if (state.focus === 'moderation') { state.focus = null; v.querySelector('#moderation')?.scrollIntoView(); }
 }

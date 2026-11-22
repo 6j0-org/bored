@@ -625,3 +625,37 @@ fieldset.checks legend { padding: 0; margin-bottom: 8px; font-size: .85rem; colo
 .mod-report label.count { flex-direction: row; align-items: center; gap: 6px; white-space: nowrap; }
 .mod-report label.count input { width: 4.5em; padding: 6px 8px; text-align: right; }
 label.check small a { color: var(--accent); }
+
+/* ---------- tutorial ---------- */
+/* The first-visit tour (TOUR in app.js): a box above the tab bar, over the page but under sheets and toasts. */
+.tour {
+  position: fixed; left: 50%; transform: translateX(-50%); z-index: 45;
+  bottom: calc(74px + env(safe-area-inset-bottom));
+  width: calc(100% - 24px); max-width: 456px;
+  background: var(--surface); color: var(--text); border: 1.5px solid var(--wood-line); border-radius: 12px;
+  box-shadow: var(--shadow); padding: 12px 14px;
+  animation: fade .25s;
+}
+.tour h2 { font-size: 1.15rem; margin: 0 0 4px; }
+.tour p { margin: 0 0 10px; font-size: .9rem; line-height: 1.45; }
+.tour .tour-count { color: var(--muted); font-size: .75rem; margin: 0 0 2px; }
+.tour-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; }
+.tour-actions button.link { margin-right: auto; font-size: .82rem; text-decoration: underline; text-underline-offset: 3px; }
+/* Room to scroll the end of the page out from under the box. */
+body[data-tour-tab] main { padding-bottom: 300px; }
+/* The step's tab, and once you're on it, the thing to use: a pulsing brown ring. */
+body[data-tour-tab="discover"] nav.tabs button[data-tab="discover"],
+body[data-tour-tab="confirm"] nav.tabs button[data-tab="confirm"],
+body[data-tour-tab="plans"] nav.tabs button[data-tab="plans"],
+body[data-tour-tab="post"] nav.tabs button[data-tab="post"],
+body[data-tour-tab="profile"] nav.tabs button[data-tab="profile"],
+body[data-tour="profile"] #view #newInvite,
+body[data-tour="post"] #view #postIdea,
+body[data-tour="discover"] #view #deckHost,
+body[data-tour="confirm"] #view #deckHost {
+  outline: 3px solid var(--wood-line); outline-offset: 4px; animation: tour-pulse 1.6s ease-in-out infinite;
+}
+body[data-tour="discover"] #view #deckHost, body[data-tour="confirm"] #view #deckHost { border-radius: 12px; }
+/* Only with motion allowed: without the keyframes, the ring just stays on. */
+@media (prefers-reduced-motion: no-preference) { @keyframes tour-pulse { 50% { outline-color: transparent; } } }
+@media (prefers-reduced-motion: reduce) { .tour { animation: none; } }

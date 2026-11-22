@@ -155,5 +155,27 @@ fails(() => fb.remove(bob, o1.id), 404, /wasn't found/);
 fails(() => fb.reply(bob, o1.id, "hi"), 404, /wasn't found/);
 assert.equal(fb.list(admin).items.length, 2);
 
+// eraseUser (a deleted account): its posts, with their threads, and its replies everywhere else go, now and after a
+// restart, and the compacted file has none of its text.
+{
+  const efile = path.join(dir, "erase.jsonl");
+  let ef = open({ file: efile, perUserPerDay: 100, perDay: 100 });
+  const annPost = ef.post(ann, "ann's idea"), bobPost = ef.post(bob, "bob's idea");
+  ef.reply(bob, annPost.id, "bob on ann's");
+  ef.reply(ann, bobPost.id, "ann on bob's");
+  ef.reply(bob, bobPost.id, "bob on bob's");
+  ef.eraseUser("ann");
+  const check = (f) => {
+    assert.deepEqual(f.list(bob).items.map((i) => i.body), ["bob's idea"]);
+    assert.deepEqual(f.thread(bob, bobPost.id).messages.map((m) => m.body), ["bob on bob's"]);
+    fails(() => f.thread(bob, annPost.id), 404);
+  };
+  check(ef);
+  ef = open({ file: efile, perUserPerDay: 100, perDay: 100 });
+  check(ef);
+  const text = fs.readFileSync(efile, "utf8");
+  assert.ok(!text.includes("ann") && !text.includes("on ann's"), "nothing of ann's is left on disk");
+}
+
 fs.rmSync(dir, { recursive: true, force: true });
 console.log("feedback: ok");

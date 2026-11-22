@@ -221,40 +221,73 @@ const route = (method, pattern, handler, { auth = true, mode } = {}) => {
 };
 
 // ---------- feedback ----------
-// Signed-in people read everyone's feedback and post their own (feedback.js, the same file as in Glaze Journal; the
-// page is public/feedback.js). It's shared, so it isn't encrypted. Posts are filed under the account's GUID, which is
+// Signed-in people read everyone's feedback and post their own (feedback.js, first written for Glaze Journal; the
+// page is public/feedback.js). Each post is a chat thread anyone signed in can reply to, which developers close as
+// done or won't do. It's shared, so it isn't encrypted. Posts are filed under the account's GUID, which is
 // never shown with them. It's kept in a JSON Lines file: FEEDBACK_PATH, by default feedback.jsonl next to the database.
 // In the demo it goes to a temporary folder that's deleted on exit, and each visitor sees only their own posts, so the
 // demo can't turn into an anonymous message board.
-// The admin, who can delete anyone's feedback and whose own is labeled, is ADMIN_SUB (a 6j0.org identity's sub, with
-// AUTH_MODE=6j0) or ADMIN_GUID (an account's GUID, in any mode).
+// Developers can reply to and close anyone's feedback and delete anyone's posts, and get a "Developer" badge and
+// label. They're the accounts in DEVELOPER_GUIDS (each account's GUID is at the bottom of its Profile page), plus
+// ADMIN_GUID (an account's GUID, in any mode) and ADMIN_SUB (a 6j0.org identity's sub, with AUTH_MODE=6j0) if set.
+const DEVELOPER_GUIDS = [
+];
 const FEEDBACK_PATH = DEMO ? (() => {
   const dir = mkdtempSync(join(tmpdir(), 'bored-demo-feedback-'));
   process.on('exit', () => rmSync(dir, { recursive: true, force: true }));
   for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(0));
   return join(dir, 'feedback.jsonl');
 })() : process.env.FEEDBACK_PATH || join(dirname(process.env.DB_PATH || new URL('./data.sqlite', import.meta.url).pathname), 'feedback.jsonl');
-const feedback = createFeedback({ file: FEEDBACK_PATH, scope: DEMO ? 'own' : 'all' });
+// Posts and replies carry their author's icon hash (iconHash, below), so browsers draw everyone's avatar and show the
+// names they gave their contacts, without learning anyone else's GUID.
+const feedback = createFeedback({ file: FEEDBACK_PATH, scope: DEMO ? 'own' : 'all', authorKey: (guid) => iconHash(guid) });
 const ADMIN_SUB = process.env.ADMIN_SUB || '', ADMIN_GUID = process.env.ADMIN_GUID || '';
-function feedbackWho(user) {
-  const sub = ADMIN_SUB && AUTH_MODE === '6j0' ? q('SELECT sub FROM id_accounts WHERE user_id = ?').get(user.id)?.sub : null;
-  return { user: user.guid, admin: Boolean((ADMIN_GUID && user.guid === ADMIN_GUID) || (sub && sub === ADMIN_SUB)) };
+function isDeveloper(user) {
+  if (DEVELOPER_GUIDS.includes(user.guid) || (ADMIN_GUID && user.guid === ADMIN_GUID)) return true;
+  return Boolean(ADMIN_SUB && AUTH_MODE === '6j0' && q('SELECT sub FROM id_accounts WHERE user_id = ?').get(user.id)?.sub === ADMIN_SUB);
 }
+const feedbackWho = (user) => ({ user: user.guid, admin: isDeveloper(user) });
 function feedbackCall(fn) {
   try { return fn(); } catch (e) { if (e instanceof FeedbackError) throw new HttpError(e.status, e.message); throw e; }
 }
+// When someone else replies to someone's feedback, or a developer closes it, the person who posted it gets a push
+// notification.
+function notifyAuthor(user, id, body) {
+  const author = feedback.authorOf(id);
+  if (!author || author === user.guid) return;
+  const to = q('SELECT id FROM users WHERE guid = ?').get(author);
+  if (to) notify(to.id, { body, tag: `feedback-${id}`, open: 'feedback' });
+}
+const STATUS_NEWS = { done: 'A developer marked your feedback as done. Thank you!', wontdo: "A developer closed your feedback as won't do.", open: 'A developer reopened your feedback.' };
 route('GET', '/api/feedback', async ({ user, res }) => {
   send(res, 200, { ...feedbackCall(() => feedback.list(feedbackWho(user))), demo: DEMO });
 });
 route('POST', '/api/feedback', async ({ user, body, res }) => {
   send(res, 201, feedbackCall(() => feedback.post(feedbackWho(user), body.body)));
 });
-// Feedback IDs aren't numbers, which route()'s :params are, so this one has its own pattern.
-routes.push({ method: 'DELETE', re: /^\/api\/feedback\/([A-Za-z0-9_-]{1,32})$/, keys: [], auth: true, handler: async ({ req, user, res }) => {
-  const id = new URL(req.url, 'http://x').pathname.split('/').pop();
+// Feedback IDs aren't numbers, which route()'s :params are, so these have their own patterns.
+const feedbackRoute = (method, suffix, handler) => routes.push({
+  method, re: new RegExp(`^/api/feedback/([A-Za-z0-9_-]{1,32})${suffix}$`), keys: [], auth: true,
+  handler: (ctx) => handler({ ...ctx, id: new URL(ctx.req.url, 'http://x').pathname.split('/')[3] }),
+});
+feedbackRoute('GET', '', async ({ user, id, res }) => {
+  send(res, 200, feedbackCall(() => feedback.thread(feedbackWho(user), id)));
+});
+feedbackRoute('DELETE', '', async ({ user, id, res }) => {
   feedbackCall(() => feedback.remove(feedbackWho(user), id));
   send(res, 200, { ok: true });
-} });
+});
+feedbackRoute('POST', '/replies', async ({ user, id, body, res }) => {
+  const who = feedbackWho(user), thread = feedbackCall(() => feedback.reply(who, id, body.body));
+  notifyAuthor(user, id, who.admin ? 'A developer replied to your feedback.' : 'Someone replied to your feedback.');
+  send(res, 201, thread);
+});
+feedbackRoute('POST', '/status', async ({ user, id, body, res }) => {
+  const who = feedbackWho(user), before = who.admin ? feedbackCall(() => feedback.thread(who, id)).status : null;
+  const thread = feedbackCall(() => feedback.setStatus(who, id, body.status));
+  if (thread.status !== before) notifyAuthor(user, id, STATUS_NEWS[thread.status]);
+  send(res, 200, thread);
+});
 
 // ---------- passkeys ----------
 // Sign-up: the server picks the GUID; the browser creates a passkey (with the PRF extension), derives a vault key,
@@ -428,7 +461,9 @@ route('POST', '/api/logout', async ({ req, res }) => {
 route('GET', '/api/me', async ({ user, res }) => {
   // Only connection requests: everything about posts is in encrypted mail, which the browser counts itself.
   const counts = { confirm: q(`SELECT COUNT(*) n FROM connection_requests WHERE owner_id = ? AND status = 'pending'`).get(user.id).n };
-  send(res, 200, { ...publicUser(user), counts });
+  // Badges: Developer (see DEVELOPER_GUIDS), and Tester with how many of their feedback posts developers marked done.
+  const badges = { developer: isDeveloper(user), tester: feedback.doneCount(user.guid) };
+  send(res, 200, { ...publicUser(user), counts, badges });
 });
 
 // ---------- keys and mail ----------

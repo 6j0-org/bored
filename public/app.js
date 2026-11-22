@@ -75,16 +75,16 @@ const CONTACT_TAGS = ['family', 'friends', 'neighbors', 'work'];
 // introduction page's footer (public/about.html), reached from here and from the title board.
 const ABOUT_LINKS = `<p class="note" style="margin-top:20px;text-align:center"><a href="/about">About Bored</a> · <a href="/privacy">Privacy Policy</a></p>`;
 
-// Tab icons on the wood buttons: a quest-giver's "?" and "!" for Discover and Confirm, then simple line drawings.
+// Tab icons on the wood buttons: simple line drawings (binoculars, a checkmark, a calendar, a plus, and a person).
 // All are cream (--wood-text), like the lettering on the other buttons.
 const svgIcon = (body, { fill = false } = {}) => `<svg viewBox="0 0 24 24" aria-hidden="true" ${fill
   ? 'fill="currentColor"' : 'fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"'}>${body}</svg>`;
 const PERSON_ICON = svgIcon('<circle cx="12" cy="8" r="4.2"/><path d="M3.8 21.5c0-4.6 3.7-7.3 8.2-7.3s8.2 2.7 8.2 7.3z"/>', { fill: true });
 const TAB_ICONS = {
-  discover: '<span class="tab-mark" aria-hidden="true">?</span>',
-  confirm: '<span class="tab-mark" aria-hidden="true">!</span>',
+  discover: svgIcon('<circle cx="6.5" cy="15.5" r="4"/><circle cx="17.5" cy="15.5" r="4"/><path d="M10.5 15.5h3M3 14.5l2.2-8.2a1.8 1.8 0 0 1 3.5.9V12M21 14.5l-2.2-8.2a1.8 1.8 0 0 0-3.5.9V12M8.7 10h6.6"/>'),
+  confirm: svgIcon('<path d="M4.5 12.5l5 5L19.5 6.5"/>'),
   plans: svgIcon('<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M3.5 10h17M8 3v4M16 3v4"/>'),
-  post: svgIcon('<path d="M4 20l1.2-4.4L15.8 5a2.1 2.1 0 0 1 3 3L8.4 18.8z"/><path d="M13.8 7l3 3"/>'),
+  post: svgIcon('<path d="M12 4.5v15M4.5 12h15"/>'),
   profile: PERSON_ICON,
   account: PERSON_ICON,
 };
@@ -730,15 +730,29 @@ async function render() {
   shell((v) => views[state.tab](v).catch(err => toast(err.message)));
 }
 
-// The feedback page (public/feedback.js, the same file as in Glaze Journal). It's drawn once per account and kept, so
+// The feedback page (public/feedback.js, first written for Glaze Journal). It's drawn once per account and kept, so
 // a half-written post survives the app redrawing and a trip to another tab.
+// Each post and reply comes with its author's icon hash (the SHA-1 of their GUID, like `icon` elsewhere): everyone's
+// avatar is drawn from it, and matched against my contacts (and blocked people) to show the name I gave them.
 let feedbackPage = null; // { guid, el, page }
+let feedbackPeople = {}; // icon hash → GUID, for me, my contacts, and people I blocked
+async function knownIcons() {
+  const guids = [state.me.guid, ...Object.keys(vault.data.contacts), ...Object.values(mod().blocked).map(b => b.guid)].filter(Boolean);
+  return Object.fromEntries(await Promise.all([...new Set(guids)].map(async g => [await sha1Hex(g), g])));
+}
+function feedbackAuthor(key) {
+  const guid = feedbackPeople[key];
+  return { icon: guid ? personAvatar(guid, 'small') : avatar(key, 'small'), name: guid ? contactName(guid) : '', hidden: Boolean(guid && isBlocked({ guid })) };
+}
 async function viewFeedback(v) {
+  feedbackPeople = await knownIcons().catch(() => feedbackPeople);
   if (feedbackPage?.guid !== state.me.guid) {
     const el = document.createElement('div');
     const page = mountFeedback(el, {
-      buttonClass: 'btn ghost small', primaryClass: 'btn',
-      ...(isDemo() ? { intro: "Ideas, problems, or questions? In this demo only you can see what you post here. Please don't include anything personal." } : {}),
+      buttonClass: 'btn ghost small', primaryClass: 'btn', author: feedbackAuthor,
+      intro: isDemo()
+        ? "Ideas, problems, or questions? In this demo only you and the developers can see what you post here. Tap a post to open its chat. Please don't include anything personal."
+        : "Ideas, problems, or questions? Everyone signed in can read what's posted here and see your profile icon, and people you're connected with see the name they gave you. It isn't encrypted, so please don't include anything personal. Tap a post to open its chat, where anyone can reply.",
     });
     feedbackPage = { guid: state.me.guid, el, page };
   } else feedbackPage.page.refresh();
@@ -2247,8 +2261,16 @@ function openContactSheet(guid, onSaved) {
 async function viewProfile(v) {
   const idMode = state.config.authMode === '6j0';
   await syncConnections();
-  const [passkeys, invites] = await Promise.all([idMode || isDemo() ? [] : api('/api/passkeys'), api('/api/invites'), loadMail().catch(() => {})]);
+  const [passkeys, invites] = await Promise.all([idMode || isDemo() ? [] : api('/api/passkeys'), api('/api/invites'), loadMail().catch(() => {}),
+    api('/api/me').then(m => { state.me = m; }, () => {})]); // fresh badges
   const me = state.me, st = mailView()?.stats || {};
+  // Badges from the server: Developer (DEVELOPER_GUIDS in server.js), and Tester once a developer has marked any of
+  // your feedback as done, with how many.
+  const tested = me.badges?.tester || 0;
+  const badges = [
+    me.badges?.developer ? `<span class="me-badge" title="Builds Bored">Developer</span>` : '',
+    tested ? `<span class="me-badge" title="${tested === 1 ? '1 piece' : `${tested} pieces`} of your feedback marked done">Tester <b>${tested}</b></span>` : '',
+  ].join('');
   // Worked out here from the mail: the server doesn't know who did what with whom.
   const history = Object.fromEntries(Object.entries(mailView()?.together || {}).map(([guid, together]) => [guid, { together }]));
   const contacts = Object.entries(vault.data.contacts).map(([guid, c]) => ({ guid, ...c, ...(history[guid] || {}) }))
@@ -2268,6 +2290,7 @@ async function viewProfile(v) {
         <p class="note">This is the name you'll use to introduce yourself.</p>
       </div>
     </div>
+    ${badges ? `<div class="me-badges" aria-label="Your badges">${badges}</div>` : ''}
     <div class="stats">
       <div class="stat"><b>${st.hosted ?? 0}</b><span>events hosted</span></div>
       <div class="stat"><b>${st.attended ?? 0}</b><span>events attended</span></div>
@@ -2336,7 +2359,8 @@ async function viewProfile(v) {
     </div>
     <button class="btn ghost" id="addKey">Add another passkey</button>`}
 
-    <button class="btn danger" id="logout" style="margin-top:24px">${isDemo() ? 'Start over' : 'Sign out'}</button>`;
+    <button class="btn danger" id="logout" style="margin-top:24px">${isDemo() ? 'Start over' : 'Sign out'}</button>
+    <p class="note account-id">Account ID: <code>${esc(me.guid)}</code></p>`;
 
   v.querySelector('#newInvite').addEventListener('click', createInvite);
   v.querySelector('#myName').addEventListener('change', async (e) => {

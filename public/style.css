@@ -118,6 +118,31 @@ main { flex: 1; padding: 8px 16px 96px; display: flex; flex-direction: column; }
 .fb-delete.fb-armed { color: var(--no); border-color: var(--no); }
 .fb-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .fb-empty { color: var(--muted); margin: 0; }
+.fb-item[data-open] { cursor: pointer; }
+.fb-item[data-open]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fb-item .fb-text { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.fb-state { font-weight: 700; font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; padding: 2px 7px; border-radius: 999px; color: #fff; background: #9a6b12; }
+.fb-state-done { background: #2f6b3a; }
+.fb-state-wontdo { background: #6b6259; }
+.fb-replies::before { content: "· "; }
+.fb-avatar { display: inline-flex; line-height: 0; }
+.fb-avatar .avatar { width: 26px; height: 26px; border: 1px solid var(--line); }
+.fb-name { color: var(--text); font-weight: 700; }
+.fb-hidden { color: var(--muted); font-style: italic; }
+.fb-thread { display: grid; gap: 10px; }
+.fb-thread-head { display: flex; align-items: center; gap: 10px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.fb-back { background: none; border: 0; color: var(--text); font-size: 1.4rem; padding: 4px 8px 4px 0; cursor: pointer; }
+.fb-thread-actions { margin-left: auto; display: flex; gap: 6px; }
+.fb-msgs { display: flex; flex-direction: column; gap: 8px; }
+.fb-msg { max-width: 85%; align-self: flex-start; background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 8px 12px; display: grid; gap: 4px; }
+.fb-msg-admin { border-color: var(--accent); }
+.fb-msg-mine { align-self: flex-end; background: var(--accent); border-color: transparent; color: #fff; }
+.fb-msg-mine .fb-meta, .fb-msg-mine .fb-name, .fb-msg-mine .fb-author, .fb-msg-mine .fb-admin { color: rgba(255, 255, 255, .9); }
+.fb-author { color: var(--text); }
+.fb-sys { align-self: center; text-align: center; color: var(--muted); font-size: .85rem; margin: 0; }
+.fb-reply { display: grid; gap: 6px; }
+.fb-reply-body { width: 100%; }
+.fb-reply-status { margin-right: auto; color: var(--muted); font-size: .85rem; }
 
 /* Tabs: wood buttons like the others, each with an icon (TAB_ICONS in app.js). The open tab looks pressed in. */
 nav.tabs {
@@ -136,11 +161,6 @@ nav.tabs button {
 nav.tabs button.active { background: linear-gradient(180deg, #7a3e1b, #96512a); box-shadow: inset 0 2px 5px rgba(30, 12, 2, .55); filter: none; }
 nav.tabs button:focus-visible { outline: 2px solid var(--wood-line); outline-offset: 2px; }
 nav.tabs svg { width: 26px; height: 26px; filter: drop-shadow(0 1px 0 rgba(40, 18, 5, .5)); }
-/* The "?" and "!" marks: lettered like the board, in the same cream as the other icons. */
-.tab-mark {
-  font-family: 'National Park', 'Trebuchet MS', sans-serif; font-weight: 800; font-size: 1.85rem; line-height: 1;
-  text-shadow: 0 1px 0 rgba(40, 18, 5, .5);
-}
 .badge {
   position: absolute; top: 4px; left: calc(50% + 6px);
   background: var(--no); color: #fff; border-radius: 999px;
@@ -490,6 +510,13 @@ button.link { background: none; border: 0; padding: 0; color: var(--accent); fon
 .name-input:hover { border-color: var(--line); }
 .name-input:focus { border-color: var(--accent); background: var(--surface); outline: none; }
 .me-head .note { margin: 0; }
+/* Profile badges: Developer (hardcoded accounts) and Tester (feedback marked done). */
+.me-badges { display: flex; flex-wrap: wrap; gap: 8px; margin: -4px 0 14px; }
+.me-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; font-weight: 700; font-size: .85rem;
+  background: var(--wood); color: var(--wood-text); border: 1.5px solid var(--wood-edge); }
+.me-badge b { background: rgba(0, 0, 0, .25); border-radius: 999px; padding: 0 7px; font-size: .8rem; }
+.account-id { margin-top: 18px; text-align: center; overflow-wrap: anywhere; }
+.account-id code { user-select: all; }
 /* An avatar to click (a contact's info, or an invitation to connect). */
 .avatar-btn { border: 0; padding: 0; background: none; border-radius: 50%; cursor: pointer; flex: none; line-height: 0; }
 .avatar-btn:hover .avatar { filter: brightness(1.08); }

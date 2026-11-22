@@ -63,22 +63,35 @@ Env vars: `PORT` (default 3000), `DB_PATH` (default `./data.sqlite`), `ORIGIN` (
 behind HTTPS/proxies, passkeys are bound to it; also turns on `Secure` cookies), `RP_ID` (passkey domain; defaults to
 the `ORIGIN` hostname), `VAPID_SUBJECT` (a `mailto:` or `https:` contact for push services; defaults to `ORIGIN`),
 `PUSH_HOSTS` (extra push service hostnames to allow, comma-separated), `DEMO` (`1` for [demo mode](#demo-mode)),
-`FEEDBACK_PATH` (default `feedback.jsonl` next to the database), `ADMIN_SUB` or `ADMIN_GUID` (who can delete anyone's
-[feedback](#feedback): a 6j0.org identity's `sub` with `AUTH_MODE=6j0`, or an account's GUID in any mode).
+`FEEDBACK_PATH` (default `feedback.jsonl` next to the database), `ADMIN_SUB` or `ADMIN_GUID` (one more developer for
+[feedback](#feedback), besides `DEVELOPER_GUIDS` in `server.js`: a 6j0.org identity's `sub` with `AUTH_MODE=6j0`, or an
+account's GUID in any mode).
 
 ### Feedback
 
 Bored is in alpha, and every screen says so in a note under the board, with a link to the feedback page; the About
 page has a Feedback button that opens it too. People who aren't signed in are asked to sign in first. The page is
-where people read everyone's feedback and post their own: plain text, up to 2048 characters. Posts show no author; the server files
-each one under the account's GUID so people can delete their own. Each account can post 5 times a day, and everyone
-together 500 times a day. The admin (`ADMIN_SUB` or `ADMIN_GUID`) can delete anyone's posts, and theirs are labeled
-"Developer". In the demo, each visitor sees only their own posts.
+where people read everyone's feedback and post their own: plain text, up to 2048 characters. Each post is a chat, like
+a plan's: tapping it opens its thread, where anyone signed in can reply. Developers close a thread as Done or Won't do,
+or reopen it, and the person who posted it gets a push notification when someone replies or a developer closes it.
+Posts and replies show their author's profile icon, and the name you gave them if they're one of your contacts
+(the post's author is also labeled "Tester" in its thread). The server sends the icon hash (the SHA-1 of the GUID),
+never the GUID itself, so strangers stay unnamed; it files each post under the account's GUID so people can delete
+their own. Each account can post or reply 100 times a day, and
+everyone together 500 times a day. In the demo, each visitor sees only their own posts.
+
+Developers are the accounts listed in `DEVELOPER_GUIDS` in `server.js` (plus `ADMIN_SUB` or `ADMIN_GUID`, if set).
+They can reply to, close, and delete anyone's feedback, their posts are labeled "Developer", and their Profile page
+shows a Developer badge. Everyone's account ID (GUID) is at the bottom of their Profile page, for adding them to the
+list. Anyone with feedback marked Done gets a Tester badge on their Profile page, with how many.
 
 Feedback is shared, so it isn't encrypted, and the page says so. It's kept in a JSON Lines file (`FEEDBACK_PATH`): one
-JSON object per line, appended to and never edited in place, with deletions as `{"delete": id}` lines. The server
-loads it at startup and, if anything was deleted, rewrites it without the deleted posts. `feedback.js` and
-`public/feedback.js` are the same files as in Glaze Journal, which has the feature too; keep them identical.
+JSON object per line, appended to and never edited in place: posts, replies (`{"reply": post id, …}`), status changes
+(`{"status": post id, "value": "done"}`), and deletions (`{"delete": id}`). The server loads it at startup and, if
+anything was deleted, rewrites it without the deleted posts and their replies. `feedback.js` and
+`public/feedback.js` are the same files as in Glaze Journal, which has the feature too; keep them identical. Bored
+shows authors by passing `authorKey` (server) and `author` (page); Glaze Journal leaves them out, so its feedback is
+anonymous.
 
 ### Notifications
 

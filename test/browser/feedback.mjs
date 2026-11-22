@@ -1,6 +1,6 @@
 // Headless Chromium against the demo: the "Alpha" note under the board on every tab and its feedback link, the
 // About page's Feedback button, posting (with the character count and the 2048-character limit), a draft surviving
-// a trip to another tab, and deleting your own.
+// a trip to another tab, a post's chat (replying), deleting your own, and the account ID on the Profile page.
 import assert from 'node:assert/strict';
 import { browser, finish, wait, BASE } from '../lib.mjs';
 
@@ -17,7 +17,7 @@ await B.until(`document.querySelector('.fb-empty')?.textContent.includes('No fee
 assert.equal(await B.ev(`document.querySelector('.page-title').textContent`), 'Feedback');
 assert.equal(await B.ev(`document.getElementById('feedbackLink').getAttribute('aria-current')`), 'page');
 assert.equal(await B.ev(`!document.querySelector('nav.tabs [aria-current]')`), true, 'no tab is marked as open');
-assert.match(await B.ev(`document.querySelector('.fb-intro').textContent`), /only you can see/);
+assert.match(await B.ev(`document.querySelector('.fb-intro').textContent`), /only you and the developers can see/);
 assert.equal(await B.ev(`document.getElementById('fbBody').maxLength`), 2048);
 
 // The About page has the note and the Feedback button, which opens the same page in the app.
@@ -51,12 +51,35 @@ await B.until(`document.querySelectorAll('.fb-item').length === 2`);
 assert.ok((await items())[0].startsWith('<b>bold?</b>'));
 assert.equal(await B.ev(`document.querySelectorAll('.fb-text b').length`), 0);
 
+// An item opens as a chat, where its author can reply; the list then shows the reply count.
+await B.ev(`document.querySelectorAll('.fb-item')[1].click()`);
+await B.until(`document.querySelector('.fb-thread:not([hidden]) .fb-msg')`);
+assert.equal(await B.ev(`document.querySelector('.fb-thread .fb-state').textContent`), 'Open');
+assert.equal(await B.ev(`document.querySelectorAll('[data-set-status]').length`), 0, 'only developers can close it');
+assert.equal(await B.ev(`!!document.querySelector('.fb-msg .fb-avatar .avatar.icon svg')`), true, 'with the profile icon');
+assert.equal(await B.ev(`document.querySelector('.fb-msg .fb-name').textContent`), 'You');
+assert.equal(await B.ev(`document.querySelector('.fb-msg .fb-author').textContent`), 'Tester');
+await B.ev(`document.getElementById('fbReply').focus()`);
+await B.send('Input.insertText', { text: 'Especially the date filter.' });
+await B.ev(`document.querySelector('.fb-reply-send').click()`);
+await B.until(`document.querySelectorAll('.fb-msg').length === 2`);
+assert.equal(await B.ev(`document.querySelectorAll('.fb-msg')[1].textContent.includes('Especially the date filter.')`), true);
+await B.ev(`document.querySelector('.fb-back').click()`);
+await B.until(`document.querySelector('.fb-item .fb-replies')`);
+assert.equal(await B.ev(`document.querySelector('.fb-item .fb-replies').textContent`), '1 reply');
+assert.ok((await items())[0].startsWith('Could Discover'), 'the most recently active comes first');
+
 // Delete takes two clicks.
 await B.ev(`document.querySelector('.fb-item .fb-delete').click()`);
 assert.equal(await B.ev(`document.querySelector('.fb-item .fb-delete').textContent`), 'Confirm delete');
 await B.ev(`document.querySelector('.fb-item .fb-delete').click()`);
 await B.until(`document.querySelectorAll('.fb-item').length === 1`);
 await wait(200);
+
+// The Profile page ends with the account's ID (the GUID developers are listed by).
+await B.tab('profile');
+await B.until(`document.querySelector('.account-id code')`);
+assert.match(await B.ev(`document.querySelector('.account-id code').textContent`), /^[0-9a-f-]{20,}$/i);
 
 B.close();
 finish('browser feedback');

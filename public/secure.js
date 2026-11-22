@@ -313,6 +313,8 @@ export async function addPasskey(api, nextStep) {
 //     only hashes. name is the nickname I suggested; key decrypts the nicknames people suggest when they ask. One I
 //     mailed to someone (inviteToConnect in app.js) also has direct: true, to (who it's for), and their (my nickname
 //     for them))
+//   deletedPlans: [channelId],  (past plans I deleted from Plans; only hidden from me)
+//   deletedPosts: [pid],  (my own past posts I deleted from Posts; only hidden from me)
 //   pendingNames: { [iconHash]: nickname },  (nicknames for inviters I've asked to connect with, applied once they confirm)
 //   inbox: token }  (my main inbox's read token; its SHA-256 is public, see "mail" below)
 const emptyVault = () => ({ v: 1, contacts: {} });

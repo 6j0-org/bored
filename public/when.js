@@ -154,3 +154,30 @@ export function occursBetween(s, from, to, end) {
   for (let t = start; t <= last; t += DAY) if (on(new Date(t))) return true;
   return false;
 }
+
+// When the sun sets at a place on a date ("YYYY-MM-DD", the place's local date), as a ms timestamp, or null if it
+// doesn't set or rise that day (near the poles). The standard sunrise equation (the U.S. Naval Observatory's
+// "Almanac for Computers"), good to a minute or two: plenty for "ends at sunset".
+export function sunsetAt(ymd, lat, lon) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd || '');
+  if (!m || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  const [y, mo, d] = m.slice(1).map(Number);
+  const rad = Math.PI / 180, deg = 180 / Math.PI, mod = (x, n) => ((x % n) + n) % n;
+  const day0 = Date.UTC(y, mo - 1, d), n = Math.round((day0 - Date.UTC(y, 0, 0)) / DAY);
+  const lngHour = lon / 15, t = n + (18 - lngHour) / 24;
+  const M = 0.9856 * t - 3.289;
+  const L = mod(M + 1.916 * Math.sin(M * rad) + 0.020 * Math.sin(2 * M * rad) + 282.634, 360);
+  let RA = mod(Math.atan(0.91764 * Math.tan(L * rad)) * deg, 360);
+  RA = (RA + Math.floor(L / 90) * 90 - Math.floor(RA / 90) * 90) / 15;
+  const sinDec = 0.39782 * Math.sin(L * rad), cosDec = Math.cos(Math.asin(sinDec));
+  const cosH = (Math.cos(90.833 * rad) - sinDec * Math.sin(lat * rad)) / (cosDec * Math.cos(lat * rad));
+  if (cosH < -1 || cosH > 1) return null;
+  const T = Math.acos(cosH) * deg / 15 + RA - 0.06571 * t - 6.622;
+  let at = day0 + mod(T - lngHour, 24) * 3600e3;
+  // The sunset after that date's solar noon, not the one a day before or after.
+  const noon = day0 + (12 - lngHour) * 3600e3;
+  while (at < noon) at += DAY;
+  while (at > noon + DAY / 2) at -= DAY;
+  return Math.round(at / 60e3) * 60e3;
+}
+

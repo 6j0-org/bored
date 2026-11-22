@@ -469,8 +469,10 @@ route('POST', '/api/logout', async ({ req, res }) => {
 route('GET', '/api/me', async ({ user, res }) => {
   // Only connection requests: everything about posts is in encrypted mail, which the browser counts itself.
   const counts = { confirm: q(`SELECT COUNT(*) n FROM connection_requests WHERE owner_id = ? AND status = 'pending'`).get(user.id).n };
-  // Badges: Developer (see DEVELOPER_GUIDS), and Tester with how many of their feedback posts developers marked done.
-  const badges = { developer: isDeveloper(user), tester: feedback.doneCount(user.guid) };
+  // Badges: Developer (see DEVELOPER_GUIDS; every demo visitor gets the badge too, but not a developer's feedback
+  // powers, which would let them see every visitor's feedback), and Tester with how many of their feedback posts
+  // developers marked done.
+  const badges = { developer: DEMO || isDeveloper(user), tester: feedback.doneCount(user.guid) };
   send(res, 200, { ...publicUser(user), counts, badges });
 });
 

@@ -35,10 +35,14 @@ assert.equal(Object.keys(view.together).length, 2);
 assert.ok(!view.deck.some(p => p.title === 'Beach cleanup at Ocean Beach'), 'past posts left the deck');
 assert.ok(view.deck.length >= 30, 'demo public posts are in the deck');
 
-// Saying yes to any other demo post: accepted, with a hello and a reply.
+// Saying yes to any other demo post: every other one is accepted, with a hello and a reply; the rest wait.
 const trivia = view.deck.find(p => p.title === 'Trivia night at the Brass Tap');
 await v.mail.requestJoin(trivia);
 view = await v.mail.loadMail();
 const tr = asked('Trivia night at the Brass Tap');
 assert.equal(tr.status, 'accepted'); assert.deepEqual(chat(tr), ["host: Yay, you're in! See you there."]);
+const couch = view.deck.find(p => p.title === 'Help me move a couch up two flights');
+await v.mail.requestJoin(couch);
+view = await v.mail.loadMail();
+assert.equal(asked('Help me move a couch up two flights').status, 'pending', 'the next post leaves the request waiting');
 console.log('demo seed: ok');

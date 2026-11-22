@@ -17,20 +17,19 @@
       --bg: #f2eee5; --surface: #fffcf6; --text: #2b2219; --muted: #776a5a; --line: #e2d9c9;
       --accent: #2f6b3a; --accent-ink: #ffffff; --accent-soft: #e0e9d5; --accent-text: #2a5f33;
       --shadow: 0 10px 30px rgba(43, 34, 25, .12); --wood-line: #934e23;
-      --alpha-bg: #fef3c7; --alpha-text: #92400e;
       color-scheme: light dark;
     }
     /* Dark: when the device asks for it (theme "automatic"), or when chosen (public/theme.js). */
     @media (prefers-color-scheme: dark) {
       :root:not([data-theme="light"]) {
         --bg: #14110d; --surface: #211c16; --text: #f0e9dd; --muted: #a69885; --line: #362e25;
-        --accent: #4e9258; --accent-soft: #24382a; --accent-text: #8cc293; --shadow: 0 10px 30px rgba(0, 0, 0, .5); --wood-line: #a75e25; --alpha-bg: #78350f; --alpha-text: #fef3c7;
+        --accent: #4e9258; --accent-soft: #24382a; --accent-text: #8cc293; --shadow: 0 10px 30px rgba(0, 0, 0, .5); --wood-line: #a75e25;
         color-scheme: dark;
       }
     }
     :root[data-theme="dark"] {
       --bg: #14110d; --surface: #211c16; --text: #f0e9dd; --muted: #a69885; --line: #362e25;
-      --accent: #4e9258; --accent-soft: #24382a; --accent-text: #8cc293; --shadow: 0 10px 30px rgba(0, 0, 0, .5); --wood-line: #a75e25; --alpha-bg: #78350f; --alpha-text: #fef3c7;
+      --accent: #4e9258; --accent-soft: #24382a; --accent-text: #8cc293; --shadow: 0 10px 30px rgba(0, 0, 0, .5); --wood-line: #a75e25;
       color-scheme: dark;
     }
     :root[data-theme="light"] { color-scheme: light; }
@@ -90,15 +89,9 @@
       display: block; width: 97%; align-self: center; text-align: center;
       font-size: clamp(2.7rem, 12vw, 5.4rem); transform: rotate(-1.2deg);
     }
-    /* "Alpha" under the board, asking for feedback (the same as in the app, public/style.css). The Feedback button
-       opens the app's feedback page (through "/?start", like "Open Bored"), which asks guests to sign in first. */
-    .alpha-note { margin: 16px 0 0; text-align: center; font-size: .9rem; color: var(--muted); text-wrap: balance; }
-    .alpha-tag {
-      display: inline-block; margin-right: 4px; padding: 1px 8px; border-radius: 999px; vertical-align: 1px;
-      background: var(--alpha-bg); color: var(--alpha-text); font-size: .74rem; font-weight: 800;
-      letter-spacing: .06em; text-transform: uppercase;
-    }
-    .alpha-note .btn { margin-left: 6px; vertical-align: middle; }
+    /* "Alpha" under the board, asking for feedback, the same as in the app (public/style.css). Its link opens the
+       app's feedback page (through "/?start", like "Open Bored"), which asks guests to sign in first. */
+    .alpha-note { margin: 12px 0 0; text-align: center; font-size: .85rem; color: var(--muted); text-wrap: balance; }
     /* the board's wood brown and dark outline, lettered in National Park (same as the app's buttons, public/style.css) */
     .btn {
       display: inline-block; text-decoration: none; border: 1.5px solid #472610; border-radius: 6px; padding: 12px 20px;
@@ -119,12 +112,10 @@
     .deck { position: relative; height: 470px; width: 100%; }
     .card {
       position: absolute; inset: 0;
-      /* the same brown and dark outline as the buttons and the title board */
-      --text: #f6ecda; --muted: #f0dcc0; --line: rgba(255, 236, 210, .25); --bg: rgba(40, 18, 5, .22);
-      --accent: #d8eebd; --accent-text: #d8eebd; --accent-soft: rgba(40, 18, 5, .28); --yes: #cdeab0; --no: #ffc2a8;
+      /* as in the app: the page's light surface, outlined in the board's wood brown */
       color: var(--text);
-      background: linear-gradient(180deg, #a05a28, #8a4720);
-      border: 1.5px solid #472610;
+      background: var(--surface);
+      border: 1.5px solid var(--wood-line);
       border-radius: 12px; box-shadow: var(--shadow); overflow: hidden; display: flex; flex-direction: column;
     }
     .card.back2 { transform: rotate(-6deg) translate(-12px, 10px); }
@@ -135,7 +126,7 @@
       transition: transform .25s ease;
     }
     .card.front.dragging { transition: none; cursor: grabbing; }
-    .card.front:focus-visible { outline: 3px solid var(--accent); outline-offset: 4px; }
+    .card.front:focus-visible { outline: 3px solid var(--wood-line); outline-offset: 4px; }
     .card .body { padding: 18px 20px; flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
     /* Long details scroll inside the card, which makes .body its own scroll area: without this, a sideways drag on
        it is taken by the browser (even as a "back" swipe) instead of swiping the card. Same as the app. */
@@ -145,8 +136,8 @@
     .facts { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; font-size: .9rem; }
     .facts dt { color: var(--muted); }
     .facts dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
-    .facts .when { color: var(--accent); }
-    .facts a { color: var(--text); text-decoration: underline dotted; text-underline-offset: 3px; }
+    .facts .when { color: var(--accent-text); }
+    .facts a { text-decoration: underline; text-underline-offset: 3px; } /* links are always underlined, like the app's */
     .who { display: flex; align-items: center; gap: 10px; margin-top: auto; padding-top: 10px; border-top: 1px solid var(--line); }
     .who small { color: var(--muted); display: block; }
     .avatar { width: 40px; height: 40px; border-radius: 50%; flex: none; display: grid; place-items: center; background: #fff; overflow: hidden; }
@@ -159,19 +150,11 @@
     }
     .stamp.yes { left: 20px; background: #2f6b3a; border-color: #2f6b3a; transform: rotate(-14deg); }
     .stamp.no { right: 20px; background: #a8432c; border-color: #a8432c; transform: rotate(14deg); }
-    /* the round Pass and I'm in buttons under the deck, as in the app */
-    .deck-actions { display: flex; justify-content: center; gap: 28px; margin-top: 24px; }
-    .round {
-      width: 68px; height: 68px; border-radius: 50%; border: 0; background: var(--surface); cursor: pointer;
-      box-shadow: var(--shadow); font-size: 1.8rem; display: grid; place-items: center; transition: transform .15s;
-    }
-    .round:active { transform: scale(.9); }
-    .round.no { color: #a8432c; }
-    .round.yes { color: #2f6b3a; }
-    @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .round.no { color: #b4502f; } :root:not([data-theme="light"]) .round.yes { color: #4e9258; } }
-    :root[data-theme="dark"] .round.no { color: #b4502f; }
-    :root[data-theme="dark"] .round.yes { color: #4e9258; }
-    .round:focus-visible { outline: 3px solid var(--accent-text); outline-offset: 3px; }
+    /* the Pass and I'm in buttons under the deck, as in the app: brown filled buttons, side by side */
+    .deck-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 24px; }
+    .round { cursor: pointer; transition: transform .15s; }
+    .round:active { transform: scale(.96); }
+    .round:focus-visible { outline: 3px solid var(--wood-line); outline-offset: 3px; }
 
     /* ---------- how it works ---------- */
     ol.steps { list-style: none; padding: 0; margin: 0; counter-reset: step; display: grid; grid-template-columns: 1fr; gap: 16px; } /* one step per line */
@@ -221,8 +204,7 @@
   <div class="wrap">
     <header class="bar">
       <span class="board" aria-label="Bored?">Bored?</span>
-      <p class="alpha-note"><span class="alpha-tag">Alpha</span> Bored is new and still changing. Share what works and what doesn't.
-        <a class="btn ghost small" href="/?start&amp;open=feedback">Feedback</a></p>
+      <p class="alpha-note"><em>Alpha:</em> Bored is new and still changing. <a id="feedbackLink" href="/?start&amp;open=feedback">Share what you think</a></p>
     </header>
 
     <div class="hero">
@@ -233,8 +215,8 @@
       <div class="deck-col">
         <div class="deck" aria-hidden="true"></div><!-- filled in by public/about.js -->
         <div class="deck-actions" hidden>
-          <button type="button" class="round no" aria-label="Pass">✕</button>
-          <button type="button" class="round yes" aria-label="I'm in">♥</button>
+          <button type="button" class="btn round no">Pass</button>
+          <button type="button" class="btn round yes">I'm in</button>
         </div>
       </div>
     </div>
@@ -295,7 +277,7 @@
       <div class="slogan">Touch grass.</div>
       <p class="lede">Get outside. Be social. Make life more fun.</p>
       <div class="cta" style="justify-content:center">
-        <a class="btn" href="/?start">Open Bored</a>
+        <a class="btn ghost" href="/?start">Open Bored</a>
       </div>
     </div>
   </section>

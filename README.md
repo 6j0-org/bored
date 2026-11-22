@@ -70,7 +70,7 @@ account's GUID in any mode).
 ### Feedback
 
 Bored is in alpha, and every screen says so in a note under the board, with a link to the feedback page; the About
-page has a Feedback button that opens it too. People who aren't signed in are asked to sign in first. The page is
+page has the same note. People who aren't signed in are asked to sign in first. The page is
 where people read everyone's feedback and post their own: plain text, up to 2048 characters. Each post is a chat, like
 a plan's: tapping it opens its thread, where anyone signed in can reply. Developers close a thread as Done or Won't do,
 or reopen it, and the person who posted it gets a push notification when someone replies or a developer closes it.
@@ -140,11 +140,12 @@ the server says so on startup, and you delete it to start fresh.
 
 | Step | Who | Where |
 |---|---|---|
-| Post an event (title, details, up to 5 tags, where (map pin), when (date, time, optional repeat), cost and currency, max attendees or no limit, public or shared with chosen contacts/groups) | Host | **Post** |
-| Swipe right on events you're in for (filter by date, distance, tags, and free/paid); scroll down to the discard pile to change a swipe | Attendee | **Discover** |
+| Post an event (title, details, up to 5 tags, where (map pin), when (date, time, optional repeat, with quick picks like "In an hour" and ends like "2 hours" or "Sunset"), cost and currency, max attendees or no limit, public or shared with chosen contacts/groups). A post idea fills in the form. The button says who'll see it ("Post it to 3 people"); a private post needs at least one person, and a public one asks first | Host | **Post** |
+| Swipe right on events you're in for (filter by date, distance, tags, and free/paid), or use "Add a note for the host" to say yes with a note; scroll down to the discard pile to change a swipe | Attendee | **Discover** |
 | Swipe right on the people who want to join (anonymous, except your contacts) | Host | **Confirm** |
 | Match → you learn who each other are and chat to sort out details (matching doesn't make you contacts) | Both | **Plans** |
 | "Mark as done" to close it out | Host | Plan chat |
+| "Cancel plan" to call it off: everyone who asked to join or is in is told, and the post is removed (so is Remove in Posts) | Host | Plan chat |
 
 Discover, Confirm, and Plans refresh when you scroll back up to the top of the page, or pull down (or scroll up)
 while you're already there; the page gives a little bump when it does. Refreshing never resets a deck, and swiped
@@ -154,7 +155,10 @@ your mind: a pass becomes a request to join, and a request the host hasn't answe
 a card out of the pile for good (it stays out of the deck too; deleting a request you're waiting on takes it back first). **Confirm** has
 a discard pile too: requests to join you said no to, waitlisted, or said yes to (until you've chatted), and connection
 requests and invitations you said no to. Swipe one again to change your answer. **Plans** shows the full card for each
-match; click one to open its chat, which is also where a match is changed once you've chatted.
+match; click one to open its chat, which is also where a match is changed once you've chatted. Cards can only be deleted
+from a discard pile, from Past in **Plans**, and from your own posts in **Posts** (Remove for a post that's still
+on, which tells everyone; Delete for one that's done). A plan that's still on has no Delete: say "Can't make it"
+first, which moves it to Past. Deleting a past plan or post only hides it from you, on all your devices.
 
 A post stays in the deck until it reaches its max attendees; after that, saying yes joins its waitlist, and people
 move off the waitlist in order as spots open. Posts with no limit stay open until the host removes them. Posts are
@@ -308,6 +312,7 @@ See `TODO.md` for the full list of open security and privacy issues.
 - `demo.js`: demo mode (`DEMO=1`): demo accounts with keys, their signed public posts, and the bot that answers them
 - `test/`: the tests (see [Tests](#tests)); `test/lib.mjs` has the shared helpers
 - `docs/encryption.md`: how the encryption and privacy system works, and why
+- `docs/styling.md`: how the app looks: the rule for buttons, filters, and choices, plus colors, cards, the discard pile, and page structure
 - `TODO.md`: open security and privacy issues, by priority
 
 ## License

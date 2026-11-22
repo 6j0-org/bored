@@ -11,6 +11,7 @@
   --accent-soft: #e0e9d5;
   --shadow: 0 10px 30px rgba(43, 34, 25, .12);
   --wood-line: #934e23; /* the board's wood brown, for outlined buttons */
+  --branch: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 140 20'%3E%3Cg fill='%23934e23'%3E%3Cpath d='M0 12C30 11.5 70 13 140 9L140 13C70 15.5 30 13 0 12.6Z'/%3E%3Cpath d='M96 11C90 7 84 4.5 77 3C84 5.6 89 8.2 93 11.6Z'/%3E%3Cpath d='M57 12.9C51 15 46 16.5 40 18C46 15.6 51 13.6 54 12.6Z'/%3E%3C/g%3E%3Cg fill='%232f6b3a'%3E%3Cpath d='M77 3C72 .5 67 1.5 65 4C70 5 74 4.6 77 3Z'/%3E%3Cpath d='M40 18C35 19.8 31 18.5 29 16C33 15.6 37 16.4 40 18Z'/%3E%3Cpath d='M18 12C14 8.5 9 8 6 9.5C10 11.5 14 12.2 18 12Z'/%3E%3C/g%3E%3C/svg%3E"); /* section headings' branches (wood) and leaves (fir green) */
   /* The title board's wood, for buttons and other solid brown things; the same in light and dark. */
   --wood: linear-gradient(180deg, #a05a28, #8a4720); --wood-edge: #472610; --wood-text: #f6ecda;
   --warn-bg: #fef3c7; --warn-line: #fcd34d; --warn-text: #78350f; --warn-pill-bg: #fef3c7; --warn-pill-text: #92400e;
@@ -30,6 +31,7 @@
     --accent: #4e9258;
     --accent-soft: #24382a;
     --wood-line: #a75e25;
+    --branch: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 140 20'%3E%3Cg fill='%23a75e25'%3E%3Cpath d='M0 12C30 11.5 70 13 140 9L140 13C70 15.5 30 13 0 12.6Z'/%3E%3Cpath d='M96 11C90 7 84 4.5 77 3C84 5.6 89 8.2 93 11.6Z'/%3E%3Cpath d='M57 12.9C51 15 46 16.5 40 18C46 15.6 51 13.6 54 12.6Z'/%3E%3C/g%3E%3Cg fill='%234e9258'%3E%3Cpath d='M77 3C72 .5 67 1.5 65 4C70 5 74 4.6 77 3Z'/%3E%3Cpath d='M40 18C35 19.8 31 18.5 29 16C33 15.6 37 16.4 40 18Z'/%3E%3Cpath d='M18 12C14 8.5 9 8 6 9.5C10 11.5 14 12.2 18 12Z'/%3E%3C/g%3E%3C/svg%3E");
     --shadow: 0 10px 30px rgba(0, 0, 0, .5);
     --warn-bg: #451a03; --warn-line: #92400e; --warn-text: #fde68a; --warn-pill-bg: #78350f; --warn-pill-text: #fef3c7;
     color-scheme: dark;
@@ -46,6 +48,7 @@
   --accent: #4e9258;
   --accent-soft: #24382a;
   --wood-line: #a75e25;
+  --branch: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 140 20'%3E%3Cg fill='%23a75e25'%3E%3Cpath d='M0 12C30 11.5 70 13 140 9L140 13C70 15.5 30 13 0 12.6Z'/%3E%3Cpath d='M96 11C90 7 84 4.5 77 3C84 5.6 89 8.2 93 11.6Z'/%3E%3Cpath d='M57 12.9C51 15 46 16.5 40 18C46 15.6 51 13.6 54 12.6Z'/%3E%3C/g%3E%3Cg fill='%234e9258'%3E%3Cpath d='M77 3C72 .5 67 1.5 65 4C70 5 74 4.6 77 3Z'/%3E%3Cpath d='M40 18C35 19.8 31 18.5 29 16C33 15.6 37 16.4 40 18Z'/%3E%3Cpath d='M18 12C14 8.5 9 8 6 9.5C10 11.5 14 12.2 18 12Z'/%3E%3C/g%3E%3C/svg%3E");
   --shadow: 0 10px 30px rgba(0, 0, 0, .5);
   --warn-bg: #451a03; --warn-line: #92400e; --warn-text: #fde68a; --warn-pill-bg: #78350f; --warn-pill-text: #fef3c7;
   color-scheme: dark;
@@ -65,6 +68,9 @@ body {
 }
 button, input, textarea, select { font: inherit; color: inherit; }
 em { font-style: normal; color: var(--accent); } /* emphasis is green, not italic, like the intro page */
+/* Links are green and always underlined, so they're never mistaken for emphasis (green, not underlined). */
+a, button.link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+a.btn, a.logo { text-decoration: none; }
 button { cursor: pointer; }
 h1, h2, h3 { margin: 0; line-height: 1.2; }
 
@@ -84,17 +90,11 @@ header.top {
 /* Title board spans the content width, matching the swipe cards. */
 .board.wide { display: block; width: 100%; text-align: center; transform: rotate(-1.2deg); }
 .logo { font-size: 2.7rem; margin-top: 4px; }
-a.logo { text-decoration: none; } /* the board links to the introduction page */
 main { flex: 1; padding: 8px 16px 96px; display: flex; flex-direction: column; }
 
 .page-title { font-size: 1.5rem; text-align: center; margin: 8px 0 0; }
 /* "Alpha" under the board, on every screen, asking for feedback (the same on the About page, public/about.html). */
 .alpha-note { margin: 12px 0 0; text-align: center; font-size: .85rem; color: var(--muted); text-wrap: balance; }
-.alpha-tag {
-  display: inline-block; margin-right: 4px; padding: 1px 8px; border-radius: 999px; vertical-align: 1px;
-  background: var(--warn-pill-bg); color: var(--warn-pill-text); font-size: .72rem; font-weight: 800;
-  letter-spacing: .06em; text-transform: uppercase;
-}
 .alpha-note button.link { font-size: inherit; }
 .alpha-note button.link[aria-current="page"] { color: var(--text); text-decoration: none; cursor: default; }
 
@@ -119,7 +119,7 @@ main { flex: 1; padding: 8px 16px 96px; display: flex; flex-direction: column; }
 .fb-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .fb-empty { color: var(--muted); margin: 0; }
 .fb-item[data-open] { cursor: pointer; }
-.fb-item[data-open]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.fb-item[data-open]:focus-visible { outline: 2px solid var(--wood-line); outline-offset: 2px; }
 .fb-item .fb-text { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 .fb-state { font-weight: 700; font-size: .7rem; text-transform: uppercase; letter-spacing: .04em; padding: 2px 7px; border-radius: 999px; color: #fff; background: #9a6b12; }
 .fb-state-done { background: #2f6b3a; }
@@ -152,9 +152,10 @@ main { flex: 1; padding: 8px 16px 96px; display: flex; flex-direction: column; }
 /* Tabs: wood buttons like the others, each with an icon (TAB_ICONS in app.js). The open tab looks pressed in. */
 nav.tabs {
   position: fixed; bottom: 0; left: 50%; transform: translateX(-50%);
+  z-index: 40; /* above everything on the page (card labels and stamps), under sheets, overlays, and toasts */
   width: 100%; max-width: 480px;
   display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px;
-  background: var(--surface); border-top: 1px solid var(--line);
+  background: var(--bg); /* the page's own background: no strip or border around the tabs */
   padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
 }
 nav.tabs button {
@@ -163,6 +164,7 @@ nav.tabs button {
   background: var(--wood); color: var(--wood-text); border: 1.5px solid var(--wood-edge); border-radius: 6px;
   filter: drop-shadow(0 2px 2px rgba(0, 0, 0, .25));
 }
+/* The open tab looks pressed in. */
 nav.tabs button.active { background: linear-gradient(180deg, #7a3e1b, #96512a); box-shadow: inset 0 2px 5px rgba(30, 12, 2, .55); filter: none; }
 nav.tabs button:focus-visible { outline: 2px solid var(--wood-line); outline-offset: 2px; }
 nav.tabs svg { width: 26px; height: 26px; filter: drop-shadow(0 1px 0 rgba(40, 18, 5, .5)); }
@@ -178,12 +180,10 @@ nav.tabs svg { width: 26px; height: 26px; filter: drop-shadow(0 1px 0 rgba(40, 1
 .deck { position: relative; flex: 1; min-height: 440px; margin: 4px 0 16px; }
 .card {
   position: absolute; inset: 0;
-  /* the same brown and dark outline as the buttons and the title board */
-  --text: #f6ecda; --muted: #f0dcc0; --line: rgba(255, 236, 210, .25); --bg: rgba(40, 18, 5, .22);
-  --accent: #d8eebd; --accent-soft: rgba(40, 18, 5, .28); --yes: #cdeab0; --no: #ffc2a8; --wood-line: #f0dcc0;
+  /* outlined in the board's wood brown, on the page's light surface */
   color: var(--text);
-  background: linear-gradient(180deg, #a05a28, #8a4720);
-  border: 1.5px solid #472610;
+  background: var(--surface);
+  border: 1.5px solid var(--wood-line);
   border-radius: 12px; box-shadow: var(--shadow);
   overflow: hidden; display: flex; flex-direction: column;
   touch-action: none; user-select: none; will-change: transform;
@@ -233,15 +233,11 @@ nav.tabs svg { width: 26px; height: 26px; filter: drop-shadow(0 1px 0 rgba(40, 1
 .stamp.yes { left: 20px; background: #2f6b3a; border-color: #2f6b3a; transform: rotate(-14deg); }
 .stamp.no  { right: 20px; background: #a8432c; border-color: #a8432c; transform: rotate(14deg); }
 
-.actions { display: flex; justify-content: center; gap: 28px; }
-.round {
-  width: 68px; height: 68px; border-radius: 50%; border: 0; background: var(--surface);
-  box-shadow: var(--shadow); font-size: 1.8rem; display: grid; place-items: center;
-  transition: transform .15s;
-}
-.round:active { transform: scale(.9); }
-.round.no { color: var(--no); }
-.round.yes { color: var(--yes); }
+/* The deck's swipe buttons answer the top card, so they're filled brown buttons (.btn), side by side. */
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.round { transition: transform .15s; }
+.with-note { display: block; margin: 10px auto 0; text-align: center; font-weight: 600; }
+.round:active { transform: scale(.96); }
 .hint { text-align: center; color: var(--muted); font-size: .8rem; margin-top: 10px; }
 
 .empty {
@@ -250,9 +246,20 @@ nav.tabs svg { width: 26px; height: 26px; filter: drop-shadow(0 1px 0 rgba(40, 1
 }
 
 /* ---------- lists, forms ---------- */
-/* Every section after the first on a page starts with a rule, so sections (like Posts' "Your posts") stand apart. */
-.section-title { font-size: 1.1rem; font-weight: 700; margin: 28px 0 10px; padding-top: 20px; border-top: 2px solid var(--line); text-align: center; }
-.section-title:first-child { margin-top: 4px; padding-top: 0; border-top: 0; }
+/* Section headings: the title between two little tree branches (wood brown, thick next to the title and thinning
+   to a point, with a couple of twigs and green leaves), with the same room above and below, so sections stand apart.
+   The branch is an SVG in --branch, one per theme; the right one is the left one mirrored. */
+.section-title {
+  display: flex; align-items: center; gap: 12px; margin: 32px 0;
+  font-size: 1.1rem; font-weight: 800; letter-spacing: .02em; text-align: center;
+}
+.section-title::before, .section-title::after {
+  content: ""; flex: 1; height: 20px; min-width: 40px; max-width: 150px;
+  background: var(--branch) center / 100% 100% no-repeat;
+}
+.section-title::before { margin-left: auto; }
+.section-title::after { margin-right: auto; transform: scaleX(-1); }
+.section-title:first-child { margin-top: 8px; }
 .list { display: flex; flex-direction: column; gap: 10px; }
 .row {
   background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
@@ -264,6 +271,11 @@ nav.tabs svg { width: 26px; height: 26px; filter: drop-shadow(0 1px 0 rgba(40, 1
 
 form.stack, .stack { display: flex; flex-direction: column; gap: 10px; }
 label { font-size: .85rem; color: var(--muted); display: flex; flex-direction: column; gap: 4px; }
+/* Starts and Ends: the label, quick picks (like filters), then the field. */
+.time-field { display: flex; flex-direction: column; gap: 6px; }
+.time-field input { font-size: 1rem; color: var(--text); }
+.quick-picks { display: flex; flex-wrap: wrap; gap: 6px; }
+.quick-picks .chip:disabled { opacity: .45; cursor: not-allowed; }
 /* Fields inside a label keep normal text, not the label's small muted style. */
 label input, label textarea, label select { font-size: 1rem; color: var(--text); }
 .field { display: flex; flex-direction: column; gap: 4px; }
@@ -272,11 +284,18 @@ input, textarea, select {
   background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
   padding: 11px 12px; width: 100%;
 }
-input:focus, textarea:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+input:focus, textarea:focus, select:focus { outline: 2px solid var(--wood-line); outline-offset: -1px; }
 textarea { resize: vertical; min-height: 80px; }
 textarea.details-input { min-height: 160px; } /* the post's Details: twice the usual height */
 .two { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-/* Buttons: the title board's wood brown and dark outline, lettered in National Park like the board (cream, for contrast). */
+/* The rule for controls, so they're never confused (docs/styling.md):
+   - Brown filled rectangles (.btn): buttons that create, update, or delete something. The title board's wood brown
+     and dark outline, lettered in National Park like the board (cream, for contrast). The tab bar's buttons too.
+   - Brown outlined rectangles (.btn.ghost): buttons that don't change anything: Cancel, going somewhere, opening a
+     form, sharing.
+   - Brown outlines that fill with wood brown when selected: choices (.seg-pick), and tags, contacts, and filters
+     (.chip.filter, .chip.suggest). The post ideas (.idea) are a brown outline too.
+   - Green is only for text: emphasis and links. */
 .btn {
   border: 1.5px solid #472610; border-radius: 6px; padding: 12px 16px;
   font-family: 'National Park', 'Trebuchet MS', sans-serif; font-weight: 800; font-size: 1rem; letter-spacing: .01em;
@@ -284,7 +303,6 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
 }
 .btn.ghost { background: transparent; color: var(--text); border-color: var(--wood-line); text-shadow: none; }
 .btn.small { padding: 6px 10px; font-size: .75rem; }
-.btn.danger { background: transparent; color: var(--no); border-color: currentColor; text-shadow: none; }
 .btn:disabled { opacity: .5; }
 .error { color: var(--no); font-size: .9rem; min-height: 1.2em; }
 
@@ -341,7 +359,7 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
 /* ---------- empty deck ---------- */
-.deck-wrap.is-empty .round.yes, .deck-wrap.is-empty .round.no, .deck-wrap.is-empty .hint { display: none; }
+.deck-wrap.is-empty .round.yes, .deck-wrap.is-empty .round.no, .deck-wrap.is-empty .hint, .deck-wrap.is-empty .with-note { display: none; }
 .deck-wrap.is-empty .deck { display: flex; }
 
 /* ---------- discard pile (Discover) ---------- */
@@ -359,7 +377,7 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
 .card.flat .label.in { background: #2f6b3a; }
 .card.flat .label.pass { background: #a8432c; }
 .card.flat .label.warn { background: #9a6b12; }
-.card.flat .label.done { background: rgba(40, 18, 5, .45); }
+.card.flat .label.done { background: #6b5a48; }
 .card-actions, .pile-actions { display: flex; justify-content: flex-end; gap: 8px; padding: 0 20px 16px; }
 /* The discard pile: sideways drags re-swipe a card. */
 .pile-card.pass { opacity: .85; }
@@ -367,7 +385,7 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
 /* Plans: a card opens its chat. */
 .plan-card[data-id] { cursor: pointer; user-select: auto; }
 .plan-card[data-id]:hover { filter: brightness(1.05); }
-.plan-card[data-id]:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.plan-card[data-id]:focus-visible { outline: 3px solid var(--wood-line); outline-offset: 2px; }
 .plans-hint { margin: 0 0 4px; }
 
 /* ---------- edits / re-confirm ---------- */
@@ -422,15 +440,17 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
 }
 
 /* ---------- rotating post ideas ---------- */
+/* A brown outline: picking an idea only fills in the form below, it doesn't post. */
 .idea {
   display: flex; align-items: stretch; margin-bottom: 10px; min-height: 3.6em;
-  background: var(--wood); color: var(--wood-text); border: 1.5px solid var(--wood-edge); border-radius: 14px; overflow: hidden;
-  text-shadow: 0 1px 0 rgba(40, 18, 5, .5); /* wood brown, like the buttons */
+  background: var(--surface); color: var(--text); border: 1.5px solid var(--wood-line); border-radius: 14px; overflow: hidden;
+  font-weight: 600;
 }
 .idea button { background: none; border: 0; color: inherit; font: inherit; cursor: pointer; }
 .idea-open { flex: 1; display: flex; align-items: center; gap: 10px; padding: 12px 0; text-align: left; }
-.idea-next, .idea-prev { flex: none; width: 40px; font-size: 1.6rem; color: #f0dcc0; }
-.idea button:hover { background: rgba(255, 236, 210, .1); }
+.idea-next, .idea-prev { flex: none; width: 40px; font-size: 1.6rem; color: var(--wood-line); }
+.idea button:hover { background: rgba(147, 78, 35, .1); }
+.idea button:focus-visible { outline: 2px solid var(--wood-line); outline-offset: -3px; }
 .idea .text.in { animation: ideaIn .4s ease; }
 @keyframes ideaIn { from { opacity: 0; transform: translateY(4px); } }
 @media (prefers-reduced-motion: reduce) { .idea .text.in { animation: none; } }
@@ -442,12 +462,12 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
   display: flex; flex-wrap: wrap; gap: 6px; align-items: center; cursor: text;
   background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; min-height: 46px;
 }
-.tag-box .chip { display: inline-flex; align-items: center; gap: 4px; }
-.tag-box .chip button { background: none; border: 0; padding: 0 2px; color: var(--muted); font-size: .8rem; cursor: pointer; }
+.tag-box .chip { display: inline-flex; align-items: center; gap: 4px; background: var(--wood); border: 1.5px solid var(--wood-edge); color: var(--wood-text); font-weight: 600; text-shadow: 0 1px 0 rgba(40, 18, 5, .5); }
+.tag-box .chip button { background: none; border: 0; padding: 0 2px; color: rgba(246, 236, 218, .85); font-size: .8rem; cursor: pointer; }
 .tag-box .tag-input { flex: 1; min-width: 8em; border: 0; padding: 4px 2px; background: transparent; outline: none; }
 .tag-suggest { display: flex; flex-wrap: wrap; gap: 6px; }
 .tag-suggest small { color: var(--muted); }
-.chip.suggest, .chip.filter { cursor: pointer; font: inherit; font-size: .82rem; }
+.chip.suggest, .chip.filter { cursor: pointer; font: inherit; font-size: .82rem; background: transparent; border: 1.5px solid var(--wood-line); color: var(--text); font-weight: 600; }
 
 /* ---------- Discover filters ---------- */
 .filters { margin-bottom: 8px; }
@@ -462,16 +482,16 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
 nav.tabs .badge { top: -7px; left: calc(50% + 8px); border: 1.5px solid var(--surface); }
 .filter-body { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
 button.chip { font: inherit; font-size: .82rem; cursor: pointer; }
-.facts button.link:hover, .cal-link:hover { text-decoration: underline; }
 .chat-head button.link.cal-link { color: inherit; font-size: inherit; font-weight: inherit; }
 .filter-row { display: flex; gap: 6px; overflow-x: auto; padding: 2px 0; scrollbar-width: none; }
 .filter-row::-webkit-scrollbar { display: none; }
 .filter-row .label { flex: none; align-self: center; font-size: .75rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; min-width: 3.2em; }
 .chip.filter { flex: none; white-space: nowrap; }
 .chip.filter .n { color: var(--muted); font-size: .75rem; margin-left: 2px; }
-.chip.filter.on { background: var(--accent); border-color: var(--accent); color: #fff; }
-.chip.filter.on .n { color: rgba(255, 255, 255, .8); }
+.chip.filter.on { background: var(--wood); border-color: var(--wood-edge); color: var(--wood-text); text-shadow: 0 1px 0 rgba(40, 18, 5, .5); }
+.chip.filter.on .n { color: rgba(246, 236, 218, .8); }
 .chip.filter.clear { background: transparent; border-style: dashed; }
+.chip.filter:focus-visible, .chip.suggest:focus-visible { outline: 2px solid var(--wood-line); outline-offset: 2px; }
 .deck-host { flex: 1; display: flex; flex-direction: column; }
 
 /* ---------- cost: amount + currency ---------- */
@@ -483,19 +503,16 @@ button.chip { font: inherit; font-size: .82rem; cursor: pointer; }
 /* ---------- segmented choice (who can see a post) ---------- */
 .seg-pick { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; color: var(--muted); border: 0; padding: 0; margin: 0; }
 .seg-pick legend { padding: 0; margin-bottom: 4px; }
-.seg-pick .seg { display: flex; flex: 1; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--surface); }
+.seg-pick .seg { display: flex; flex: 1; border: 1.5px solid var(--wood-line); border-radius: 999px; overflow: hidden; background: var(--surface); }
 .seg-pick label { position: relative; flex: 1; display: block; text-align: center; color: var(--text); font-size: .95rem; cursor: pointer; }
 .seg-pick input { position: absolute; inset: 0; width: 1px; height: 1px; padding: 0; margin: 0; border: 0; opacity: 0; pointer-events: none; }
-.seg-pick span { display: block; padding: 9px 0; }
-.seg-pick label + label span { border-left: 1px solid var(--line); }
+.seg-pick span { display: block; padding: 9px 4px; color: var(--text); font-weight: 600; }
+.seg-pick label + label span { border-left: 1.5px solid var(--wood-line); }
 /* Picked choices are wood brown, like the buttons. */
 .seg-pick input:checked + span { background: var(--wood); color: var(--wood-text); text-shadow: 0 1px 0 rgba(40, 18, 5, .5); font-weight: 700; }
-.seg-pick input:focus-visible + span { outline: 2px solid var(--wood-line); outline-offset: -2px; }
+.seg-pick input:focus-visible + span { outline: 2px solid var(--text); outline-offset: -4px; }
 .seg-pick input:disabled + span { color: var(--muted); opacity: .5; cursor: not-allowed; }
-/* In the post forms, picked contact and group chips are wood brown too. */
-.post-form .chip.filter.on { background: var(--wood); color: var(--wood-text); text-shadow: 0 1px 0 rgba(40, 18, 5, .5); border-color: var(--wood-edge); }
-.post-form .chip.filter.on .n { color: rgba(246, 236, 218, .8); }
-#themePick { margin-bottom: 12px; } /* Profile: space before the settings form */
+#themePick { margin-bottom: 12px; } /* Profile's Developer settings: space before Sign out */
 .audience { display: flex; flex-direction: column; gap: 8px; }
 .audience .filter-row { flex-wrap: wrap; overflow: visible; }
 .filter-row.stacked .label { flex-basis: 100%; text-transform: none; letter-spacing: 0; font-size: .85rem; }
@@ -523,19 +540,17 @@ button.link { background: none; border: 0; padding: 0; color: var(--accent); fon
   border: 1px solid transparent; border-radius: 10px; background: transparent;
 }
 .name-input:hover { border-color: var(--line); }
-.name-input:focus { border-color: var(--accent); background: var(--surface); outline: none; }
+.name-input:focus { border-color: var(--wood-line); background: var(--surface); outline: none; }
 .me-head .note { margin: 0; }
-/* Profile badges: Developer (hardcoded accounts) and Tester (feedback marked done). */
-.me-badges { display: flex; flex-wrap: wrap; gap: 8px; margin: -4px 0 14px; }
-.me-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 12px; border-radius: 999px; font-weight: 700; font-size: .85rem;
-  background: var(--wood); color: var(--wood-text); border: 1.5px solid var(--wood-edge); }
-.me-badge b { background: rgba(0, 0, 0, .25); border-radius: 999px; padding: 0 7px; font-size: .8rem; }
+/* Profile badges, as cards with the stats: Tester (feedback marked done) and Developer (hardcoded accounts). */
+.badge-stat b { color: var(--accent); }
+.badge-stat b.word { font-size: 1.15rem; line-height: 1.6rem; padding: .2rem 0; }
 .account-id { margin-top: 18px; text-align: center; overflow-wrap: anywhere; }
 .account-id code { user-select: all; }
 /* An avatar to click (a contact's info, or an invitation to connect). */
 .avatar-btn { border: 0; padding: 0; background: none; border-radius: 50%; cursor: pointer; flex: none; line-height: 0; }
 .avatar-btn:hover .avatar { filter: brightness(1.08); }
-.avatar-btn:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.avatar-btn:focus-visible { outline: 3px solid var(--wood-line); outline-offset: 2px; }
 
 /* ---------- location: map links and the OSM picker (public/location.js) ---------- */
 .loc-field { position: relative; display: flex; min-width: 0; }
@@ -547,14 +562,13 @@ button.link { background: none; border: 0; padding: 0; color: var(--accent); fon
   background: none; border: 0; border-radius: 8px; color: var(--muted); cursor: pointer;
 }
 .loc-field .loc-pick:hover { background: rgba(0, 0, 0, .06); color: var(--text); }
-a.map-link { color: inherit; text-decoration: underline dotted; text-underline-offset: 2px; }
-a.chip.map-link { text-decoration: none; color: var(--accent); }
+a.map-link { text-underline-offset: 2px; }
 .map {
   position: relative; height: min(55vh, 420px); overflow: hidden; border-radius: 14px; border: 1px solid var(--line);
   background: #e6e0d4; touch-action: none; user-select: none; cursor: grab;
 }
 .map:active { cursor: grabbing; }
-.map:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.map:focus-visible { outline: 2px solid var(--wood-line); outline-offset: 2px; }
 .map .tiles img { position: absolute; left: 0; top: 0; width: 256px; height: 256px; max-width: none; pointer-events: none; }
 .map .pin { position: absolute; left: 0; top: 0; width: 36px; height: 36px; margin: -34px 0 0 -18px; pointer-events: none; }
 .map .pin svg { display: block; filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .35)); }
@@ -571,7 +585,7 @@ a.chip.map-link { text-decoration: none; color: var(--accent); }
   display: flex; flex-direction: column; gap: 2px; width: 100%; padding: 10px 12px; text-align: left;
   background: none; border: 0; color: var(--text); font: inherit; cursor: pointer;
 }
-.map-results button:hover, .map-results button:focus-visible { background: var(--accent-soft); }
+.map-results button:hover, .map-results button:focus-visible { background: rgba(147, 78, 35, .1); }
 .map-results button span { color: var(--muted); font-size: .85rem; }
 .place-results { margin-top: 6px; }
 .map-status { display: flex; align-items: center; justify-content: space-between; gap: 8px; font-variant-numeric: tabular-nums; }
@@ -593,7 +607,7 @@ a.chip.map-link { text-decoration: none; color: var(--accent); }
 /* ---------- moderation ---------- */
 /* Report or block (on cards, Discover's hidden-posts note), and Profile → Moderation (moderationHtml in app.js). */
 .who .report-link { margin-left: auto; flex: none; font-size: .8rem; color: var(--muted); }
-.who .report-link:hover { color: var(--text); text-decoration: underline; }
+.who .report-link:hover { color: var(--text); }
 .mod-note { margin: 0 0 10px; }
 .msg.hidden-msg { color: var(--muted); font-style: italic; }
 .sub-title { font-size: .95rem; font-weight: 700; margin: 14px 0 0; text-align: center; }

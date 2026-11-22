@@ -1,6 +1,7 @@
 // Headless Chromium against the demo: the "Alpha" note under the board on every tab and its feedback link, the
 // About page's Feedback button, posting (with the character count and the 2048-character limit), a draft surviving
-// a trip to another tab, a post's chat (replying), deleting your own, and the account ID on the Profile page.
+// a trip to another tab, a post's chat (replying), deleting your own, and on the Profile page, the account ID and the
+// order of its sections.
 import assert from 'node:assert/strict';
 import { browser, finish, wait, BASE } from '../lib.mjs';
 
@@ -22,8 +23,8 @@ assert.equal(await B.ev(`document.getElementById('fbBody').maxLength`), 2048);
 
 // The About page has the note and the Feedback button, which opens the same page in the app.
 await B.send('Page.navigate', { url: BASE + '/about' }); await wait(1500);
-assert.match(await B.ev(`document.querySelector('.bar .alpha-note').textContent`), /Alpha.*Feedback/s);
-await B.ev(`document.querySelector('.bar .alpha-note a.btn').click()`);
+assert.match(await B.ev(`document.querySelector('.bar .alpha-note').textContent`), /Alpha.*Share what you think/s, 'the same note as in the app');
+await B.ev(`document.querySelector('.bar .alpha-note a').click()`);
 await B.until(`document.querySelector('.page-title')?.textContent === 'Feedback'`);
 assert.equal(await B.ev(`location.search`), '', 'the open=feedback is taken out of the address');
 
@@ -93,6 +94,11 @@ await B.until(`document.querySelector('.fb-thread:not([hidden]) .fb-msg')?.textC
 await B.tab('profile');
 await B.until(`document.querySelector('.account-id code')`);
 assert.match(await B.ev(`document.querySelector('.account-id code').textContent`), /^[0-9a-f-]{20,}$/i);
+
+// Profile's sections come in this order, with Theme under Developer settings at the end.
+const order = ['Notifications', 'Invitations', 'Contacts', 'Settings', 'Moderation', 'Developer settings'];
+assert.deepEqual(await B.ev(`[...document.querySelectorAll('#view .section-title')].map(h => h.textContent).filter(t => ${JSON.stringify(order)}.includes(t))`), order);
+assert.equal(await B.ev(`document.getElementById('themePick').previousElementSibling.textContent`), 'Developer settings');
 
 B.close();
 finish('browser feedback');

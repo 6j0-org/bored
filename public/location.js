@@ -35,18 +35,24 @@ export function mapLink(lat, lon) {
   if (/iPhone|iPad|iPod|Macintosh/.test(ua)) return { href: `https://maps.apple.com/?ll=${lat},${lon}&q=${lat},${lon}`, external: true };
   return { href: `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=17/${lat}/${lon}`, external: true };
 }
+// The same, for a place known only by its name: a search for it in the maps app.
+export function mapSearchLink(name) {
+  const ua = navigator.userAgent, q = encodeURIComponent(name);
+  if (/Android/i.test(ua)) return { href: `geo:0,0?q=${q}`, external: false };
+  if (/iPhone|iPad|iPod|Macintosh/.test(ua)) return { href: `https://maps.apple.com/?q=${q}`, external: true };
+  return { href: `https://www.openstreetmap.org/search?query=${q}`, external: true };
+}
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
-// HTML for a location: its name (or, without one, the coordinates), linked to the map when there are coordinates.
-// cls is the link/span's class.
+// HTML for a location: its name (or, without one, the coordinates), always linked to the map: to the spot when there
+// are coordinates, otherwise to a search for the name. cls is the link's class.
 export function locationHtml(loc, cls = '', { name = '' } = {}) {
   if (!loc && !name) return '';
   const ll = parseLatLon(loc);
-  if (!ll) return `<span class="${cls}">${esc(name || loc)}</span>`;
-  const { href, external } = mapLink(...ll);
+  const { href, external } = ll ? mapLink(...ll) : mapSearchLink(name || loc);
   return `<a class="${cls} map-link" href="${esc(href)}" ${external ? 'target="_blank" rel="noopener noreferrer"' : ''}
-    title="Open in your maps app">${esc(name || fmt(...ll))}</a>`;
+    title="Open in your maps app">${esc(name || (ll ? fmt(...ll) : loc))}</a>`;
 }
 
 // A suggested name for a spot, or '' if none could be found.

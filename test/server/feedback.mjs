@@ -35,7 +35,7 @@ assert.equal(th.body, 'Could Discover remember my filters?');
 th = await a.api(`/api/feedback/${f1.id}/replies/${th.messages[0].id}`, { method: 'PUT', body: { body: 'Also the date one.' } });
 assert.deepEqual([th.messages[0].body, th.messages[0].edited > 0], ['Also the date one.', true]);
 await assert.rejects(b.api(`/api/feedback/${f1.id}`, { method: 'PUT', body: { body: 'x' } }), { status: 404 });
-assert.deepEqual((await a.api('/api/me')).badges, { developer: false, tester: 0 });
+assert.deepEqual((await a.api('/api/me')).badges, { developer: true, tester: 0 }, 'demo visitors get the Developer badge');
 const raw = await fetch(BASE + `/api/feedback/${f1.id}`, { method: 'DELETE' });
 assert.equal(raw.status, 401, 'deleting needs an account too');
 

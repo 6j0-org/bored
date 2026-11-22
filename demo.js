@@ -15,6 +15,8 @@
 // 3. The bot answers as it goes (see visitorPosts and HOST_REPLIES): Maya and Dev ask to join the hike, Sam asks to
 //    join basketball and they're already chatting, Dev says yes to ramen and chats, and the cleanup and shelves are
 //    marked as happened.
+// When a visitor asks to join any other demo post, its host says yes on every other post (by the order in
+// public/examples.js) and never answers on the rest, so visitors see requests that are still waiting too.
 // To fill in a conversation the bot also writes the visitor's side of it on the channel (it knows the channel
 // secret, as both sides do). Only chat lines and answers, never a hello: those are signed, by the visitor's browser.
 import { db } from './db.js';
@@ -117,7 +119,7 @@ export async function seedDemo() {
       pid: randomId(), v: 1, kind: 'public', status: 'open', reply: { chat: host.chat, inbox: host.inbox } };
     const record = await env.signRecord(host, 'post', post);
     q('INSERT INTO public_posts (pid, host_id, v, body, seq) VALUES (?, ?, ?, ?, ?)').run(post.pid, ids[e.host], 1, JSON.stringify(record), i + 1);
-    posts.set(post.pid, { host: e.host, post, at: Infinity });
+    posts.set(post.pid, { host: e.host, post, at: Infinity, autoAccept: i % 2 === 0 || SEED_JOINS.includes(e.title) });
   }
   return { users: Object.keys(people).length, posts: EXAMPLES.length };
 }
@@ -175,6 +177,7 @@ export async function demoBot(items) {
 async function answerJoin(handle, join, channel) {
   const p = posts.get(join.pid);
   if (!p || p.host !== handle) return;
+  if (!p.past && !p.autoAccept) return; // left waiting (see the top of this file)
   const list = [join];
   await write(channel, list, [['host', { type: 'answer', status: 'accepted' }], ['host', await hello(handle, channel)]]);
   if (p.past) {

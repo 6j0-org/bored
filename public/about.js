@@ -1,5 +1,5 @@
 // The sample deck on the introduction page: the demo's example posts (public/examples.js), drawn exactly like a
-// Discover card in the app (eventCard in public/app.js). Drag a card (mouse or touch), tap the round buttons, or use
+// Discover card in the app (eventCard in public/app.js). Drag a card (mouse or touch), tap Pass or I'm in, or use
 // the arrow keys. It loops forever and saves nothing.
 import { EXAMPLES, exampleWhen } from './examples.js';
 import { whenLabel, localToday } from './when.js';
@@ -28,7 +28,6 @@ function cardHtml(e) {
         ${e.location || e.place ? fact('Where', locationHtml(e.location, '', { name: e.place })) : ''}
         ${fact('Cost', esc(costLabel(e.cost || 0, e.currency || 'USD')))}
         ${fact('Max attendees', attendeesLabel(e.max))}
-        ${fact('Who can see it', 'Public')}
         ${e.tags.length ? fact('Tags', e.tags.map(x => '#' + esc(x)).join(' ')) : ''}
       </dl>
       <div class="details">${esc(e.details)}</div>

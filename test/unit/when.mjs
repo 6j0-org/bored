@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { parseEnd, composeEnd, shiftEnd, whenLabel, occursBetween } from '../../public/when.js';
+import { parseEnd, composeEnd, shiftEnd, whenLabel, occursBetween, sunsetAt } from '../../public/when.js';
 import { icsFor } from '../../public/ics.js';
 
 const opts = { locale: 'en-US', today: '2026-11-21' };
@@ -34,5 +34,15 @@ assert.equal(occursBetween('2026-11-25T22:00;FREQ=WEEKLY;BYDAY=WE', '2026-12-04'
 const ev = { id: 1, title: 'Dinner', when_text: '2026-11-27T18:30' };
 assert.match(icsFor(ev, { origin: 'https://example.test' }), /DURATION:PT1H/);
 assert.match(icsFor({ ...ev, end_text: '2026-11-27T21:00' }, { origin: 'https://example.test' }), /DTEND:20261127T210000/);
+
+// sunsetAt: within a couple of minutes of published times, on the place's own date; none near the poles in winter
+// or summer.
+const near = (ymd, lat, lon, iso) => assert.ok(Math.abs(sunsetAt(ymd, lat, lon) - Date.parse(iso)) <= 3 * 60e3, `${ymd} ${lat},${lon}`);
+near('2026-11-22', 32.7157, -117.1611, '2026-11-23T00:43:00Z'); // San Diego, 4:43 PM PST (the next day in UTC)
+near('2026-06-21', 51.5074, -0.1278, '2026-06-21T20:21:00Z');   // London, 9:21 PM BST
+near('2026-11-22', 35.68, 139.69, '2026-11-22T07:30:00Z');      // Tokyo, 4:30 PM JST
+assert.equal(sunsetAt('2026-12-21', 69.65, 18.96), null, 'Tromsø: polar night');
+assert.equal(sunsetAt('2026-06-21', 69.65, 18.96), null, 'Tromsø: midnight sun');
+assert.equal(sunsetAt('tomorrow', 0, 0), null);
 
 console.log('when.js: end times pass');

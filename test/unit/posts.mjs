@@ -233,4 +233,23 @@ const ID = (id) => ({ guid: id, chat: { x: id }, sign: { x: id }, inbox: id + '-
   const e2 = c.send('attendee', { type: 'edit', of: mine.n, text: 'see you at 9' });
   assert.equal(c.state().timeline.find(x => x.n === mine.n && x.role === 'attendee').edited, e2.at, 'still editable after it happened');
 }
+// The host cancels: from accepted, waitlisted, or pending; the plan is called off, and chat stops.
+for (const before of ['accepted', 'waitlisted', 'pending']) {
+  const c = channel('pc');
+  if (before !== 'pending') c.send('host', { type: 'answer', status: before });
+  c.send('attendee', { type: 'cancel' });                              // not the attendee's to send
+  assert.equal(c.state().status, before);
+  c.send('host', { type: 'cancel' });
+  assert.equal(c.state().status, 'called-off', `cancel from ${before}`);
+  assert.equal(c.state().timeline.at(-1).event, 'cancelled');
+  c.send('attendee', { type: 'chat', text: 'wait, why?' });
+  assert.ok(!c.state().timeline.some(t => t.event === 'chat'), 'no chat after it is called off');
+}
+{
+  const c = channel('pd');
+  c.send('host', { type: 'answer', status: 'accepted' });
+  c.send('host', { type: 'happened' });
+  c.send('host', { type: 'cancel' });
+  assert.equal(c.state().status, 'attended', "something that happened can't be cancelled");
+}
 console.log('posts.js: all scripted sequences pass');

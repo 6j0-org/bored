@@ -34,6 +34,7 @@
 //   reconfirm  attendee: accepted and asked to, { yes }                → still in, or withdrawn
 //   leave      attendee: accepted                                      → withdrawn
 //   happened   host: accepted                                          → attended
+//   cancel     host: pending, waitlisted, or accepted                  → called-off (the host cancelled the plan)
 //   chat       either: accepted or attended, { text }
 //   edit       either: accepted or attended, { of, text }: of is the n of one of the sender's own chat messages,
 //              whose text it replaces (the timeline keeps when, as `edited`)
@@ -44,7 +45,7 @@ export const MAX_NOTE = 500, MAX_CHAT = 4000;
 
 const SENDER = {
   join: 'attendee', unjoin: 'attendee', reconfirm: 'attendee', leave: 'attendee',
-  answer: 'host', undo: 'host', update: 'host', happened: 'host',
+  answer: 'host', undo: 'host', update: 'host', happened: 'host', cancel: 'host',
   hello: 'both', chat: 'both', edit: 'both',
 };
 
@@ -131,6 +132,9 @@ function apply(st, m) {
     case 'happened':
       if (s !== 'accepted') return false;
       st.status = 'attended'; st.reconfirm = false; line('happened'); return true;
+    case 'cancel':
+      if (!['pending', 'waitlisted', 'accepted'].includes(s)) return false;
+      st.status = 'called-off'; st.reconfirm = false; line('cancelled'); return true;
     case 'chat':
       if ((s !== 'accepted' && s !== 'attended') || typeof m.text !== 'string' || !m.text.trim()) return false;
       st.chatted = true; line('chat', { text: m.text.slice(0, MAX_CHAT), n: m.n }); return true;

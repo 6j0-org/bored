@@ -4,9 +4,9 @@ import {
   PrfUnsupportedError, startIdSignIn, finishIdSignIn, hasIdCallback, createDemoAccount,
   newInviteKey, sealForInvite, openForInvite, sha1Hex, b64u, ensureKeys,
 } from './secure.js';
-import { locationHtml, mountLocationField, pickLocation, PIN_SVG } from './location.js';
+import { locationHtml, mountLocationField, pickLocation, PIN_SVG, parseLatLon } from './location.js';
 import { mountFeedback } from './feedback.js';
-import { parseWhen, parseEnd, shiftEnd, repeatOptions, whenLabel as fmtWhen, localToday, occursBetween } from './when.js';
+import { parseWhen, parseEnd, shiftEnd, repeatOptions, whenLabel as fmtWhen, localToday, occursBetween, sunsetAt } from './when.js';
 import {
   initMail, resetMail, loadMail, mailView, requestJoin, sendOn, pass, unpass, deletePassed, savePost, setPostStatus, reshare,
   invitesForMe, answerInvite, sendInvite, declinedInvites, keysFor,
@@ -549,14 +549,17 @@ function dragToSwipe(el, onSwipe, onDragging = () => {}) {
 }
 
 // No undo: a swiped card goes to the view's discard pile (mountPile), where the answer can be changed.
-function mountDeck(root, { items, renderCard, onSwipe, yesLabel, noLabel, empty }) {
+// withNote, if given, adds a link under the buttons for saying yes with a note: { label, ask(item) → Promise of the
+// note, or null if they changed their mind }. The note goes to onSwipe(item, true, { note }).
+function mountDeck(root, { items, renderCard, onSwipe, yesLabel, noLabel, empty, withNote = null }) {
   root.innerHTML = `
     <div class="deck-wrap">
       <div class="deck"></div>
       <div class="actions">
-        <button class="round no" aria-label="${esc(noLabel)}">✕</button>
-        <button class="round yes" aria-label="${esc(yesLabel)}">♥</button>
+        <button class="btn round no">${esc(noLabel)}</button>
+        <button class="btn round yes">${esc(yesLabel)}</button>
       </div>
+      ${withNote ? `<button type="button" class="link with-note">${esc(withNote.label)}</button>` : ''}
       <div class="hint">Swipe right for <b>${esc(yesLabel)}</b>, left for <b>${esc(noLabel)}</b> · or use ← →</div>
     </div>`;
   const wrap = root.querySelector('.deck-wrap');
@@ -580,14 +583,14 @@ function mountDeck(root, { items, renderCard, onSwipe, yesLabel, noLabel, empty 
 
   const flyout = (yes) => `translate(${yes ? 600 : -600}px, 40px) rotate(${yes ? 30 : -30}deg)`;
 
-  async function decide(yes, el = deck.querySelector('.card.top')) {
+  async function decide(yes, el = deck.querySelector('.card.top'), extra = {}) {
     if (busy || !el || !queue.length) return;
     busy = true;
     const item = queue[0];
     el.style.transform = flyout(yes);
     el.style.opacity = '0';
     try {
-      if ((await onSwipe(item, yes)) === KEEP_CARD) {
+      if ((await onSwipe(item, yes, extra)) === KEEP_CARD) {
         // e.g. a guest swiped yes: put the card back instead of using it up.
         el.style.transform = ''; el.style.opacity = '';
         el.querySelectorAll('.stamp').forEach(st => { st.style.opacity = 0; });
@@ -606,6 +609,11 @@ function mountDeck(root, { items, renderCard, onSwipe, yesLabel, noLabel, empty 
 
   root.querySelector('.round.yes').onclick = () => decide(true);
   root.querySelector('.round.no').onclick = () => decide(false);
+  root.querySelector('.with-note')?.addEventListener('click', async () => {
+    if (busy || !queue.length) return;
+    const item = queue[0], note = await withNote.ask(item);
+    if (note !== null && queue[0] === item) decide(true, undefined, { note });
+  });
   mountDeck.keyHandler = (e) => {
     if (e.target.matches('input, textarea, select') || document.querySelector('.overlay, .sheet')) return;
     if (e.key === 'ArrowRight') decide(true);
@@ -650,8 +658,8 @@ function mountPile(el, { items, renderCard, label, onChange, onDelete, yesLabel,
           <span class="label ${cls}">${esc(text)}</span>
           ${renderCard(it)}
           <div class="pile-actions">
-            ${onDelete ? '<button type="button" class="btn danger small" data-delete>Delete</button>' : ''}
-            <button type="button" class="btn ghost small" data-flip>Change to ${esc(it.yes ? noLabel : yesLabel)}</button>
+            ${onDelete ? '<button type="button" class="btn small" data-delete>Delete</button>' : ''}
+            <button type="button" class="btn small" data-flip>Change to ${esc(it.yes ? noLabel : yesLabel)}</button>
           </div>
         </div>`;
       }).join('')}</div>`;
@@ -698,7 +706,7 @@ function shell(content) {
   app.innerHTML = `
     <header class="top">
       <a class="logo board wide" href="/about" title="About Bored">Bored?</a>
-      <p class="alpha-note"><span class="alpha-tag">Alpha</span> Bored is new and still changing.
+      <p class="alpha-note"><em>Alpha:</em> Bored is new and still changing.
         <button type="button" class="link" id="feedbackLink" ${state.tab === 'feedback' ? 'aria-current="page"' : ''}>Share what you think</button></p>
       <h1 class="page-title">${esc(title)}</h1>
     </header>
@@ -759,7 +767,7 @@ async function viewFeedback(v) {
   if (feedbackPage?.guid !== state.me.guid) {
     const el = document.createElement('div');
     const page = mountFeedback(el, {
-      buttonClass: 'btn ghost small', primaryClass: 'btn', author: feedbackAuthor,
+      buttonClass: 'btn ghost small', primaryClass: 'btn', actionClass: 'btn small', author: feedbackAuthor,
       intro: isDemo()
         ? "Ideas, problems, or questions? In this demo only you and the developers can see what you post here. Tap a post to open its chat. Please don't include anything personal."
         : "Ideas, problems, or questions? Everyone signed in can read what's posted here and see your profile icon, and people you're connected with see the name they gave you. It isn't encrypted, so please don't include anything personal. Tap a post to open its chat, where anyone can reply.",
@@ -849,7 +857,7 @@ function mailDestination(view) {
   if (invites.length && (!newest || inviteAt >= newest.r.updatedAt)) return { tab: 'confirm' };
   if (!newest) return { tab: 'discover' };
   const { r, host } = newest;
-  if (['accepted', 'attended', 'withdrawn'].includes(r.status)) return { tab: 'plans', chat: `m:${r.id}` };
+  if (['accepted', 'attended', 'withdrawn', 'called-off'].includes(r.status)) return { tab: 'plans', chat: `m:${r.id}` };
   if (r.status === 'waitlisted') return { tab: 'plans' };
   if (host && r.status === 'pending') return { tab: 'confirm' };
   return { tab: 'discover' };
@@ -890,8 +898,8 @@ async function drawPushSettings(el) {
         your browser's site settings.</p>
     </details>
     ${canToggle ? `<div class="two">
-      <button type="button" class="btn ${on ? 'ghost' : ''}" data-push-toggle>${on ? 'Turn off' : 'Turn on notifications'}</button>
-      ${on ? '<button type="button" class="btn ghost" data-push-test>Send a test</button>' : ''}</div>` : ''}`;
+      <button type="button" class="btn" data-push-toggle>${on ? 'Turn off' : 'Turn on notifications'}</button>
+      ${on ? '<button type="button" class="btn" data-push-test>Send a test</button>' : ''}</div>` : ''}`;
   el.querySelector('[data-push-toggle]')?.addEventListener('click', async (e) => {
     e.target.disabled = true;
     try { if (on) { await turnOffPush(); toast('Notifications off for this device'); } else { await turnOnPush(); toast('Notifications on'); } }
@@ -926,7 +934,7 @@ function viewAccountId(v) {
         passkey or a username and password, for every 6j0.org app. New here? You can create one on the next screen.
         Nobody sees a name for you unless they've connected with you, and then only the nickname <em>they</em> chose.
         Your contacts and chats are encrypted with a key only you can unlock.</div>
-      ${unlocking ? `<button class="btn danger" id="logout">Sign out</button>` : ''}
+      ${unlocking ? `<button class="btn" id="logout">Sign out</button>` : ''}
       ${ABOUT_LINKS}
     </div>`;
   v.querySelector('#idSignIn').onclick = async () => {
@@ -947,13 +955,13 @@ async function viewAccount(v) {
            Join something fun, or host your own.`}</p>
       ${unlocking ? `<button class="btn" id="signIn">Unlock with passkey</button>` : `
         <button class="btn" id="signIn">Sign in with passkey</button>
-        <button class="btn ghost" id="create" ${support === false ? 'disabled' : ''}>Create an account</button>`}
+        <button class="btn" id="create" ${support === false ? 'disabled' : ''}>Create an account</button>`}
       <div class="error" id="authErr"></div>
       <div class="notice ${support === false ? 'warn' : ''}" id="authNote">${support === false ? UPGRADE_ADVICE : `
         <b>No usernames, passwords, or email.</b> You get an anonymous account protected by a passkey.
         Nobody sees a name for you unless they've connected with you, and then only the nickname <em>they</em> chose.
         <br><br>${PASSKEY_ADVICE}`}</div>
-      ${unlocking ? `<button class="btn danger" id="logout">Sign out</button>` : ''}
+      ${unlocking ? `<button class="btn" id="logout">Sign out</button>` : ''}
       ${ABOUT_LINKS}
     </div>`;
   const err = v.querySelector('#authErr'), note = v.querySelector('#authNote');
@@ -1012,6 +1020,7 @@ async function startDemo() {
   const res = await createDemoAccount(api);
   await refreshMe();
   await vault.load(api);
+  await vault.update(api, (d) => { d.profile = { ...d.profile, name: 'Demolition Man' }; }); // the demo visitor's name
   await addContacts(Object.keys(res.names || {}), res.names);
   await ensureKeys(api);
   await seedDemo().catch(err => console.warn('demo seed', err));
@@ -1050,7 +1059,6 @@ function eventCard(t, { who = null, mine = false } = {}) {
         ${whereHtml(t) ? fact('Where', whereHtml(t)) : ''}
         ${fact('Cost', esc(costLabel(t.cost_amount, t.cost_currency)))}
         ${fact('Max attendees', attendeesLabel(t.max_attendees))}
-        ${fact('Who can see it', t.visibility !== 'private' ? 'Public' : mine ? 'Private: the contacts you picked' : 'Private: the host shared it with you')}
         ${t.tags.length ? fact('Tags', t.tags.map(x => '#' + esc(x)).join(' ')) : ''}
       </dl>
       ${t.details ? `<div class="details">${esc(t.details)}</div>` : ''}
@@ -1265,20 +1273,51 @@ async function viewDiscover(v) {
   keepFresh(host, () => load({ soft: true }));
 }
 
+// Asking to join with a note: a sheet with the note, and Send request (which says yes, like swiping right) or Cancel.
+// Resolves to the note, or null if cancelled. The note is sealed to the host with the request, so only they read it.
+const MAX_JOIN_NOTE = 280; // what requestJoin keeps (public/mail.js)
+function askJoinNote(t) {
+  return new Promise((resolve) => {
+    const sheet = document.createElement('div');
+    sheet.className = 'sheet';
+    sheet.innerHTML = `
+      <form class="stack panel">
+        <h2>Ask to join</h2>
+        <p><b>${esc(t.title)}</b></p>
+        <label>A note for the host (optional)
+          <textarea name="note" rows="3" maxlength="${MAX_JOIN_NOTE}" placeholder="e.g. I have a spare headlamp if anyone needs one."></textarea></label>
+        <p class="note"><span class="note-count">0 / ${MAX_JOIN_NOTE}</span> · Only the host can read it, with your request.</p>
+        <div class="two">
+          <button type="button" class="btn ghost" data-cancel>Cancel</button>
+          <button class="btn">Send request</button>
+        </div>
+      </form>`;
+    document.body.appendChild(sheet);
+    const box = sheet.querySelector('textarea'), count = sheet.querySelector('.note-count');
+    const done = (v) => { sheet.remove(); resolve(v); };
+    box.addEventListener('input', () => { count.textContent = `${box.value.length} / ${MAX_JOIN_NOTE}`; });
+    sheet.querySelector('[data-cancel]').onclick = () => done(null);
+    sheet.onclick = (e) => { if (e.target === sheet) done(null); };
+    sheet.querySelector('form').onsubmit = (e) => { e.preventDefault(); done(box.value.trim()); };
+    box.focus();
+  });
+}
 // changed: called after a swipe or an undo is saved (Discover redraws the discard pile).
 function deckOptions(events, changed, filters) {
   return {
     items: events,
     renderCard: eventCard,
     yesLabel: "I'm in", noLabel: 'Pass',
-    onSwipe: async (t, yes) => {
+    // Saying yes can carry a note for the host (shown with the request in their Confirm tab). Signed in only.
+    withNote: state.me ? { label: 'Add a note for the host', ask: askJoinNote } : null,
+    onSwipe: async (t, yes, { note = '' } = {}) => {
       if (!state.me) {
         // Guests can browse; passing is just local, but saying yes needs an account.
         if (yes) { toast('Sign in or create an account to say yes.'); go('account'); return KEEP_CARD; }
         return;
       }
       if (!yes) { await pass(t.pid); return changed(); }
-      t.ch = await requestJoin(t.post);
+      t.ch = await requestJoin(t.post, note);
       changed();
       toast(t.status === 'full'
         ? `Asked to join the waitlist for “${t.title}”. If the host says yes, you'll get the next open spot.`
@@ -1289,11 +1328,11 @@ function deckOptions(events, changed, filters) {
       ? `<div class="empty"><h3>No matches for these filters</h3>
           <p>${[filters.near && esc(filters.near), filters.date && esc(DATE_FILTERS[filters.date]), filters.tags.length && filters.tags.map(t => '#' + esc(t)).join(' or '), filters.costs.length && filters.costs.map(c => esc(COST_FILTERS[c])).join(' or ')].filter(Boolean).join(' · ')}</p>
           <p>Nothing open matches right now. Try other filters, or see everything.</p>
-          <button class="btn" id="clearFilters">Show all posts</button></div>`
+          <button class="btn ghost" id="clearFilters">Show all posts</button></div>`
       : `<div class="empty"><h3>Still bored?</h3>
           ${state.me
             ? `<p>Nothing new right now. Check back later, or post something you think people would enjoy.</p>
-          <button class="btn" id="goPost">Post something</button>`
+          <button class="btn ghost" id="goPost">Post something</button>`
             : `<p>Nothing new right now. Check back later.</p>`}</div>`,
   };
 }
@@ -1494,7 +1533,7 @@ function showMatch(otherGuid, title, matchId) {
     <div class="pair">${avatar(state.me.guid)}${avatar(otherGuid)}</div>
     <p>You and <b>${esc(known ? displayName(otherGuid) : 'someone new')}</b> are teaming up on<br><b>${esc(title)}</b></p>
     ${known ? '' : `<p style="opacity:.8;font-size:.9rem">Want to stay in touch afterwards? Invite them to connect from the chat. You'll only be contacts if you both say yes.</p>`}
-    <button class="btn" id="mChat">Send a message</button>
+    <button class="btn ghost" id="mChat">Send a message</button>
     <button class="btn ghost" id="mKeep">Keep swiping</button>`;
   document.body.appendChild(o);
   o.querySelector('#mKeep').onclick = () => { o.remove(); shellRefreshBadges(); };
@@ -1523,8 +1562,8 @@ function mailMatches(view) {
       last_message: last?.text || '' };
   };
   return [
-    ...(view?.requests || []).filter(r => r.post && ['accepted', 'attended', 'withdrawn', 'waitlisted'].includes(r.status)).map(r => row(r, 'attendee', r.post)),
-    ...(view?.hosting || []).flatMap(h => h.requests.filter(r => ['accepted', 'attended', 'withdrawn'].includes(r.status)).map(r => row(r, 'host', h.post))),
+    ...(view?.requests || []).filter(r => r.post && ['accepted', 'attended', 'withdrawn', 'called-off', 'waitlisted'].includes(r.status)).map(r => row(r, 'attendee', r.post)),
+    ...(view?.hosting || []).flatMap(h => h.requests.filter(r => ['accepted', 'attended', 'withdrawn', 'called-off'].includes(r.status)).map(r => row(r, 'host', h.post))),
   ].sort((a, b) => b.state.updatedAt - a.state.updatedAt);
 }
 const nameOrSomeone = (guid) => displayName(guid) || 'Someone';
@@ -1541,27 +1580,32 @@ async function viewPlans(v) {
   if (!matches.length) {
     v.innerHTML = `<div class="empty"><h3>No plans yet</h3>
       <p>Swipe right on something you'd like to join. When the host swipes yes on you, you'll match.</p>
-      <button class="btn" id="goD">Find something to do</button></div>`;
+      <button class="btn ghost" id="goD">Find something to do</button></div>`;
     v.querySelector('#goD').onclick = () => go('discover');
     return;
   }
+  // Only past plans can be deleted (for a plan that's still on, "Can't make it" first moves it here). Deleting just
+  // hides it from me, on all my devices; nobody is told.
+  const deleted = new Set(vault.data.deletedPlans || []);
   const active = matches.filter(m => m.status === 'accepted'), waiting = matches.filter(m => m.status === 'waitlisted');
-  const past = matches.filter(m => !['accepted', 'waitlisted'].includes(m.status));
+  const past = matches.filter(m => !['accepted', 'waitlisted'].includes(m.status) && !deleted.has(m.ch));
   // Full cards, like Discover's, each labelled with where the plan stands and who's in it. A card opens its chat.
   const label = (m) =>
     m.status === 'attended' ? ['done', 'Done']
     : m.status === 'withdrawn' ? ['done', 'Dropped out']
+    : m.status === 'called-off' ? ['pass', 'Cancelled']
     : m.reconfirm ? ['warn', m.role === 'attendee' ? 'Re-confirm?' : 'Awaiting OK']
     : ['in', "It's on"];
   const who = (m) => `${personAvatar(m.other)}
     <div><b>${m.role === 'attendee' ? `Hosted by ${esc(nameOrSomeone(m.other))}` : `${esc(nameOrSomeone(m.other))} is going`}</b>
       ${m.last_message && !isBlocked({ guid: m.other }) ? `<small>${esc(clean(m.last_message))}</small>` : ''}</div>`;
-  const card = (m) => {
+  const card = (m, { deletable = false } = {}) => {
     const [cls, text] = label(m);
     return `
     <div class="card flat plan-card" role="button" tabindex="0" data-id="${m.id}" aria-label="Chat about ${esc(m.title)}">
       <span class="label ${cls}">${esc(text)}</span>
       ${eventCard(mailCard(m.post), { who: who(m), mine: m.role === 'host' })}
+      ${deletable ? `<div class="card-actions"><button class="btn small" data-delete-plan="${esc(m.ch)}">Delete</button></div>` : ''}
     </div>`;
   };
   // Waitlist cards have no chat yet: that opens when a spot does and they're matched.
@@ -1569,7 +1613,7 @@ async function viewPlans(v) {
     <div class="card flat plan-card waiting">
       <span class="label warn">${m.waitlist_pos ? `Waitlist #${m.waitlist_pos}` : 'Waitlist'}</span>
       ${eventCard(mailCard(m.post), { who: `${personAvatar(m.other)}<div>${contactName(m.other) ? `<b>Hosted by ${esc(contactName(m.other))}</b>` : ''}</div>` })}
-      <div class="card-actions"><button class="btn ghost small" data-leave-ch="${esc(m.ch)}">Leave</button></div>
+      <div class="card-actions"><button class="btn small" data-leave-ch="${esc(m.ch)}">Leave</button></div>
     </div>`;
   v.innerHTML = `
     ${active.length || past.length ? `<p class="hint plans-hint">Click a card to chat. In a chat, tap one of your messages to edit it.</p>` : ''}
@@ -1577,7 +1621,7 @@ async function viewPlans(v) {
     ${waiting.length ? `<div class="section-title">Waitlist</div>
       <p class="note">These posts are full. You'll be matched automatically, in order, when a spot opens.</p>
       <div class="list">${waiting.map(waitCard).join('')}</div>` : ''}
-    ${past.length ? `<div class="section-title">Past</div><div class="list">${past.map(card).join('')}</div>` : ''}`;
+    ${past.length ? `<div class="section-title">Past</div><div class="list">${past.map(m => card(m, { deletable: true })).join('')}</div>` : ''}`;
   const all = [...active, ...waiting, ...past];
   v.onclick = (e) => {
     const cal = e.target.closest('[data-ics]');
@@ -1590,6 +1634,12 @@ async function viewPlans(v) {
     const c = e.target.closest?.('.plan-card[data-id]');
     if (c && e.target === c && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); state.chat = c.dataset.id; render(); }
   };
+  v.querySelectorAll('[data-delete-plan]').forEach(b => b.onclick = async () => {
+    if (!confirm('Delete this plan from Plans? Only you stop seeing it; nobody is told.')) return;
+    const ch = b.dataset.deletePlan;
+    try { await vault.update(api, (d) => { d.deletedPlans = [...new Set([...(d.deletedPlans || []), ch])]; }); toast('Deleted'); render(); }
+    catch (err) { toast(err.message); }
+  });
   v.querySelectorAll('[data-leave-ch]').forEach(b => b.onclick = async () => {
     if (!confirm('Leave this waitlist?')) return;
     try { await sendOn(b.dataset.leaveCh, { type: 'unjoin' }); toast('Left the waitlist'); render(); }
@@ -1605,7 +1655,18 @@ const mailSystemLine = (t, m) => ({
   reconfirmed: 'Re-confirmed: still in!',
   'reconfirm-no': "Can't make it after the change, so dropped out.",
   left: "Can't make it anymore, so dropped out.",
+  cancelled: m.role === 'host' ? 'You cancelled this plan.' : 'The host cancelled this plan.',
 }[t.event]);
+
+// Cancel one of my posts: everyone who asked to join, is in, or is waitlisted gets a cancel on their channel (so their
+// Plans say it's cancelled), then the post is marked cancelled (so it leaves everyone's Discover).
+async function cancelPost(pid) {
+  const h = mailView()?.hosting.find(x => x.post.pid === pid);
+  for (const r of h?.requests || []) {
+    if (['pending', 'waitlisted', 'accepted'].includes(r.status)) await sendOn(r.id, { type: 'cancel' }).catch(err => console.warn('cancel', err));
+  }
+  await setPostStatus(pid, 'cancelled');
+}
 
 async function viewChat(v, id) {
   await loadMail().catch(() => {});
@@ -1625,11 +1686,12 @@ async function viewChat(v, id) {
           <b>${esc(name)}</b>
           <div class="sub" style="color:var(--muted);font-size:.85rem">${esc(m.title)}${m.when_text ? ` · <button type="button" class="link cal-link" id="addCal" title="Add to your calendar">${esc(whenLabel(m.when_text, m.end_text))}</button>` : ''}${whereHtml(m) ? ' · ' + whereHtml(m) : ''}</div>
         </div>
-        ${m.role === 'host' && m.status === 'accepted' ? `<button class="btn small" id="happened">Mark as done</button>` : ''}
-        ${m.role === 'attendee' && m.status === 'accepted' && !m.reconfirm ? `<button class="btn ghost small" id="leave">Can't make it</button>` : ''}
+        ${m.role === 'host' && m.status === 'accepted' ? `<button class="btn small" id="happened">Mark as done</button>
+          <button class="btn small" id="cancelPlan">Cancel plan</button>` : ''}
+        ${m.role === 'attendee' && m.status === 'accepted' && !m.reconfirm ? `<button class="btn small" id="leave">Can't make it</button>` : ''}
       </div>
       ${isBlocked({ guid: m.other }) ? `<div class="notice">You blocked ${esc(name)}, so their messages are hidden.
-        <button type="button" class="link" id="unblockChat">Unblock</button></div>`
+        <button type="button" class="btn small" id="unblockChat">Unblock</button></div>`
       : canConnect ? `<div class="notice connect-note">You're not connected.
         <button type="button" class="link" id="connectChat">Invite them to connect</button></div>` : ''}
       <div class="msgs" id="msgs"></div>
@@ -1638,7 +1700,7 @@ async function viewChat(v, id) {
           <div><b>${esc(name)} changed this post.</b> Can you still make it?</div>
           <div class="btns">
             <button class="btn small" id="stillIn">I'm still in</button>
-            <button class="btn danger small" id="cantGo">Can't make it</button>
+            <button class="btn small" id="cantGo">Can't make it</button>
           </div>
         </div>` : ''}
       ${m.status === 'accepted' ? `
@@ -1738,6 +1800,14 @@ async function viewChat(v, id) {
   v.querySelector('#happened')?.addEventListener('click', () => {
     if (confirm(`Mark “${m.title}” as done with ${name}?`)) act({ type: 'happened' }, `Glad it went well! Thanks, ${name}.`);
   });
+  // Cancelling the plan cancels the whole post, for everyone in it, not just this chat.
+  v.querySelector('#cancelPlan')?.addEventListener('click', async () => {
+    const h = mailView()?.hosting.find(x => x.post.pid === m.post.pid);
+    const others = (h?.requests || []).filter(r => ['pending', 'waitlisted', 'accepted'].includes(r.status)).length;
+    if (!confirm(`Cancel “${m.title}”? ${others > 1 ? `Everyone who asked to join (${others} people) will be told` : `${name} will be told`}, and the post is removed.`)) return;
+    try { await cancelPost(m.post.pid); toast('Cancelled. Everyone in it has been told.'); shellRefreshBadges(); render(); }
+    catch (err) { toast(err.message); }
+  });
 }
 
 // Unique ids for <label for=…>, since a post form and an edit sheet can be open at once.
@@ -1784,13 +1854,21 @@ function eventFormFields(t = {}) {
 // choices follow the date picked (see public/when.js).
 const repeatOptionsHtml = (start, selected) => repeatOptions(start)
   .map(o => `<option value="${o.rule}" data-kind="${o.kind}" ${o.kind === selected ? 'selected' : ''}>${esc(o.label)}</option>`).join('');
+// Quick picks above the start and end times, like filters: each fills in its field (see mountWhenFields). Starts
+// are from now; ends are from the start, so they need one first.
+const START_PICKS = [['now', 'Now'], ['30m', 'In 30 min'], ['1h', 'In an hour'], ['afternoon', 'This afternoon'], ['evening', 'This evening']];
+const END_PICKS = [['30m', '30 minutes'], ['1h', '1 hour'], ['2h', '2 hours'], ['4h', '4 hours'], ['sunset', 'Sunset'], ['midnight', 'Midnight']];
+const quickPicks = (which, picks) => `<div class="quick-picks" role="group" aria-label="Quick picks">${picks.map(([k, label]) =>
+  `<button type="button" class="chip filter" data-pick-${which}="${k}">${label}</button>`).join('')}</div>`;
 function whenInputs(v = '', end = '') {
-  const w = parseWhen(v), e = parseEnd(v, end);
+  const w = parseWhen(v), e = parseEnd(v, end), startId = fieldId('start'), endId = fieldId('end');
   return `
-      <label>Starts
-        <input name="when_text" type="datetime-local" value="${esc(w?.start ?? '')}"></label>
-      <label>Ends (optional)
-        <input name="end_text" type="datetime-local" value="${esc(e?.end ?? '')}" min="${esc(w?.start ?? '')}"></label>
+      <div class="time-field"><label for="${startId}">Starts</label>
+        ${quickPicks('start', START_PICKS)}
+        <input id="${startId}" name="when_text" type="datetime-local" value="${esc(w?.start ?? '')}"></div>
+      <div class="time-field"><label for="${endId}">Ends</label>
+        ${quickPicks('end', END_PICKS)}
+        <input id="${endId}" name="end_text" type="datetime-local" value="${esc(e?.end ?? '')}" min="${esc(w?.start ?? '')}"></div>
       <label>Repeats
         <select name="when_repeat" ${w ? '' : 'disabled'}>${repeatOptionsHtml(w?.start, w?.repeat.kind)}</select></label>`;
 }
@@ -1814,6 +1892,59 @@ function mountWhenFields(form) {
     sel.innerHTML = repeatOptionsHtml(input.value, keep);
     sel.disabled = !input.value;
   });
+  mountTimePicks(form, input, endIn);
+}
+
+// A Date as a datetime-local value ("YYYY-MM-DDTHH:MM", this device's wall clock), and back.
+const toWall = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+const fromWall = (s) => (s ? new Date(s) : null); // datetime-local values are read as local time
+// Up to the next 5 minutes, so "in 30 min" reads as 7:35, not 7:33.
+const roundUp5 = (d) => { const r = new Date(d); r.setSeconds(0, 0); r.setMinutes(Math.ceil(r.getMinutes() / 5) * 5); return r; };
+const atToday = (h) => { const d = new Date(); d.setHours(h, 0, 0, 0); return d; };
+// What a quick pick means right now: a Date, or a reason it can't be used ({ off: 'why' }).
+function startPick(k, now = new Date()) {
+  if (k === 'now') { const d = new Date(now); d.setSeconds(0, 0); return d; }
+  if (k === '30m') return roundUp5(new Date(+now + 30 * 60e3));
+  if (k === '1h') return roundUp5(new Date(+now + 60 * 60e3));
+  const d = atToday(k === 'afternoon' ? 14 : 18);
+  return d > now ? d : { off: `${k === 'afternoon' ? '2' : '6'}:00 PM has already passed today` };
+}
+function endPick(k, start, loc) {
+  if (!start) return { off: 'Pick a start time first' };
+  const mins = { '30m': 30, '1h': 60, '2h': 120, '4h': 240 }[k];
+  if (mins) return new Date(+start + mins * 60e3);
+  if (k === 'midnight') { const d = new Date(start); d.setHours(24, 0, 0, 0); return d; }
+  // Sunset where the post is, on the day it starts.
+  const ll = parseLatLon(loc);
+  if (!ll) return { off: 'Pick a place first, so sunset can be worked out' };
+  const at = sunsetAt(toWall(start).slice(0, 10), ...ll);
+  if (at == null) return { off: "The sun doesn't set there that day" };
+  return at > +start ? new Date(at) : { off: 'Sunset is before it starts' };
+}
+// The quick picks: a pick fills in its field and is shown as picked until the field changes some other way. Picks
+// that can't be used right now (a start time that's passed, an end before there's a start) are disabled, with why.
+function mountTimePicks(form, startIn, endIn) {
+  const startBtns = [...form.querySelectorAll('[data-pick-start]')], endBtns = [...form.querySelectorAll('[data-pick-end]')];
+  const locIn = form.querySelector('input[name=location]');
+  const set = (input, value, btns, b) => {
+    input.value = value;
+    input.dispatchEvent(new Event('input', { bubbles: true })); // the start's listener moves the end and the repeats
+    btns.forEach(x => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', String(x === b)); });
+    refresh();
+  };
+  function refresh() {
+    for (const b of startBtns) { const r = startPick(b.dataset.pickStart); b.disabled = Boolean(r.off); b.title = r.off || toWall(r).replace('T', ' '); }
+    for (const b of endBtns) { const r = endPick(b.dataset.pickEnd, fromWall(startIn.value), locIn?.value); b.disabled = Boolean(r.off); b.title = r.off || ''; }
+  }
+  startBtns.forEach(b => b.onclick = () => { const r = startPick(b.dataset.pickStart); if (!r.off) set(startIn, toWall(r), startBtns, b); });
+  endBtns.forEach(b => b.onclick = () => { const r = endPick(b.dataset.pickEnd, fromWall(startIn.value), locIn?.value); if (!r.off) set(endIn, toWall(r), endBtns, b); });
+  // Typing a time yourself unpicks; the end picks also depend on the start and the place.
+  startIn.addEventListener('change', () => { startBtns.forEach(x => { x.classList.remove('on'); x.removeAttribute('aria-pressed'); }); refresh(); });
+  endIn?.addEventListener('change', () => endBtns.forEach(x => { x.classList.remove('on'); x.removeAttribute('aria-pressed'); }));
+  startIn.addEventListener('input', refresh);
+  // "Now" moves on, and the place may have been picked meanwhile: check again whenever the time fields are used.
+  form.querySelectorAll('.time-field').forEach(f => f.addEventListener('focusin', refresh));
+  refresh();
 }
 
 // While you type a title or details, say if they look like they have contact info or ID numbers (which the server
@@ -1905,6 +2036,15 @@ function mountAudience(form) {
   if (!box) return;
   const pick = JSON.parse(box.dataset.audience);
   const radios = form.querySelectorAll('input[name=visibility]');
+  // A new post's button says who'll see it: "Post it publicly", or "Post it to 3 people" (disabled until someone's
+  // picked, since a private post has to go to someone).
+  const postBtn = form.querySelector('[data-post-button]');
+  const label = () => {
+    if (!postBtn) return;
+    const n = audienceGuids(pick).length, isPublic = form.querySelector('input[name=visibility]:checked')?.value === 'public';
+    postBtn.textContent = isPublic ? 'Post it publicly' : n ? `Post it to ${n === 1 ? '1 person' : `${n} people`}` : 'Pick who can see it';
+    postBtn.disabled = !isPublic && !n;
+  };
   const draw = () => {
     const groups = contactGroups();
     const contacts = Object.keys(vault.data.contacts).sort((a, b) => displayName(a).localeCompare(displayName(b)));
@@ -1912,14 +2052,15 @@ function mountAudience(form) {
     const chip = (kind, value, label, on) =>
       `<button type="button" class="chip filter ${on ? 'on' : ''}" data-${kind}="${esc(value)}" aria-pressed="${on}">${label}</button>`;
     box.innerHTML = !contacts.length
-      ? `<p class="note">You don't have any contacts yet; people are added when you match with them. Until then only you
-          can see a private post. Make it public to find people.</p>`
+      ? `<p class="note">You don't have any contacts yet: people become contacts when you both say yes to an invitation
+          to connect. Until then, make it public to find people.</p>`
       : `${groups.length ? `<div class="filter-row stacked" role="group" aria-label="Groups"><span class="label">Groups</span>
           ${groups.map(([g, count]) => chip('group', g, `#${esc(g)} <span class="n">${count}</span>`, pick.groups.includes(g))).join('')}</div>` : ''}
         <div class="filter-row stacked" role="group" aria-label="Contacts"><span class="label">People</span>
           ${contacts.map(g => chip('contact', g, esc(displayName(g)), pick.contacts.includes(g))).join('')}</div>
-        <p class="note">${n ? `Only you and ${n === 1 ? '1 person' : `${n} people`} can see this.` : 'Only you can see this until you pick someone.'}
+        <p class="note">${n ? `Only you and ${n === 1 ? '1 person' : `${n} people`} can see this.` : 'Pick at least one person or group to post it.'}
           ${pick.groups.length ? 'People you add to these groups later will see it too.' : ''}</p>`;
+    label();
   };
   box.addEventListener('click', (e) => {
     const b = e.target.closest('button');
@@ -1929,7 +2070,7 @@ function mountAudience(form) {
     if (i >= 0) list.splice(i, 1); else list.push(v);
     draw();
   });
-  radios.forEach(r => r.addEventListener('change', () => { box.hidden = form.querySelector('input[name=visibility]:checked').value === 'public'; }));
+  radios.forEach(r => r.addEventListener('change', () => { box.hidden = form.querySelector('input[name=visibility]:checked').value === 'public'; label(); }));
   form.audience = () => (form.querySelector('input[name=visibility]:checked')?.value === 'public' ? null : pick);
   draw();
 }
@@ -1938,6 +2079,10 @@ function mountAudience(form) {
 // their audience, public ones signed. id is "m:<pid>" when editing.
 async function saveEvent(form, id) {
   const pick = form.audience?.() ?? null;
+  // A private post has to go to someone: nobody picked (or only blocked people) can't be posted.
+  if (pick && !audienceGuids(pick).length) throw new Error('Pick at least one person or group to share this private post with.');
+  // A new public post asks first: anyone can see it, and it can't be made private later.
+  if (!pick && !id && !confirm("Post this publicly? Anyone can see it, including people who aren't signed in, and it stays public.")) throw new Error('Not posted.');
   const pid = id ? String(id).replace(/^m:/, '') : null;
   const h = pid && mailView()?.hosting.find(x => x.post.pid === pid);
   const fields = await postFields(formData(form), { matched: h ? h.counts.accepted + h.counts.attended : 0 });
@@ -2016,7 +2161,7 @@ function openPostSheet(t = {}) {
       ${editing ? '' : `<p class="note">Tweak anything you like, then post it.</p>`}
       <div class="two">
         <button type="button" class="btn ghost" id="cancelSheet">Cancel</button>
-        <button class="btn">${editing ? 'Save changes' : 'Post it'}</button>
+        <button class="btn" ${editing ? '' : 'data-post-button'}>${editing ? 'Save changes' : 'Post it'}</button>
       </div>
     </form>`;
   document.body.appendChild(sheet);
@@ -2058,9 +2203,16 @@ function rotatePostIdeas(el) {
   const next = () => { i = (i + 1) % POST_IDEAS.length; show(); };
   const prev = () => { i = (i - 1 + POST_IDEAS.length) % POST_IDEAS.length; show(); };
   show();
+  // An idea fills in the Post form under it (asking first if you've already started one).
   el.querySelector('.idea-open').onclick = () => {
+    const form = document.getElementById('newEvent');
+    if (!form) return;
+    const started = ['title', 'details'].some(n => form.elements[n]?.value.trim());
+    if (started && !confirm('Replace what you\'ve written with this idea?')) return;
     const { when, ...t } = POST_IDEAS[i].template;
-    openPostSheet({ ...t, when_text: when ? nextAt(...when) : '' });
+    fillPostForm(form, { ...t, when_text: when ? nextAt(...when) : '' });
+    form.elements.title?.focus();
+    toast('Tweak anything you like, then post it.');
   };
   el.querySelector('.idea-next').onclick = next;
   el.querySelector('.idea-prev').onclick = prev;
@@ -2071,9 +2223,22 @@ function rotatePostIdeas(el) {
   }, POST_IDEA_MS);
 }
 
+// The Post tab's form, drawn (again) with a post's fields filled in: empty, or from a post idea.
+function fillPostForm(form, t = {}) {
+  form.innerHTML = `${eventFormFields(t)}<button class="btn" data-post-button>Post it</button>`;
+  form.querySelectorAll('.tag-editor').forEach(el => mountTagEditor(el));
+  mountAudience(form);
+  mountLocationField(form);
+  mountWhenFields(form);
+  mountPiiCheck(form);
+  mountCostFields(form);
+}
+
 async function viewPost(v) {
   const mail = await loadMail().catch(() => mailView());
-  const mine = (mail?.hosting || []).filter(h => h.post.status !== 'cancelled').map(h => ({
+  // Removed posts are cancelled (everyone's told); past ones I deleted are just hidden from me (deletedPosts).
+  const deletedPosts = new Set(vault.data.deletedPosts || []);
+  const mine = (mail?.hosting || []).filter(h => h.post.status !== 'cancelled' && !deletedPosts.has(h.post.pid)).map(h => ({
     ...h.post, id: `m:${h.post.pid}`, visibility: h.post.kind, tags: h.post.tags || [], status: h.status,
     pending: h.counts.pending, matched: h.counts.accepted + h.counts.attended, waitlisted: h.counts.waitlisted, awaiting: h.counts.reconfirm,
     viewers: vault.data.posts?.[h.post.pid]?.sharedWith.length || 0, audience: vault.data.posts?.[h.post.pid]?.audience,
@@ -2094,36 +2259,29 @@ async function viewPost(v) {
         <div class="card flat post-card" data-id="${t.id}">
           <span class="label ${cls}">${esc(text)}</span>
           ${eventCard(mailCard(t), { who: who(t), mine: true })}
-          ${t.status !== 'past' ? `<div class="card-actions">
+          <div class="card-actions">${t.status !== 'past' ? `
             <button class="btn ghost small" data-edit="${t.id}">Edit</button>
-            <button class="btn danger small" data-del="${t.id}">Remove</button>
-          </div>` : ''}
+            <button class="btn small" data-del="${t.id}">Remove</button>`
+            : `<button class="btn small" data-delete-post="${esc(t.pid)}">Delete</button>`}
+          </div>
         </div>`;
   };
   v.innerHTML = `
     <div class="section-title">Post something</div>
     <div class="idea" id="postIdea">
       <button type="button" class="idea-prev" aria-label="Previous idea" title="Previous idea">‹</button>
-      <button type="button" class="idea-open" title="Start a post from this idea">
+      <button type="button" class="idea-open" title="Fill in the form with this idea">
         <span class="text" aria-live="polite"></span>
       </button>
       <button type="button" class="idea-next" aria-label="Next idea" title="Next idea">›</button>
     </div>
-    <form class="stack post-form" id="newEvent">
-      ${eventFormFields()}
-      <button class="btn">Post it</button>
-    </form>
+    <form class="stack post-form" id="newEvent"></form>
     <div class="section-title">Your posts</div>
     <div class="list">
       ${events.length ? events.map(card).join('') : `<p style="color:var(--muted)">Nothing yet. What would you like to host?</p>`}
     </div>`;
+  fillPostForm(v.querySelector('#newEvent'));
   rotatePostIdeas(v.querySelector('#postIdea'));
-  v.querySelectorAll('.tag-editor').forEach(el => mountTagEditor(el));
-  mountAudience(v.querySelector('#newEvent'));
-  mountLocationField(v.querySelector('#newEvent'));
-  mountWhenFields(v.querySelector('#newEvent'));
-  mountPiiCheck(v.querySelector('#newEvent'));
-  mountCostFields(v.querySelector('#newEvent'));
   v.querySelector('#newEvent').onsubmit = async (e) => {
     e.preventDefault();
     try { const r = await saveEvent(e.target); toast(postedMessage(e.target, r)); render(); }
@@ -2131,9 +2289,15 @@ async function viewPost(v) {
   };
   v.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openPostSheet(events.find(t => String(t.id) === b.dataset.edit)));
   v.querySelectorAll('.post-card [data-ics]').forEach(b => b.onclick = () => addToCalendar(events.find(t => String(t.id) === b.dataset.ics)));
+  v.querySelectorAll('[data-delete-post]').forEach(b => b.onclick = async () => {
+    if (!confirm('Delete this past post from Posts? Only you stop seeing it.')) return;
+    const pid = b.dataset.deletePost;
+    try { await vault.update(api, (d) => { d.deletedPosts = [...new Set([...(d.deletedPosts || []), pid])]; }); toast('Deleted'); render(); }
+    catch (err) { toast(err.message); }
+  });
   v.querySelectorAll('[data-del]').forEach(b => b.onclick = async () => {
-    if (!confirm('Remove this post?')) return;
-    try { await setPostStatus(b.dataset.del.slice(2), 'cancelled'); } catch (err) { return toast(err.message); }
+    if (!confirm('Remove this post? Anyone who asked to join or is in will be told it\'s cancelled.')) return;
+    try { await cancelPost(b.dataset.del.slice(2)); } catch (err) { return toast(err.message); }
     render();
   });
 }
@@ -2312,8 +2476,8 @@ function openContactSheet(guid, onSaved) {
         <button class="btn">Save</button>
       </div>
       ${isContact(guid) ? `<div class="two">
-        <button type="button" class="btn danger small" id="blockContact">${isBlocked({ guid }) ? 'Unblock' : 'Block'}</button>
-        <button type="button" class="btn danger small" id="deleteContact">Delete contact</button>
+        <button type="button" class="btn small" id="blockContact">${isBlocked({ guid }) ? 'Unblock' : 'Block'}</button>
+        <button type="button" class="btn small" id="deleteContact">Delete contact</button>
       </div>
       <p class="note">Blocking hides their posts and messages and stops sharing your private posts with them. Deleting
         takes them out of your contacts. Neither one tells them.</p>` : ''}
@@ -2358,12 +2522,12 @@ async function viewProfile(v) {
   const [passkeys, invites] = await Promise.all([idMode || isDemo() ? [] : api('/api/passkeys'), api('/api/invites'), loadMail().catch(() => {}),
     api('/api/me').then(m => { state.me = m; }, () => {})]); // fresh badges
   const me = state.me, st = mailView()?.stats || {};
-  // Badges from the server: Developer (DEVELOPER_GUIDS in server.js), and Tester once a developer has marked any of
-  // your feedback as done, with how many.
+  // Badges from the server, as cards with the stats: Tester once a developer has marked any of your feedback as done,
+  // with how many, and Developer (DEVELOPER_GUIDS in server.js).
   const tested = me.badges?.tester || 0;
   const badges = [
-    me.badges?.developer ? `<span class="me-badge" title="Builds Bored">Developer</span>` : '',
-    tested ? `<span class="me-badge" title="${tested === 1 ? '1 piece' : `${tested} pieces`} of your feedback marked done">Tester <b>${tested}</b></span>` : '',
+    tested ? `<div class="stat badge-stat" title="${tested === 1 ? '1 piece' : `${tested} pieces`} of your feedback marked done"><b>${tested}</b><span>Tester: feedback done</span></div>` : '',
+    me.badges?.developer ? `<div class="stat badge-stat" title="Builds Bored"><b class="word">Developer</b><span>builds Bored</span></div>` : '',
   ].join('');
   // Worked out here from the mail: the server doesn't know who did what with whom.
   const history = Object.fromEntries(Object.entries(mailView()?.together || {}).map(([guid, together]) => [guid, { together }]));
@@ -2384,30 +2548,15 @@ async function viewProfile(v) {
         <p class="note">This is the name you'll use to introduce yourself.</p>
       </div>
     </div>
-    ${badges ? `<div class="me-badges" aria-label="Your badges">${badges}</div>` : ''}
     <div class="stats">
       <div class="stat"><b>${st.hosted ?? 0}</b><span>events hosted</span></div>
       <div class="stat"><b>${st.attended ?? 0}</b><span>events attended</span></div>
       <div class="stat"><b>${st.helped ?? 0}</b><span>${st.helped === 1 ? 'person' : 'people'} helped</span></div>
+      ${badges}
     </div>
 
     <div class="section-title">Notifications</div>
     <div class="stack" id="pushSettings"></div>
-
-    <div class="section-title">Settings</div>
-    <fieldset class="seg-pick" id="themePick"><legend>Theme (on this device)</legend><div class="seg">
-      ${[['auto', 'Automatic'], ['light', 'Light'], ['dark', 'Dark']].map(([value, label]) =>
-        `<label><input type="radio" name="theme" value="${value}" ${(window.boredTheme?.get() || 'auto') === value ? 'checked' : ''}><span>${label}</span></label>`).join('')}
-    </div></fieldset>
-    <form class="stack" id="prefsForm">
-      <label>Distance units
-        <select name="distanceUnit">
-          <option value="km" ${useMiles() ? '' : 'selected'}>Kilometers</option>
-          <option value="mi" ${useMiles() ? 'selected' : ''}>Miles</option>
-        </select></label>
-    </form>
-
-    ${moderationHtml()}
 
     <div class="section-title">Invitations</div>
     <p class="note">Send people a link to connect. When someone opens it and asks to connect, they show up in your
@@ -2418,9 +2567,9 @@ async function viewProfile(v) {
         <div class="grow"><div class="title">${inviteOf(inv.id)?.name ? `${inviteOf(inv.id).direct ? 'Sent to a host as' : 'As'} “${esc(inviteOf(inv.id).name)}”` : `Invitation ${invites.length - i}`}</div>
           <div class="sub">Created ${fmt(inv.created_at)} · ${inv.uses === 1 ? '1 person' : `${inv.uses} people`} connected</div></div>
         <button class="btn ghost small" data-share-invite="${inv.id}">Share</button>
-        <button class="btn danger small" data-del-invite="${inv.id}">Delete</button>
+        <button class="btn small" data-del-invite="${inv.id}">Delete</button>
       </div>`).join('')}</div>` : ''}
-    <button class="btn ghost" id="newInvite">Create an invitation</button>
+    <button class="btn" id="newInvite">Create an invitation</button>
 
     <div class="section-title">Contacts</div>
     <p class="note">People you've connected with: you both said yes to an invitation. Names and tags here are yours alone: they're encrypted with your passkey, and nobody else, including the server, can read them.</p>
@@ -2436,6 +2585,17 @@ async function viewProfile(v) {
         : `<p style="color:var(--muted)">${contacts.length ? 'No contacts with those tags.' : "No contacts yet. Invite someone to connect from a plan's chat, or share an invitation above. Once you both say yes, they'll show up here."}</p>`}
     </div>
 
+    <div class="section-title">Settings</div>
+    <form class="stack" id="prefsForm">
+      <label>Distance units
+        <select name="distanceUnit">
+          <option value="km" ${useMiles() ? '' : 'selected'}>Kilometers</option>
+          <option value="mi" ${useMiles() ? 'selected' : ''}>Miles</option>
+        </select></label>
+    </form>
+
+    ${moderationHtml()}
+
     ${isDemo() ? `<div class="section-title">Demo</div>
     <div class="notice">This is a demo account, made just for this browser. It's deleted after a day, and everything
       resets when the server restarts. Start over to get a fresh account with the demo content back.</div>`
@@ -2449,11 +2609,17 @@ async function viewProfile(v) {
     <div class="list">
       ${passkeys.map((p, i) => `<div class="row">
         <div class="grow"><div class="title">Passkey ${i + 1}</div><div class="sub">Added ${fmt(p.created_at)} · last used ${fmt(p.last_used_at)}</div></div>
-        ${passkeys.length > 1 ? `<button class="btn danger small" data-rmkey="${p.id}" aria-label="Remove passkey">✕</button>` : ''}</div>`).join('')}
+        ${passkeys.length > 1 ? `<button class="btn small" data-rmkey="${p.id}" aria-label="Remove passkey">✕</button>` : ''}</div>`).join('')}
     </div>
-    <button class="btn ghost" id="addKey">Add another passkey</button>`}
+    <button class="btn" id="addKey">Add another passkey</button>`}
 
-    <button class="btn danger" id="logout" style="margin-top:24px">${isDemo() ? 'Start over' : 'Sign out'}</button>
+    <div class="section-title">Developer settings</div>
+    <fieldset class="seg-pick" id="themePick"><legend>Theme (on this device)</legend><div class="seg">
+      ${[['auto', 'Automatic'], ['light', 'Light'], ['dark', 'Dark']].map(([value, label]) =>
+        `<label><input type="radio" name="theme" value="${value}" ${(window.boredTheme?.get() || 'auto') === value ? 'checked' : ''}><span>${label}</span></label>`).join('')}
+    </div></fieldset>
+
+    <button class="btn" id="logout" style="margin-top:24px">${isDemo() ? 'Start over' : 'Sign out'}</button>
     <p class="note account-id">Account ID: <code>${esc(me.guid)}</code></p>`;
 
   v.querySelector('#newInvite').addEventListener('click', createInvite);
@@ -2529,14 +2695,14 @@ function moderationHtml() {
       <div class="mod-list" data-list="${i}">
         <div class="mod-list-head">
           <input name="name" maxlength="60" placeholder="List name" aria-label="List name" value="${esc(l.name)}">
-          <button type="button" class="btn danger small" data-del-list="${i}">Delete</button>
+          <button type="button" class="btn small" data-del-list="${i}">Delete</button>
         </div>
         <label>Words and phrases, one per line or separated by commas. Add * after a letter that may repeat (so*o).
           <textarea name="words" rows="3" spellcheck="false">${esc(l.words.join('\n'))}</textarea></label>
         ${check('on', l.on, 'On')}
         ${check('hide', l.hide, HIDE)}
       </div>`).join('')}
-      ${m.lists.length < MAX_LISTS ? '<button type="button" class="btn ghost" id="addList">Add a word list</button>' : ''}
+      ${m.lists.length < MAX_LISTS ? '<button type="button" class="btn" id="addList">Add a word list</button>' : ''}
 
       <h3 class="sub-title">Reports</h3>
       <p class="note">People can report public posts. Hide a post from you, in Discover and its discard pile, once this
@@ -2553,7 +2719,7 @@ function moderationHtml() {
       <div class="row">${avatar(b.guid || (b.sign ? `${b.sign.x}.${b.sign.y}` : null))}
         <div class="grow"><div class="title">${esc((b.guid && isContact(b.guid) && displayName(b.guid)) || b.name || 'Someone')}</div>
           <div class="sub">Blocked ${b.at ? fmt(b.at) : ''}</div></div>
-        <button type="button" class="btn ghost small" data-unblock="${esc(key)}">Unblock</button>
+        <button type="button" class="btn small" data-unblock="${esc(key)}">Unblock</button>
       </div>`).join('')}</div>`
     : '<p class="note">Nobody. Block someone from a post (Report or block) or from their contact info.</p>'}`;
 }

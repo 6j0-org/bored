@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#2f6b3a">
-  <meta name="description" content="Bored is an app to make life more fun. Find people to do things with, near you. Free libre open source, ad-free, and it never asks who you are.">
+  <meta name="description" content="Bored is an app to make life more fun. Find people near you to do things with. It's free libre open source software, has no ads, and never asks who you are.">
   <title>Bored: Make life more fun</title>
   <link rel="preload" href="/fonts/national-park-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
@@ -174,7 +174,7 @@
     .round:focus-visible { outline: 3px solid var(--accent-text); outline-offset: 3px; }
 
     /* ---------- how it works ---------- */
-    ol.steps { list-style: none; padding: 0; margin: 0; counter-reset: step; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+    ol.steps { list-style: none; padding: 0; margin: 0; counter-reset: step; display: grid; grid-template-columns: 1fr; gap: 16px; } /* one step per line */
     /* the number and the heading share a line; the text runs underneath */
     ol.steps li { counter-increment: step; display: grid; grid-template-columns: auto 1fr; align-items: center; align-content: start; gap: 8px 12px; }
     ol.steps li::before {
@@ -186,14 +186,11 @@
 
     /* ---------- why not ---------- */
     .narrow p { max-width: 65ch; } /* comfortable line length for the text-only sections */
-    .stored h3 { margin-top: 1.6em; }
-    .stored ul { max-width: 65ch; padding-left: 1.2em; margin: .4em 0 0; }
-    .stored li { margin: .45em 0; }
     .wrongs { padding-left: 1.2em; margin: 0 0 1em; }
     .wrongs li { margin: 6px 0; }
 
     /* ---------- promises ---------- */
-    .promises { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+    .promises { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: 1fr; gap: 14px; } /* one promise per line */
     .promises li { display: flex; gap: 12px; align-items: flex-start; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 16px; }
     .promises .check {
       flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--accent-soft); color: var(--accent-text);
@@ -224,14 +221,14 @@
   <div class="wrap">
     <header class="bar">
       <span class="board" aria-label="Bored?">Bored?</span>
-      <p class="alpha-note"><span class="alpha-tag">Alpha</span> Bored is new and still changing. Tell us what works and what doesn't.
+      <p class="alpha-note"><span class="alpha-tag">Alpha</span> Bored is new and still changing. Share what works and what doesn't.
         <a class="btn ghost small" href="/?start&amp;open=feedback">Feedback</a></p>
     </header>
 
     <div class="hero">
       <div>
         <h1>Bored is an app to make life <em>more fun.</em></h1>
-        <p class="lede">Instead of scrolling through ads in a "social" media app, you can swipe through opportunities to actually socialize with other people! Use it for anything: go for walk with a bored neighbor; find another bored parent, and meet up at the park with your bored kids; spend some time with a friend who's doing some boring, monotonous task, like packing or painting; or meet at a cafe, so you can have a nice cup of coffee, and scroll through social media <em>together</em>!</p>
+        <p class="lede">Instead of scrolling through ads in a “social” media app, you can swipe through opportunities to actually socialize with other people! Use it for anything: go for a walk with a bored neighbor; find another bored parent and meet up at the park with your bored kids; spend some time with a friend who's doing a boring, monotonous task, like packing or painting; or meet at a cafe so you can have a nice cup of coffee and scroll through social media <em>together</em>!</p>
       </div>
       <div class="deck-col">
         <div class="deck" aria-hidden="true"></div><!-- filled in by public/about.js -->
@@ -248,94 +245,48 @@
       <h2>How it works</h2>
       <ol class="steps">
         <li><h3>Connect</h3><p>Open your profile, create an invitation, and send it to your friends to invite them to Bored.</p></li>
-        <li><h3>Post</h3><p>This doesn't need to be a solid plan - something interesting or something you need help with. Optionally include where, when, how much (or free), and how many people, or leave some of it blank, and play it by ear. Don't let details get in the way of hanging out. Share it with everyone, or just with people you know.</p></li>
-        <li><h3>Discover</h3><p>Swipe through events - right means “I'm in.” Filter by tags, distance, date, or cost. Once you've swiped, the host must decide whether or not they want to proceed. Don't feel offended if nothing happens - this is a guilt-free zone - maybe the host changed their mind, or maybe the timing isn't right anymore.</p></li>
-        <li><h3>Confirm</h3><p>Hosts swipe through who wants to come, right means “Let's do it.” No obligation - if you've lost interest, or just aren't feeling it, that's OK. If you don't like rejecting people, be more specific about what you want in your posts, and share them with a more targetted audience.</p></li>
-        <li><h3>Plan</h3><p>It's a match! Chat to sort out the details, end-to-end encrypted. Then go do the thing!</p></li>
+        <li><h3>Post</h3><p>Post something you want to do or need help with. Optionally include details like where, when, and how much, or leave them blank and play it by ear. Share it with everyone, or just with people you know.</p></li>
+        <li><h3>Discover</h3><p>Swipe through events—right means “I'm in.” Filter by tags, distance, date, and more. Once you've swiped, the host decides whether they want to go ahead. Don't be offended if nothing happens; this is a guilt-free zone. Maybe the host changed their mind, or maybe the timing isn't right anymore.</p></li>
+        <li><h3>Confirm</h3><p>As a host, you swipe through the people who want to join—right means “Let's do it.” There's no obligation: if you've lost interest or just aren't feeling it, that's OK. If you don't like turning people down, be more specific about what you want in your posts and share them with a more targeted audience.</p></li>
+        <li><h3>Plan</h3><p>It's a match! Chat to sort out the remaining details, click “When” to add it to your calendar, and then go do the thing!</p></li>
       </ol>
-    </div>
-  </section>
-
-  <section id="why-not">
-    <div class="wrap narrow">
-      <h2>What's wrong with other event sites?</h2>
-      <p>They're businesses. They make money from ads, subscriptions, ticket fees, or investors who expect a return, and most of them want to know who you are: your name, your face, your email, your phone number, your address.</p>
-      <p>That shows up in what they ask of you:</p>
-      <ul class="wrongs">
-        <li>Organizers pay a subscription to run a group, and everyone else is offered a premium tier, paid upgrades, or in-app coins for the nicer stuff.</li>
-        <li>A cut of every paid ticket, or a membership fee just to show up, on top of what the thing itself costs.</li>
-        <li>Ads built on what you do, unless you pay extra to make them go away.</li>
-        <li>A real-name profile, a profile photo, a selfie to verify your face, your phone number, or your verified home address before you can join, and an account before you can even send an invitation.</li>
-        <li>Organizers who can make you wait for their approval.</li>
-        <li>Tools built for selling tickets, not for meeting people.</li>
-      </ul>
-      <p>Bored doesn't do any of that, because Bored isn't a business.</p>
     </div>
   </section>
 
   <section>
     <div class="wrap narrow">
       <h2>Can't I just text my friends if I want to hang out with them?</h2>
-      <p>You can, but if you texted all your friends every time you wanted to do any little thing, you'd probably overwhelm them and get left on read.</p>
+      <p>You can. But if you texted all your friends about every little whim or need, you'd probably overwhelm them and get left on read.</p>
       <p>With Bored, you post it once. Whoever's up for it says so, and nobody else gets pestered. You can still keep it to people you know: share a post with just your contacts.</p>
     </div>
   </section>
 
-  <section>
-    <div class="wrap">
-      <h2>Bored's promises</h2>
-      <ul class="promises">
-        <li><span class="check" aria-hidden="true">✓</span><div><h3>No Ads</h3><p>Nobody is paying to put things in front of you, and nobody ever will. We're not doing this for money. We're doing this because software can and should be better. Stop being used, and start being a user!</p></div></li>
-        <li><span class="check" aria-hidden="true">✓</span><div><h3>No Investors</h3><p>No one to answer to who wants a return on your attention. No venture capitalists. No money. No perverse incentives. Just software built to solve a human problem and given away for free, because being generous makes us feel good.</p></div></li>
-        <li><span class="check" aria-hidden="true">✓</span><div><h3>No EULA</h3><p>You don't have to get lawyers involved to use a screwdriver, so why should you have to sign a EULA to use a piece of software? This is a tool, not a legally binding agreement.</p></div></li>
-        <li><span class="check" aria-hidden="true">✓</span><div><h3>Privacy Enforced</h3><p>No email, no phone numbers, no full names (please), and no photos with their tricksy metadata. We make it as hard as possible for you to dox yourself, by not collecting any data that isn't necessary. Additionally, your private posts, requests to join, matches, and chats are client-side end-to-end (E2E) encrypted to the best of our ability, so the server can't see who's doing what with whom. Only public posts are readable, and they're signed, so nobody can fake one. See <a href="https://codeberg.org/6j0-org/bored/src/branch/main/docs/encryption.md">the spec here</a>.</p></div></li>
-        <li><span class="check" aria-hidden="true">✓</span><div><h3>Free Libre Open Source Software (FLOSS)</h3><p>Free forever: no premium tier and no paywalled features. Starting things and joining things cost nothing. Licensed under the GNU AGPL, so you can take the code, change it, and run your own. Just keep it free for the next person, too.</p></div></li>
-      </ul>
+  <section id="why-not">
+    <div class="wrap narrow">
+      <h2>What's wrong with other apps?</h2>
+      <p>They're businesses. They exist to make money, and <em>you are the product</em> that they sell to their advertisers. They need your name, email, phone number, and contact list to build a creepily accurate profile of you, so they can send you targeted ads that you're more likely to click on. But that's not all! They want more money, so they also nag you to subscribe, upgrade, and get verified, and they charge extra for paywalled “premium” features. Profit is the priority, and they provide the minimum viable product to keep you on their platform. Eventually, <a href="https://en.wikipedia.org/wiki/Enshittification">enshittification</a> sets in, the platform slowly dies, and another pops up and goes through the whole cycle again.</p>
+      <p>Bored doesn't do any of that, because Bored isn't a business. It was made with passion, by people for people, not by a corporation for profit.</p>
     </div>
   </section>
 
+
   <section>
-    <div class="wrap narrow stored">
-      <h2>So what do we store and know about you?</h2>
-      <p>The short version: an anonymous account, encrypted things we can't read, and the posts you make public.</p>
-
-      <h3>On our server</h3>
-      <ul>
-        <li>An anonymous account: a random ID, the public keys other people use to encrypt things for you, and, if you used a passkey, its public half (never the passkey itself).</li>
-        <li>Your vault: your contacts, the nicknames and tags you give them, your posts, and who you shared them with. It's encrypted in your browser before it's sent, so we can't read it.</li>
-        <li>Encrypted mail: private posts, requests to join, answers, and chats. We can see which inbox each message goes to, when, and how big it is, but not what it says or who sent it.</li>
-        <li>Your public posts. Anyone can read those, which is the point.</li>
-        <li>Who you've connected with through an invitation. This one isn't encrypted.</li>
-        <li>If you turn on notifications, your device's push address.</li>
-      </ul>
-
-      <h3>What we don't keep</h3>
-      <ul>
-        <li>Your IP address, or any log of what you do. Like every website, the server sees your IP address with each request, but it doesn't write it down.</li>
-        <li>Who searched for which place. Place searches go through our server to OpenStreetMap, so your browser doesn't have to contact them, and nothing about you is passed along.</li>
-      </ul>
-
-      <h3>In your browser</h3>
-      <ul>
-        <li>Two cookies: one that keeps you signed in (30 days, deleted when you sign out), and one that remembers you've seen this page (it holds nothing about you).</li>
-        <li>Your keys, locked in the browser's storage so that not even the app can copy them out. Signing out deletes them.</li>
-        <li>Your preferences: theme, currency, and your Discover filters, including the place you search near. These never leave your device, but they do stay on it after you sign out.</li>
-      </ul>
-      <p>That's everything. No analytics, no ads, and no trackers, so there's no cookie banner: there's nothing to agree to.</p>
-
-      <h3>Who else sees anything</h3>
-      <ul>
-        <li>OpenStreetMap, while you have the map open to pick a place: your browser loads the map from them, so they see your IP address and the area you're looking at.</li>
-        <li>Your browser's push service (Google, Apple, Mozilla, or Microsoft), if you turn on notifications. It delivers an encrypted "New activity" ping that it can't read.</li>
+    <div class="wrap">
+      <h2>What's special about Bored?</h2>
+      <ul class="promises">
+        <li><span class="check" aria-hidden="true">✓</span><div><h3>No Ads</h3><p>Nobody is paying to put things in front of you, and nobody ever will. Bored isn't made for money. It's made because software can and should be better!</p></div></li>
+        <li><span class="check" aria-hidden="true">✓</span><div><h3>No Investors</h3><p>No one to answer to who wants a return on your attention. No venture capitalists. No money. No perverse incentives. Just software built to solve a human problem and given away for free, because being generous feels good.</p></div></li>
+        <li><span class="check" aria-hidden="true">✓</span><div><h3>No EULA</h3><p>You don't have to get lawyers involved to use a screwdriver, so why should you have to sign an End User License Agreement (EULA) to use a piece of software? This is a tool, not a legally binding agreement. Bored won't ask you to click “I agree.”</p></div></li>
+        <li><span class="check" aria-hidden="true">✓</span><div><h3>Privacy Enforced</h3><p>No email addresses, no phone numbers, no full names (please), and no photos with their tricksy metadata. Bored makes it as hard as possible for you to dox yourself by not collecting any data that isn't necessary. Additionally, your private posts, requests to join, matches, and chats are client-side end-to-end (E2E) encrypted as thoroughly as Bored can manage, so the server can't see who's doing what with whom. Only public posts are readable by the server, and they're signed, so nobody can fake one. See <a href="/privacy">the privacy policy</a> for everything Bored stores, and <a href="https://codeberg.org/6j0-org/bored/src/branch/main/docs/encryption.md">the encryption spec</a> for how it works.</p></div></li>
+        <li><span class="check" aria-hidden="true">✓</span><div><h3>Free Libre Open Source Software (FLOSS)</h3><p>Free forever: no premium tier and no paywalled features. Licensed under the GNU AGPL, so you can take the code, change it, and run your own. Just keep it free for the next person, too.</p></div></li>
       </ul>
     </div>
   </section>
 
   <section>
     <div class="wrap narrow">
-      <h2>How can Bored keep these promises?</h2>
-      <p>Bored is very lightweight. It doesn't store photos or use much network bandwidth, so it costs almost nothing to run.</p>
-      <p>It was made with passion, by people for people, not by a corporation for profit.</p>
+      <h2>How can Bored exist without making any money?</h2>
+      <p>Bored costs almost nothing to run, since it doesn't store photos or use much network bandwidth. It was created for fun to solve a need, and it runs on a tiny, bare-metal cluster. No cloud bill. It only costs a few dollars a month for electricity.</p>
     </div>
   </section>
 
@@ -351,7 +302,7 @@
 
   <footer>
     <div class="wrap">
-      <span>Bored is free software under the <a href="https://www.gnu.org/licenses/agpl-3.0.html">GNU AGPL v3 or later</a>.</span>
+      <span><a href="/privacy">Privacy Policy</a> · Bored is free software under the <a href="https://www.gnu.org/licenses/agpl-3.0.html">GNU AGPL v3 or later</a>.</span>
       <span>Source: <a href="https://codeberg.org/6j0-org/bored">Codeberg</a> · <a href="https://gitlab.com/6j0-org/bored">GitLab</a> · <a href="https://github.com/6j0-org/bored">GitHub</a> · <a href="https://app.radicle.xyz/nodes/iris.radicle.network/rad:z2j6Pog3cY6azMjstGj1utmB81kTZ">Radicle</a></span>
     </div>
   </footer>

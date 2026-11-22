@@ -73,7 +73,7 @@ const CONTACT_TAGS = ['family', 'friends', 'neighbors', 'work'];
 // Signed-out guests can browse Discover; everything else needs an account.
 // AGPL-3.0 section 13: people using the app over the network must be offered its source. The links are in the
 // introduction page's footer (public/about.html), reached from here and from the title board.
-const ABOUT_LINKS = `<p class="note" style="margin-top:20px;text-align:center"><a href="/about">About Bored</a></p>`;
+const ABOUT_LINKS = `<p class="note" style="margin-top:20px;text-align:center"><a href="/about">About Bored</a> · <a href="/privacy">Privacy Policy</a></p>`;
 
 // Tab icons on the wood buttons: a quest-giver's "?" and "!" for Discover and Confirm, then simple line drawings.
 // All are cream (--wood-text), like the lettering on the other buttons.
@@ -689,7 +689,7 @@ function shell(content) {
     <header class="top">
       <a class="logo board wide" href="/about" title="About Bored">Bored?</a>
       <p class="alpha-note"><span class="alpha-tag">Alpha</span> Bored is new and still changing.
-        <button type="button" class="link" id="feedbackLink" ${state.tab === 'feedback' ? 'aria-current="page"' : ''}>Tell us what you think</button></p>
+        <button type="button" class="link" id="feedbackLink" ${state.tab === 'feedback' ? 'aria-current="page"' : ''}>Share what you think</button></p>
       <h1 class="page-title">${esc(title)}</h1>
     </header>
     <main id="view"></main>

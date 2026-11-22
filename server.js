@@ -821,7 +821,7 @@ const STATIC = {
   '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/secure.js': 'secure.js', '/hpke.js': 'hpke.js', '/envelope.js': 'envelope.js', '/posts.js': 'posts.js', '/mail.js': 'mail.js', '/postfields.js': 'postfields.js', '/style.css': 'style.css', '/location.js': 'location.js', '/when.js': 'when.js', '/cost.js': 'cost.js', '/ics.js': 'ics.js',
   '/feedback.js': 'feedback.js', '/moderation.js': 'moderation.js',
   '/pii.js': 'pii.js', '/libphonenumber.js': 'libphonenumber.js',
-  '/about': 'about.html', '/about.html': 'about.html', '/landing.js': 'landing.js', '/about.js': 'about.js', '/examples.js': 'examples.js',
+  '/about': 'about.html', '/about.html': 'about.html', '/privacy': 'privacy.html', '/privacy.html': 'privacy.html', '/landing.js': 'landing.js', '/about.js': 'about.js', '/examples.js': 'examples.js',
   '/sw.js': 'sw.js', '/theme.js': 'theme.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon.svg': 'icon.svg', '/board.webp': 'board.webp',
   // National Park, SIL OFL 1.1 (see public/fonts/NationalPark-OFL.txt)
   '/fonts/national-park-latin.woff2': 'fonts/national-park-latin.woff2', '/fonts/national-park-latin-ext.woff2': 'fonts/national-park-latin-ext.woff2',

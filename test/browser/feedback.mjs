@@ -10,7 +10,7 @@ const items = () => B.ev(`[...document.querySelectorAll('.fb-item .fb-text')].ma
 // The Alpha note is on every tab, and its link opens the page.
 for (const t of ['discover', 'confirm', 'plans', 'post', 'profile']) {
   await B.tab(t);
-  assert.match(await B.ev(`document.querySelector('header.top .alpha-note')?.textContent || ''`), /Alpha.*Tell us what you think/s, `Alpha note on ${t}`);
+  assert.match(await B.ev(`document.querySelector('header.top .alpha-note')?.textContent || ''`), /Alpha.*Share what you think/s, `Alpha note on ${t}`);
 }
 await B.ev(`document.getElementById('feedbackLink').click()`);
 await B.until(`document.querySelector('.fb-empty')?.textContent.includes('No feedback yet')`);

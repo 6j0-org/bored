@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#2f6b3a">
+  <meta name="description" content="What Bored stores and knows about you: an anonymous account, encrypted things it can't read, and the posts you make public.">
+  <title>Bored: Privacy Policy</title>
+  <link rel="preload" href="/fonts/national-park-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <script src="/theme.js"></script>
+  <!-- The same look as the introduction page (public/about.html): its colors, fonts, title board, and footer. -->
+  <style>
+    :root {
+      --bg: #f2eee5; --surface: #fffcf6; --text: #2b2219; --muted: #776a5a; --line: #e2d9c9;
+      --accent: #2f6b3a; --accent-text: #2a5f33;
+      color-scheme: light dark;
+    }
+    /* Dark: when the device asks for it (theme "automatic"), or when chosen (public/theme.js). */
+    @media (prefers-color-scheme: dark) {
+      :root:not([data-theme="light"]) {
+        --bg: #14110d; --surface: #211c16; --text: #f0e9dd; --muted: #a69885; --line: #362e25;
+        --accent: #4e9258; --accent-text: #8cc293;
+        color-scheme: dark;
+      }
+    }
+    :root[data-theme="dark"] {
+      --bg: #14110d; --surface: #211c16; --text: #f0e9dd; --muted: #a69885; --line: #362e25;
+      --accent: #4e9258; --accent-text: #8cc293;
+      color-scheme: dark;
+    }
+    :root[data-theme="light"] { color-scheme: light; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; }
+    body {
+      font: 17px/1.55 'National Park', system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      background: var(--bg); color: var(--text);
+    }
+    a { color: var(--accent-text); }
+    h1, h2, h3 { line-height: 1.15; margin: 0; text-wrap: balance; }
+    h1 { font-size: clamp(1.8rem, 5vw, 2.6rem); letter-spacing: -.02em; margin-bottom: .5em; }
+    h2 { font-size: clamp(1.25rem, 3.4vw, 1.5rem); margin: 1.8em 0 .4em; }
+    p { margin: 0 0 1em; }
+    .wrap { max-width: 980px; margin: 0 auto; padding: 0 16px; }
+    main { padding: 32px 0 56px; }
+    main p, main ul { max-width: 65ch; }
+    main ul { padding-left: 1.2em; margin: .4em 0 1em; }
+    main li { margin: .45em 0; }
+    .muted { color: var(--muted); }
+    .lede { font-size: 1.15rem; }
+
+    @font-face {
+      font-family: 'National Park'; font-style: normal; font-weight: 200 800; font-display: swap;
+      src: url(/fonts/national-park-latin.woff2) format('woff2');
+      unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+    }
+    @font-face {
+      font-family: 'National Park'; font-style: normal; font-weight: 200 800; font-display: swap;
+      src: url(/fonts/national-park-latin-ext.woff2) format('woff2');
+      unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+    }
+    /* Title on an oak plank, linking back to the introduction page. */
+    .bar { display: flex; flex-direction: column; padding: 20px 0 8px; }
+    .board {
+      position: relative; isolation: isolate; display: block; width: 97%; align-self: center; text-align: center;
+      padding: .6em .9em .58em; font-size: clamp(2.2rem, 9vw, 4rem); text-decoration: none;
+      font-family: 'National Park', 'Trebuchet MS', sans-serif; font-weight: 800; line-height: 1; letter-spacing: .01em;
+      color: #f6ecda; text-shadow: 0 .06em 0 rgba(40, 18, 5, .7), 0 0 .15em rgba(40, 18, 5, .35);
+      filter: drop-shadow(0 .1em .1em rgba(0, 0, 0, .35)); transform: rotate(-1.2deg); user-select: none;
+    }
+    .board::before { content: ""; position: absolute; inset: 0; z-index: -1; background: url(/board.webp) center / 100% 100% no-repeat; }
+    .board:focus-visible { outline: 3px solid var(--accent-text); outline-offset: 3px; }
+
+    footer { border-top: 1px solid var(--line); padding: 24px 0 calc(24px + env(safe-area-inset-bottom)); font-size: .9rem; color: var(--muted); }
+    footer .wrap { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header class="bar">
+      <a class="board" href="/about" aria-label="Bored? About Bored">Bored?</a>
+    </header>
+
+    <main>
+      <h1>Privacy Policy</h1>
+      <p class="muted">Last updated November 21, 2026.</p>
+      <p class="lede">The short version: Bored stores an anonymous account, encrypted things it can't read, and the posts you make public.</p>
+
+      <h2>On Bored's server</h2>
+      <ul>
+        <li>An anonymous account: a random ID, the public keys other people use to encrypt things for you, and, if you use a passkey, its public half (never the passkey itself).</li>
+        <li>Your vault: your contacts, the nicknames and tags you give them, your posts, and who you've shared them with. It's encrypted in your browser before it's sent, so Bored can't read it.</li>
+        <li>Encrypted mail: private posts, requests to join, answers, and chats. The server can see which inbox each message goes to, when, and how big it is, but not what it says or who sent it.</li>
+        <li>Your public posts. Anyone can read them, which is the point.</li>
+        <li>Who you've connected with through an invitation. This isn't encrypted.</li>
+        <li>Your device's push address, if you turn on notifications.</li>
+      </ul>
+
+      <h2>What Bored doesn't keep</h2>
+      <ul>
+        <li>Your IP address, or any log of what you do. Like every website, Bored's server sees your IP address with each request, but it doesn't write it down.</li>
+        <li>Who searched for which place. Place searches go through Bored's server to OpenStreetMap, so your browser doesn't have to contact them, and nothing about you is passed along.</li>
+      </ul>
+
+      <h2>In your browser</h2>
+      <ul>
+        <li>Two cookies: one that keeps you signed in (for 30 days, deleted when you sign out), and one that remembers you've seen the introduction page (it holds nothing about you).</li>
+        <li>Your keys, locked in the browser's storage so that not even the app can copy them out. Signing out deletes them.</li>
+        <li>Your preferences: theme, currency, and Discover filters, including the place you search near. These never leave your device, but they stay on it after you sign out.</li>
+      </ul>
+      <p>That's everything. There are no analytics, ads, or trackers, so there's no cookie banner: there's nothing to agree to.</p>
+
+      <h2>Who else sees anything</h2>
+      <ul>
+        <li>OpenStreetMap, while you have the map open to pick a place: your browser loads the map from them, so they see your IP address and the area you're looking at.</li>
+        <li>Your browser's push service (Google, Apple, Mozilla, or Microsoft), if you turn on notifications. It delivers an encrypted “New activity” ping that it can't read.</li>
+      </ul>
+
+      <p>For how the encryption works, see <a href="https://codeberg.org/6j0-org/bored/src/branch/main/docs/encryption.md">the encryption spec</a>. Questions? <a href="/?start&amp;open=feedback">Send feedback</a>.</p>
+    </main>
+  </div>
+
+  <footer>
+    <div class="wrap">
+      <span><a href="/about">About Bored</a> · Bored is free software under the <a href="https://www.gnu.org/licenses/agpl-3.0.html">GNU AGPL v3 or later</a>.</span>
+      <span>Source: <a href="https://codeberg.org/6j0-org/bored">Codeberg</a> · <a href="https://gitlab.com/6j0-org/bored">GitLab</a> · <a href="https://github.com/6j0-org/bored">GitHub</a> · <a href="https://app.radicle.xyz/nodes/iris.radicle.network/rad:z2j6Pog3cY6azMjstGj1utmB81kTZ">Radicle</a></span>
+    </div>
+  </footer>
+</body>
+</html>

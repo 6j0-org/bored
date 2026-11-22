@@ -90,6 +90,13 @@ const threadId = await B.ev(`fetch('/api/feedback').then(r => r.json()).then(d =
 await B.send('Page.navigate', { url: `${BASE}/?open=feedback:${threadId}` });
 await B.until(`document.querySelector('.fb-thread:not([hidden]) .fb-msg')?.textContent.includes('<b>bold?</b>')`);
 
+// It can be deleted from its chat too (two clicks), which goes back to the list.
+await B.ev(`document.querySelector('[data-delete-thread]').click()`);
+assert.equal(await B.ev(`document.querySelector('[data-delete-thread]').textContent`), 'Confirm delete');
+await B.ev(`document.querySelector('[data-delete-thread]').click()`);
+await B.until(`document.querySelector('.fb-thread[hidden]') && document.querySelector('.fb-empty')`);
+assert.equal(await B.ev(`fetch('/api/feedback').then(r => r.json()).then(d => d.items.length)`), 0);
+
 // The Profile page ends with the account's ID (the GUID developers are listed by).
 await B.tab('profile');
 await B.until(`document.querySelector('.account-id code')`);

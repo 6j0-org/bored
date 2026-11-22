@@ -86,13 +86,14 @@ export function mountFeedback(el, {
   const text = (m) => (whoIs(m).hidden && !m.mine ? `<p class="fb-text fb-hidden">Hidden</p>` : `<p class="fb-text">${esc(m.body)}</p>`);
 
   // ---- the list ----
-  function drawList({ items, maxLength: max }) {
+  function drawList({ items, maxLength: max, isAdmin }) {
     if (max && box.maxLength !== max) { box.maxLength = max; showCount(); }
     list.innerHTML = items.length
       ? items.map((it) => `<article class="fb-item${it.mine ? " fb-mine" : ""}" data-open="${esc(it.id)}" role="button" tabindex="0" aria-label="Open this feedback's chat">
           <div class="fb-meta">${statusTag(it.status)}${byline(it, false)}${time(it.created)}${editedTag(it)}
             ${it.replies ? `<span class="fb-replies">${it.replies === 1 ? "1 reply" : `${it.replies} replies`}</span>` : ""}
-            ${it.canDelete ? `<button type="button" class="fb-delete ${esc(actionClass ?? primaryClass)}" data-delete="${esc(it.id)}">Delete</button>` : ""}</div>
+            <span class="fb-item-actions">${isAdmin && it.status === "open" ? `<button type="button" class="${esc(actionClass ?? primaryClass)}" data-done="${esc(it.id)}">Done</button>` : ""}
+            ${it.canDelete ? `<button type="button" class="fb-delete ${esc(actionClass ?? primaryClass)}" data-delete="${esc(it.id)}">Delete</button>` : ""}</span></div>
           ${text(it)}</article>`).join("")
       : `<p class="fb-empty">No feedback yet. Be the first.</p>`;
   }
@@ -123,7 +124,8 @@ export function mountFeedback(el, {
         <button type="button" class="fb-back" aria-label="Back to all feedback">←</button>
         ${statusTag(t.status)}
         <span class="fb-thread-actions">${t.canClose ? (t.status === "open"
-          ? closeBtn("done", "Done") + closeBtn("wontdo", "Won't do") : closeBtn("open", "Reopen")) : ""}</span>
+          ? closeBtn("done", "Done") + closeBtn("wontdo", "Won't do") : closeBtn("open", "Reopen")) : ""}
+          ${t.canDelete ? `<button type="button" class="fb-delete ${esc(actionClass ?? primaryClass)}" data-delete-thread>Delete</button>` : ""}</span>
       </div>
       <div class="fb-msgs" aria-live="polite">${messagesHtml(t)}</div>
       ${t.canReply ? `<form class="fb-reply" novalidate>
@@ -182,8 +184,16 @@ export function mountFeedback(el, {
     } catch (err) { setStatus(err.message, true); }
     finally { send.disabled = false; }
   });
-  // Delete takes two clicks: the first asks to confirm. Anywhere else on an item opens its chat.
+  // Delete takes two clicks: the first asks to confirm. Done (developers) closes it right there. Anywhere else on an
+  // item opens its chat.
   list.addEventListener("click", async (e) => {
+    const d = e.target.closest("[data-done]");
+    if (d) {
+      d.disabled = true;
+      try { await call("POST", `${itemUrl(d.dataset.done)}/status`, { status: "done" }); await refreshList(); }
+      catch (err) { d.disabled = false; setStatus(err.message, true); }
+      return;
+    }
     const b = e.target.closest("[data-delete]");
     if (!b) {
       const item = e.target.closest("[data-open]");
@@ -235,6 +245,15 @@ export function mountFeedback(el, {
     if (e.target.closest(".fb-back")) return closeThread();
     const ed = e.target.closest("[data-edit]");
     if (ed) return startEdit(ed.dataset.edit);
+    // Delete, from the chat too (two clicks, like the list), then back to the list.
+    const del = e.target.closest("[data-delete-thread]");
+    if (del && openId) {
+      if (!del.classList.contains("fb-armed")) { del.classList.add("fb-armed"); del.textContent = "Confirm delete"; return; }
+      del.disabled = true;
+      try { await call("DELETE", itemUrl(openId)); closeThread(); }
+      catch (err) { del.disabled = false; del.textContent = "Couldn't delete"; alert(err.message); }
+      return;
+    }
     const b = e.target.closest("[data-set-status]");
     if (!b || !openId) return;
     b.disabled = true;

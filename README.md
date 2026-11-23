@@ -64,7 +64,9 @@ behind HTTPS/proxies, passkeys are bound to it; also turns on `Secure` cookies),
 the `ORIGIN` hostname), `VAPID_SUBJECT` (a `mailto:` or `https:` contact for push services; defaults to `ORIGIN`),
 `PUSH_HOSTS` (extra push service hostnames to allow, comma-separated), `NTFY_SERVERS` (the
 [ntfy](#notifications) servers people can pick, comma-separated origins, each optionally `=<access token>`; default
-`https://ntfy.sh`, empty to turn ntfy off), `DEMO` (`1` for [demo mode](#demo-mode)),
+`https://ntfy.sh`, empty to turn ntfy off), `DISCOVER_NEWS_HOURS` (when to send
+["New posts in Discover"](#notifications) notifications: hours from 0 to 23, comma-separated, in the server's time
+zone, set with `TZ`; default `10,16`, empty to turn them off), `DEMO` (`1` for [demo mode](#demo-mode)),
 `FEEDBACK_PATH` (default `feedback.jsonl` next to the database), `ADMIN_SUB` or `ADMIN_GUID` (one more developer for
 [feedback](#feedback), besides `DEVELOPER_GUIDS` in `server.js`: a 6j0.org identity's `sub` with `AUTH_MODE=6j0`, or an
 account's GUID in any mode).
@@ -106,6 +108,13 @@ database), using `node:crypto` only. Push needs HTTPS (or `localhost`).
 Tapping a notification opens what it's about. Most are "New activity" for encrypted mail, which the server can't
 read, so the app opens the newest thing in the mail once it's loaded: that plan's chat, a request waiting in Confirm,
 or Discover. Feedback notifications open the post's chat.
+
+**New posts in Discover**: twice a day, at 10:00 and 16:00 server time (`DISCOVER_NEWS_HOURS`, `TZ`), everyone with
+notifications on (Web Push or ntfy) gets "New posts in Discover" if someone else published a public post since the last
+round and it's still live. Updates to older posts don't count. Tapping it opens Discover. It's on by default, and a
+checkbox under Notifications in Profile turns it off for the account. The text is generic because Discover's filters
+(where, tags, cost, and when) stay in the browser: the server can't tell whether a new post is one the person would
+see. `kill -USR2 <pid>` runs a round now.
 
 On Android, Chromium-based browsers deliver web notifications through Google Play services, so phones without them
 (such as GrapheneOS without sandboxed Google Play) can't turn notifications on; the app says so, and offers ntfy.

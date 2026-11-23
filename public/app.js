@@ -2971,6 +2971,10 @@ async function viewProfile(v) {
     <div class="section-title">Notifications</div>
     <div class="stack" id="pushSettings"></div>
     <div class="stack" id="ntfySettings"></div>
+    ${state.me?.discoverNews?.perDay ? `<label class="check" style="margin-top: 14px"><input type="checkbox" id="discoverNews" ${state.me.discoverNews.on ? 'checked' : ''}>
+      <span>Tell me about new posts in Discover<small>At most ${state.me.discoverNews.perDay === 1 ? 'once' : state.me.discoverNews.perDay === 2 ? 'twice' : `${state.me.discoverNews.perDay} times`} a day, when
+        someone has posted something since the last one. It doesn't know your Discover filters, so some may be too
+        far away or not your thing.</small></span></label>` : ''}
 
     <div class="section-title">Invitations</div>
     <p class="note">Send people a link to connect. When someone opens it and asks to connect, they show up in your
@@ -3061,6 +3065,12 @@ async function viewProfile(v) {
   });
   drawPushSettings(v.querySelector('#pushSettings'));
   drawNtfySettings(v.querySelector('#ntfySettings'));
+  // Discover news is per account (server.js), for every device with notifications on and for ntfy.
+  v.querySelector('#discoverNews')?.addEventListener('change', async (e) => {
+    const box = e.target;
+    try { ({ discoverNews: state.me.discoverNews } = await api('/api/me/discover-news', { method: 'PUT', body: { on: box.checked } })); toast('Saved'); }
+    catch (err) { box.checked = !box.checked; toast(err.message); }
+  });
   // The theme stays on this device (public/theme.js), unlike the settings below, which are saved in your vault.
   v.querySelector('#themePick').addEventListener('change', (e) => window.boredTheme?.set(e.target.value));
   v.querySelector('#prefsForm').addEventListener('change', async (e) => {

@@ -556,7 +556,9 @@ route('GET', '/api/me', async ({ user, res }) => {
   // powers, which would let them see every visitor's feedback), and Tester with how many of their feedback posts
   // developers marked done.
   const badges = { developer: DEMO || isDeveloper(user), tester: feedback.doneCount(user.guid) };
-  send(res, 200, { ...publicUser(user), counts, badges });
+  // Discover news (see "Discover news" below): perDay is 0 when this server doesn't send them.
+  const discoverNews = { on: Boolean(user.discover_news), perDay: DISCOVER_NEWS_HOURS.length };
+  send(res, 200, { ...publicUser(user), counts, badges, discoverNews });
 });
 
 // ---------- keys and mail ----------
@@ -684,10 +686,10 @@ route('PUT', '/api/public', async ({ user, body, res }) => {
     if (cur && cur.host_id !== user.id) throw new HttpError(409, 'That post ID is taken');
     if (cur && cur.v >= post.v) throw new HttpError(409, 'A newer version of this post is already published');
     const seq = q('SELECT COALESCE(MAX(seq), 0) + 1 n FROM public_posts').get().n;
-    q(`INSERT INTO public_posts (pid, host_id, v, body, live, seq) VALUES (?, ?, ?, ?, ?, ?)
+    q(`INSERT INTO public_posts (pid, host_id, v, body, live, seq, first_seq) VALUES (?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT (pid) DO UPDATE SET v = excluded.v, body = excluded.body, live = excluded.live, seq = excluded.seq,
          updated_at = datetime('now')`)
-      .run(post.pid, user.id, post.v, JSON.stringify({ body: record.body, sig: record.sig, signer: record.signer }), live, seq);
+      .run(post.pid, user.id, post.v, JSON.stringify({ body: record.body, sig: record.sig, signer: record.signer }), live, seq, seq);
   });
   send(res, 200, { ok: true });
 });
@@ -963,6 +965,56 @@ route('POST', '/api/push/test', async ({ user, res }) => {
   send(res, 200, { ok: true });
 });
 
+// ---------- Discover news ----------
+// "New posts in Discover", at most a few times a day: at each hour in DISCOVER_NEWS_HOURS (comma-separated, 0-23,
+// in the server's time zone, TZ; default 10 and 16; empty turns it off), everyone who has notifications on (Web Push
+// or ntfy) and hasn't turned these off hears about it if a public post went up since the last round, other than their
+// own, and is still live. The text is generic: Discover's filters (where, tags, cost, and when) live in each browser,
+// so the server can't tell whether the new posts are ones a person would see. kill -USR2 runs a round now.
+const DISCOVER_NEWS_HOURS = [...new Set(String(process.env.DISCOVER_NEWS_HOURS ?? '10,16').split(',').map(h => h.trim()).filter(Boolean).map(h => {
+  if (!/^\d{1,2}$/.test(h) || Number(h) > 23) throw new Error(`DISCOVER_NEWS_HOURS: "${h}" isn't an hour from 0 to 23`);
+  return Number(h);
+}))].sort((a, b) => a - b);
+const newsSeq = {
+  get: () => Number(q(`SELECT value FROM app_settings WHERE key = 'discover_news_seq'`).get()?.value ?? NaN),
+  set: (n) => q(`INSERT INTO app_settings (key, value) VALUES ('discover_news_seq', ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value`).run(String(n)),
+};
+const newestPost = () => q('SELECT COALESCE(MAX(first_seq), 0) n FROM public_posts').get().n;
+// The first time, only posts from then on count, not everything already there.
+if (Number.isNaN(newsSeq.get())) newsSeq.set(newestPost());
+
+function discoverNews() {
+  const since = newsSeq.get(), newest = newestPost();
+  if (newest <= since) return;
+  const who = q(`SELECT u.id FROM users u WHERE u.discover_news = 1
+    AND (EXISTS (SELECT 1 FROM push_subscriptions s WHERE s.user_id = u.id) OR EXISTS (SELECT 1 FROM ntfy_topics t WHERE t.user_id = u.id))
+    AND EXISTS (SELECT 1 FROM public_posts p WHERE p.first_seq > ? AND p.live = 1 AND p.host_id != u.id)`).all(since);
+  newsSeq.set(newest);
+  for (const { id } of who) notify(id, { body: 'New posts in Discover', tag: 'discover', open: 'discover' });
+}
+function scheduleDiscoverNews() {
+  if (!DISCOVER_NEWS_HOURS.length) return;
+  const now = new Date();
+  const next = Math.min(...DISCOVER_NEWS_HOURS.map(h => {
+    const d = new Date(now); d.setHours(h, 0, 0, 0);
+    if (d <= now) d.setDate(d.getDate() + 1);
+    return d.getTime();
+  }));
+  setTimeout(() => {
+    try { discoverNews(); } catch (e) { console.error('Discover news failed:', e); }
+    scheduleDiscoverNews();
+  }, next - now.getTime()).unref();
+}
+scheduleDiscoverNews();
+process.on('SIGUSR2', () => { try { discoverNews(); } catch (e) { console.error('Discover news failed:', e); } });
+
+// Turn Discover news on or off for my account: { on }.
+route('PUT', '/api/me/discover-news', async ({ user, body, res }) => {
+  if (typeof body.on !== 'boolean') throw new HttpError(400, 'Expected { on: true or false }');
+  q('UPDATE users SET discover_news = ? WHERE id = ?').run(body.on ? 1 : 0, user.id);
+  send(res, 200, { discoverNews: { on: body.on, perDay: DISCOVER_NEWS_HOURS.length } });
+});
+
 
 // ---------- server ----------
 
@@ -971,7 +1023,7 @@ const STATIC = {
   '/feedback.js': 'feedback.js', '/moderation.js': 'moderation.js',
   '/pii.js': 'pii.js', '/libphonenumber.js': 'libphonenumber.js',
   '/about': 'about.html', '/about.html': 'about.html', '/privacy': 'privacy.html', '/privacy.html': 'privacy.html', '/landing.js': 'landing.js', '/about.js': 'about.js', '/examples.js': 'examples.js',
-  '/sw.js': 'sw.js', '/theme.js': 'theme.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon.svg': 'icon.svg', '/board.webp': 'board.webp',
+  '/sw.js': 'sw.js', '/theme.js': 'theme.js', '/holiday.js': 'holiday.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon.svg': 'icon.svg', '/board.webp': 'board.webp',
   // National Park, SIL OFL 1.1 (see public/fonts/NationalPark-OFL.txt)
   '/fonts/national-park-latin.woff2': 'fonts/national-park-latin.woff2', '/fonts/national-park-latin-ext.woff2': 'fonts/national-park-latin-ext.woff2',
 };

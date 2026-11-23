@@ -152,6 +152,11 @@ const MIGRATIONS = [
      click      TEXT NOT NULL,
      created_at TEXT NOT NULL DEFAULT (datetime('now'))
    );`,
+  // 4. "New posts in Discover" notifications (server.js, "Discover news"): whether each account wants them (on unless
+  // turned off), and the seq each public post first got, so an update doesn't count as a new post.
+  `ALTER TABLE users ADD COLUMN discover_news INTEGER NOT NULL DEFAULT 1;
+   ALTER TABLE public_posts ADD COLUMN first_seq INTEGER NOT NULL DEFAULT 0;
+   UPDATE public_posts SET first_seq = seq;`,
 ];
 
 export function migrate() {

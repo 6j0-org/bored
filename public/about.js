@@ -6,6 +6,7 @@ import { whenLabel, localToday } from './when.js';
 import { costLabel } from './cost.js';
 import { locationHtml } from './location.js';
 import { toSvg as identicon } from './vendor/jdenticon.js';
+import { tap } from './pointer.js';
 
 const deck = document.querySelector('.deck');
 const FLING = 100; // px of drag that counts as a swipe, as in the app
@@ -104,3 +105,6 @@ if (deck) {
     actions.querySelector('.round.yes').onclick = () => swipe(current, 1);
   }
 }
+
+// "tap", "click", or "tap or click", to match this device (public/pointer.js).
+document.querySelectorAll('[data-tap]').forEach(el => { el.textContent = tap; });

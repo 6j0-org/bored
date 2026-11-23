@@ -20,14 +20,19 @@ const r = { posted: await A.ev(`document.getElementById('toast').textContent`) }
 await B.tab('confirm'); await B.tab('discover');
 await B.until(`document.querySelector('.card.top h2')?.textContent === 'Two-browser picnic'`).catch(async e => { console.log(JSON.stringify(r), await B.ev(`[...document.querySelectorAll('.card h2')].map(h => h.textContent).slice(0, 5).join(' | ')`), await B.ev(`import('/mail.js').then(m => m.mailView().deck.slice(0,3).map(p => p.title).join(' | '))`)); throw e; });
 r.card = await B.ev(`document.querySelector('.card.top .who b').innerText`);
-// I'm in opens Ask to join; Cancel puts the card back, and sending it without a rating or note works too.
+// I'm in turns the card over to Ask to join (no dialog); Back turns it face up again, and I'm in then Send request
+// (a second yes) sends it without a rating or note.
 await B.ev(`document.querySelector('.round.yes').click()`);
-await B.until(`document.querySelector('.sheet [data-cancel]')`);
-await B.ev(`document.querySelector('.sheet [data-cancel]').click()`); await wait(600);
-r.cardBack = await B.ev(`document.querySelector('.card.top h2')?.textContent`);
+await B.until(`document.querySelector('.card.top.flipped .join-back textarea[name=note]')`);
+assert.equal(await B.ev(`!!document.querySelector('.sheet')`), false, 'no dialog');
+assert.deepEqual(await B.ev(`[...document.querySelectorAll('.actions .round')].map(b => b.textContent)`), ['Back', 'Send request']);
+await wait(700); // the turn finishes
+await B.ev(`document.querySelector('.round.no').click()`); await wait(800);
+r.cardBack = await B.ev(`document.querySelector('.card.top:not(.flipped) h2')?.textContent`);
+assert.deepEqual(await B.ev(`[...document.querySelectorAll('.actions .round')].map(b => b.textContent)`), ['Pass', "I'm in"]);
 await B.ev(`document.querySelector('.round.yes').click()`);
-await B.until(`document.querySelector('.sheet form')`);
-await B.ev(`document.querySelector('.sheet form').requestSubmit()`); await wait(2500);
+await B.until(`document.querySelector('.card.top.flipped')`); await wait(700);
+await B.ev(`document.querySelector('.round.yes').click()`); await wait(2500);
 r.asked = await B.ev(`document.getElementById('toast').textContent`);
 
 // Host: Confirm shows the request, named (the guest is a contact); yes → It's on! → chat.
@@ -50,6 +55,8 @@ r.hostChat = (await A.text()).slice(0, 160);
 await B.tab('plans');
 await B.until(`document.getElementById('view').innerText.includes('Two-browser picnic')`);
 r.guestPlans = (await B.text()).slice(0, 400);
+// The guest's card for it has no Edit (the guest may host other plans, like the demo's seeded ones, which do).
+assert.equal(await B.ev(`[...document.querySelectorAll('.plan-card')].find(c => c.innerText.includes('Two-browser picnic'))?.querySelector('[data-edit-plan]') === null`), true, 'only the host gets Edit');
 await B.ev(`document.querySelector('.plan-card[data-id^="m:"] h2').click()`); await wait(2000);
 await B.ev(`document.getElementById('chatBody').value = 'hi from the guest'; document.getElementById('composer').requestSubmit()`); await wait(2000);
 
@@ -66,11 +73,34 @@ await B.until(`document.querySelector('#msgs .msg.mine')?.innerText.includes('hi
 await A.until(`[...document.querySelectorAll('#msgs .msg')].some(m => m.innerText.includes('hi from the guest, edited') && m.querySelector('.msg-edited'))`, 20000);
 assert.equal(await A.ev(`document.querySelectorAll('#msgs .msg.editable').length`), 1, 'the host can edit only their own message');
 
+// The guest sends another message and deletes it (tap it, Delete, confirm); both sides see "Message deleted".
+await B.ev(`document.getElementById('chatBody').value = 'wrong chat, sorry'; document.getElementById('composer').requestSubmit()`);
+await A.until(`document.getElementById('msgs')?.innerText.includes('wrong chat, sorry')`, 20000);
+await B.until(`[...document.querySelectorAll('#msgs .msg.mine.editable')].some(m => m.innerText.includes('wrong chat, sorry'))`);
+await B.ev(`window.confirm = () => true; [...document.querySelectorAll('#msgs .msg.mine.editable')].find(m => m.innerText.includes('wrong chat, sorry')).click()`);
+await B.until(`document.querySelector('[data-delete-msg]')`);
+await B.ev(`document.querySelector('[data-delete-msg]').click()`);
+await B.until(`document.querySelector('#msgs .msg.deleted.mine') && !document.getElementById('msgs').innerText.includes('wrong chat, sorry')`, 10000);
+await A.until(`document.querySelector('#msgs .msg.deleted:not(.mine)') && !document.getElementById('msgs').innerText.includes('wrong chat, sorry')`, 20000);
+assert.equal(await B.ev(`document.querySelectorAll('#msgs .msg.editable').length`), 1, 'a deleted message can no longer be edited');
+
+// Web addresses in chat are links (opening in a new tab), without the full stop after them.
+await B.ev(`document.getElementById('chatBody').value = 'The map: https://example.com/park?x=1.'; document.getElementById('composer').requestSubmit()`);
+await A.until(`document.querySelector('#msgs a[href="https://example.com/park?x=1"][target=_blank]')`, 20000);
+assert.equal(await A.ev(`document.querySelector('#msgs a[href="https://example.com/park?x=1"]').closest('.msg').innerText`), 'The map: https://example.com/park?x=1.');
+
 // A tapped "New activity" notification (?open=mail) opens the newest thing in the mail: this chat.
 await A.send('Page.navigate', { url: BASE + '/?open=mail' });
 await A.until(`document.getElementById('msgs')?.innerText.includes('hi back')`, 20000);
 await A.ev(`document.querySelector('.back').click()`); await wait(1500);
 r.hostPlans = (await A.text()).slice(0, 400);
+// The host can edit the plan from its Plans card: Edit opens the post's form, filled in, with the re-confirm note.
+await A.ev(`document.querySelector('.plan-card [data-edit-plan]').click()`);
+await A.until(`document.querySelector('#sheetForm')`);
+assert.match(await A.ev(`document.querySelector('#sheetForm h2').innerText`), /Edit post/);
+assert.equal(await A.ev(`document.querySelector('#sheetForm input[name=title]').value`), 'Two-browser picnic');
+assert.match(await A.ev(`document.querySelector('#sheetForm').innerText`), /asked to re-confirm/);
+await A.ev(`document.getElementById('cancelSheet').click()`);
 r.guestChat = await B.ev(`document.getElementById('msgs').innerText.replace(/\\s+/g, ' ')`);
 // Guest can't make it: the host's post opens up again.
 await B.ev(`window.confirm = () => true; document.getElementById('leave').click()`); await wait(2500);
@@ -85,7 +115,7 @@ assert.equal(r.badge, '1');
 assert.match(r.request, /Guesty One of your contacts/, 'a contact who asks is named');
 assert.match(r.overlay, /^It's on! You and Guesty/);
 assert.match(r.guestPlans, /Two-browser picnic[\s\S]*Hosted by Hosty/);
-assert.match(r.hostPlans, /Two-browser picnic[\s\S]*Guesty is going hi back/);
+assert.match(r.hostPlans, /Two-browser picnic[\s\S]*Guesty is going The map: https:\/\/example\.com\/park/, 'the newest message, not the deleted one');
 assert.match(r.guestChat, /hi from the guest, edited edited hi back/);
 assert.match(r.hostPostAfterLeave, /^LOOKING .*0\/1 matched/, 'the post opens up again when the guest leaves');
 A.close(); B.close();

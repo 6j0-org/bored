@@ -27,12 +27,13 @@ for (let i = 0; i < 30; i++) {
   await B.ev(`document.querySelector('.round.no').click()`); await wait(900);
 }
 r.strangerCard = await B.ev(`document.querySelector('.card.top').innerText.replace(/\\s+/g, ' ').slice(0, 200)`);
-// I'm in opens Ask to join: 4 stars (tapping the 2nd then the 4th) and a note.
+// I'm in turns the card over to Ask to join: 4 stars (tapping the 2nd then the 4th) and a note, then a second yes
+// sends it.
 await B.ev(`document.querySelector('.round.yes').click()`);
-await B.until(`document.querySelector('.sheet textarea[name=note]')`);
-await B.ev(`document.querySelector('.sheet [data-interest="2"]').click(); document.querySelector('.sheet [data-interest="4"]').click()`);
-r.stars = await B.ev(`[...document.querySelectorAll('.sheet .interest-star')].map(b => b.textContent).join('') + ' ' + document.querySelector('.sheet .interest-label').textContent`);
-await B.ev(`(() => { const f = document.querySelector('.sheet form'); f.note.value = 'I can bring a spare kite.'; f.requestSubmit(); })()`);
+await B.until(`document.querySelector('.card.top.flipped textarea[name=note]')`); await wait(700);
+await B.ev(`document.querySelector('.join-back [data-interest="2"]').click(); document.querySelector('.join-back [data-interest="4"]').click()`);
+r.stars = await B.ev(`[...document.querySelectorAll('.join-back .interest-star')].map(b => b.textContent).join('') + ' ' + document.querySelector('.join-back .interest-label').textContent`);
+await B.ev(`document.querySelector('.join-back textarea[name=note]').value = 'I can bring a spare kite.'; document.querySelector('.round.yes').click()`);
 await wait(2500);
 r.asked = await B.ev(`document.getElementById('toast').textContent`);
 

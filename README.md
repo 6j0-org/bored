@@ -340,6 +340,7 @@ See `TODO.md` for the full list of open security and privacy issues.
 - `public/postfields.js`: checks a post's fields, in the browser and (for public posts) on the server
 - `public/location.js`: "lat,lon" locations, links to the viewer's maps app, and a small OpenStreetMap pin picker
 - `public/theme.js`: the automatic / light / dark theme switch, applied before the page draws
+- `public/pointer.js`: "tap", "click", or "tap or click" in UI text, to match how the device points
 - `public/board.webp`: the wooden board behind the Bored title
 - `public/when.js`, `public/cost.js`: event time (with repeat rules) and cost formats, shared by server and browser
 - `public/moderation.js`: word filters, report thresholds, and moderation settings
@@ -354,6 +355,14 @@ See `TODO.md` for the full list of open security and privacy issues.
 - `docs/encryption.md`: how the encryption and privacy system works, and why
 - `docs/styling.md`: how the app looks: the rule for buttons, filters, and choices, plus colors, cards, the discard pile, and page structure
 - `TODO.md`: open security and privacy issues, by priority
+- `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`: how to contribute, the Contributor Covenant, and how to report
+  security holes privately
+
+## Contributing
+
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to report bugs, suggest ideas, and send changes. Everyone taking part
+follows the [Code of Conduct](CODE_OF_CONDUCT.md). Please report security and privacy holes privately, as
+[`SECURITY.md`](SECURITY.md) describes.
 
 ## License
 

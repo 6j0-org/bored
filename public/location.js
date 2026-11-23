@@ -6,6 +6,8 @@
 // The picker uses no library. Its tiles come from tile.openstreetmap.org, and only while it is open: that is the
 // only third-party request the browser makes, so the rest of the app never talks to OSM directly.
 
+import { tap } from './pointer.js';
+
 // A location pin (the teardrop map marker), drawn in the current text color. Used for the Where field's map button.
 export const PIN_SVG = '<svg class="pin-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" ' +
   'stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 21.5s-7-6.1-7-11.6a7 7 0 0 1 14 0c0 5.5-7 11.6-7 11.6z"/>' +
@@ -95,7 +97,7 @@ function unproject(x, y, z) {
 // or undefined if they cancelled.
 // Options: title; note (the hint under the map); nameField: false hides the place name box and never looks one up;
 // clearLabel for the button that resolves to ''.
-const POST_NOTE = `Search for a place, or tap the map to drop the pin. Anyone who can see your post can see this spot, so a nearby
+const POST_NOTE = `Search for a place, or ${tap} the map to drop the pin. Anyone who can see your post can see this spot, so a nearby
   landmark may be better than your front door.`;
 export function pickLocation(initial = '', initialName = '', { title = 'Where?', note = POST_NOTE, nameField = true, clearLabel = 'No location' } = {}) {
   return new Promise((resolve) => {
@@ -114,7 +116,7 @@ export function pickLocation(initial = '', initialName = '', { title = 'Where?',
           <button type="submit" class="btn ghost small">Search</button>
         </form>
         <ul class="map-results" hidden aria-live="polite"></ul>
-        <div class="map" tabindex="0" aria-label="Map. Drag to move, tap to place the pin, and plus and minus keys to zoom.">
+        <div class="map" tabindex="0" aria-label="Map. Drag to move, ${tap} to place the pin, and plus and minus keys to zoom.">
           <div class="tiles"></div>
           <div class="pin" hidden>${MAP_PIN_SVG}</div>
           <div class="map-zoom">
@@ -302,7 +304,7 @@ export function pickLocation(initial = '', initialName = '', { title = 'Where?',
         showResults(places.length
           ? places.map((p, i) => `<li><button type="button" data-result="${i}"><strong>${esc(p.name)}</strong>
               ${p.detail ? `<span>${esc(p.detail)}</span>` : ''}</button></li>`).join('')
-          : '<li class="note">No places found. Try adding the town, or move the map and tap the spot.</li>');
+          : `<li class="note">No places found. Try adding the town, or move the map and ${tap} the spot.</li>`);
       } catch (err) {
         if (n === searchNo) showResults(`<li class="note">${esc(err.message)}</li>`);
       }

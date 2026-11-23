@@ -16,6 +16,7 @@ import { postFields, FIELD_LABELS } from './postfields.js';
 import { CURRENCIES, DEFAULT_CURRENCY, costLabel } from './cost.js';
 import { toSvg as identicon } from './vendor/jdenticon.js';
 import { addToCalendar } from './ics.js';
+import { tap, Tap } from './pointer.js';
 import {
   builtinTerms, ownTerms, censor, mentions, reportedFor, moderationSettings, parseTerms, reportThreshold, REPORT_REASONS,
   MAX_LISTS, MAX_LIST_WORDS, MAX_THRESHOLD,
@@ -234,6 +235,20 @@ function saveDiscoverFilters() {
 }
 
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+// Text as HTML, escaped, with its web addresses (http:// or https://) as links that open in a new tab. Punctuation
+// right after an address (a full stop, a comma, or a closing bracket with no opening one in it) isn't part of it.
+function linkify(text) {
+  return String(text ?? '').split(/(https?:\/\/[^\s<>"']+)/i).map((part, i) => {
+    if (i % 2 === 0) return esc(part);
+    let url = part, after = '';
+    for (let m; (m = url.match(/[.,;:!?'")\]}]$/));) {
+      if (m[0] === ')' && url.split('(').length > url.split(')').length - 1) break; // a bracket that belongs, e.g. Wikipedia
+      after = m[0] + after; url = url.slice(0, -1);
+    }
+    try { new URL(url); } catch { return esc(part); }
+    return `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer nofollow">${esc(url)}</a>${esc(after)}`;
+  }).join('');
+}
 
 async function api(path, { method = 'GET', body } = {}) {
   const res = await fetch(path, {
@@ -530,7 +545,7 @@ function dragToSwipe(el, onSwipe, onDragging = () => {}) {
   let sx = 0, sy = 0, dx = 0, dy = 0, dragging = false;
   const back = () => { el.style.transform = ''; if (yesS) yesS.style.opacity = 0; if (noS) noS.style.opacity = 0; };
   el.addEventListener('pointerdown', (e) => {
-    if (e.target.closest('a,button')) return;
+    if (e.target.closest('a, button, input, textarea, select, label')) return;
     dragging = true; sx = e.clientX; sy = e.clientY; dx = dy = 0;
     el.setPointerCapture(e.pointerId); el.classList.add('dragging'); onDragging(true);
   });
@@ -552,7 +567,10 @@ function dragToSwipe(el, onSwipe, onDragging = () => {}) {
 }
 
 // No undo: a swiped card goes to the view's discard pile (mountPile), where the answer can be changed.
-function mountDeck(root, { items, renderCard, onSwipe, yesLabel, noLabel, empty }) {
+// back, if given, turns a card over on a yes instead of using it up: { render(item) → HTML for the back, or null to
+// skip it; mount(backEl) → read(), whose result reaches onSwipe as extra.back; yesLabel, noLabel }. On the back, yes
+// (swipe right, the yes button, or →) goes ahead and no turns the card face up again.
+function mountDeck(root, { items, renderCard, onSwipe, yesLabel, noLabel, empty, back = null }) {
   root.innerHTML = `
     <div class="deck-wrap">
       <div class="deck"></div>
@@ -560,13 +578,20 @@ function mountDeck(root, { items, renderCard, onSwipe, yesLabel, noLabel, empty 
         <button class="btn round no">${esc(noLabel)}</button>
         <button class="btn round yes">${esc(yesLabel)}</button>
       </div>
-      <div class="hint">Swipe right for <b>${esc(yesLabel)}</b>, left for <b>${esc(noLabel)}</b> · or use ← →</div>
+      <div class="hint"></div>
     </div>`;
   const wrap = root.querySelector('.deck-wrap');
   const deck = root.querySelector('.deck');
   const queue = [...items];
   const used = new Set(); // ids of cards already swiped away, so an update doesn't bring them back
   let busy = false, dragging = false;
+  let flipped = null; // { el, read } while the top card shows its back
+  // The buttons and hint say what yes and no do now: the deck's own labels, or the back's.
+  const setLabels = (yes, no) => {
+    root.querySelector('.round.yes').textContent = yes; root.querySelector('.round.no').textContent = no;
+    root.querySelector('.hint').innerHTML = `Swipe right for <b>${esc(yes)}</b>, left for <b>${esc(no)}</b> · or use ← →`;
+  };
+  setLabels(yesLabel, noLabel);
 
   function draw() {
     deck.innerHTML = '';
@@ -575,7 +600,8 @@ function mountDeck(root, { items, renderCard, onSwipe, yesLabel, noLabel, empty 
     queue.slice(0, 2).reverse().forEach((item, i, arr) => {
       const el = document.createElement('div');
       el.className = 'card ' + (i === arr.length - 1 ? 'top' : 'second');
-      el.innerHTML = `<div class="stamp yes">${esc(yesLabel)}</div><div class="stamp no">${esc(noLabel)}</div>` + renderCard(item);
+      el.innerHTML = `<div class="stamp yes">${esc(yesLabel)}</div><div class="stamp no">${esc(noLabel)}</div>`
+        + `<div class="face front">${renderCard(item)}</div>`;
       deck.appendChild(el);
     });
     attachDrag(deck.querySelector('.card.top'));
@@ -583,18 +609,60 @@ function mountDeck(root, { items, renderCard, onSwipe, yesLabel, noLabel, empty 
 
   const flyout = (yes) => `translate(${yes ? 600 : -600}px, 40px) rotate(${yes ? 30 : -30}deg)`;
 
+  // Turn the top card over, to its back (html) or face up (null): a quarter turn to edge-on (sliding back to the middle
+  // if it was dragged), swap the faces, then on round the same way from the other edge, so it reads as one turn of a
+  // card with two sides. Turning back goes the other way. Without animation if the device asks for less motion.
+  const still = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function turn(el, html) {
+    busy = true;
+    el.querySelectorAll('.stamp').forEach(st => { st.style.opacity = 0; });
+    const dir = html ? 1 : -1, half = still() ? 0 : 160;
+    // The same function list as a drag's transform (plus rotateY), so it slides back while turning, smoothly.
+    el.style.transition = half ? `transform ${half}ms ease-in` : 'none';
+    el.style.transform = `translate(0px, 0px) rotate(0deg) rotateY(${90 * dir}deg)`;
+    setTimeout(() => {
+      el.querySelector('.face.back')?.remove();
+      el.querySelector('.face.front').hidden = Boolean(html);
+      el.classList.toggle('flipped', Boolean(html));
+      const [yes, no] = html ? [back.yesLabel, back.noLabel] : [yesLabel, noLabel];
+      el.querySelector('.stamp.yes').textContent = yes; el.querySelector('.stamp.no').textContent = no;
+      setLabels(yes, no);
+      flipped = null;
+      if (html) {
+        const face = document.createElement('div');
+        face.className = 'face back'; face.innerHTML = html;
+        el.append(face);
+        flipped = { el, read: back.mount(face) };
+      }
+      el.style.transition = 'none';
+      el.style.transform = `rotateY(${-90 * dir}deg)`;
+      void el.offsetWidth; // start the second half from the far edge
+      el.style.transition = half ? `transform ${half + 60}ms ease-out` : 'none';
+      el.style.transform = 'rotateY(0deg)';
+      setTimeout(() => { el.style.transition = ''; el.style.transform = ''; busy = false; }, half + 80);
+    }, half);
+  }
+
   async function decide(yes, el = deck.querySelector('.card.top'), extra = {}) {
     if (busy || !el || !queue.length) return;
+    if (flipped?.el === el) {
+      if (!yes) return turn(el, null);
+      extra = { ...extra, back: flipped.read() };
+    } else if (yes && back) {
+      const html = back.render(queue[0]);
+      if (html) return turn(el, html);
+    }
     busy = true;
     const item = queue[0];
     el.style.transform = flyout(yes);
     el.style.opacity = '0';
     try {
       if ((await onSwipe(item, yes, extra)) === KEEP_CARD) {
-        // e.g. a guest swiped yes: put the card back instead of using it up.
+        // e.g. a guest swiped yes: put the card back instead of using it up (face up).
         el.style.transform = ''; el.style.opacity = '';
         el.querySelectorAll('.stamp').forEach(st => { st.style.opacity = 0; });
         busy = false;
+        if (flipped?.el === el) turn(el, null);
         return;
       }
     } catch (e) {
@@ -602,6 +670,7 @@ function mountDeck(root, { items, renderCard, onSwipe, yesLabel, noLabel, empty 
     }
     used.add(item.id);
     queue.shift();
+    if (flipped?.el === el) { flipped = null; setLabels(yesLabel, noLabel); }
     setTimeout(() => { busy = false; draw(); }, 250);
   }
 
@@ -621,7 +690,7 @@ function mountDeck(root, { items, renderCard, onSwipe, yesLabel, noLabel, empty 
   // card is moving (being dragged, flying out, or coming back); the caller can try again later.
   return {
     update(fresh) {
-      if (busy || dragging || !document.body.contains(deck)) return false;
+      if (busy || dragging || flipped || !document.body.contains(deck)) return false;
       const byId = new Map(fresh.filter(x => !used.has(x.id)).map(x => [x.id, x]));
       const shown = queue.slice(0, 2).map(x => x.id + JSON.stringify(x)).join('|');
       const kept = queue.filter(x => byId.has(x.id)).map(x => byId.get(x.id));
@@ -774,14 +843,14 @@ const TOUR = [
   { tab: 'profile', target: '#newInvite', title: 'Connect', text: `Welcome to Bored! Here's how it works, in five steps. First, invite your
     friends: on Profile, create an invitation and send them the link. Once you're connected, you can share posts with
     just them.` },
-  { tab: 'post', target: '#postIdea', title: 'Post', text: `Post something you want to do or need help with. Tap an idea to fill in the
+  { tab: 'post', target: '#postIdea', title: 'Post', text: `Post something you want to do or need help with. ${Tap} an idea to fill in the
     form, or write your own. When, where, and cost are optional: leave them blank and play it by ear.` },
   { tab: 'discover', target: '#deckHost', title: 'Discover', text: `Swipe through what other people have posted: right means “I'm in,” and
     left means pass. Open the filters to narrow it down by tags, distance, date, and more.` },
   { tab: 'confirm', target: '#deckHost', title: 'Confirm', text: `When people want to join your posts, they show up here. Swipe right for
     “Let's do it,” or left if you're not feeling it. There's no obligation.` },
   { tab: 'plans', title: 'Plan', text: `When you both say yes, it's on, and it shows up in Plans. Chat to sort out the
-    details, tap When to add it to your calendar, and then go do the thing!` },
+    details, ${tap} When to add it to your calendar, and then go do the thing!` },
 ];
 let tour = null; // { step, el }
 let tourDone = false; // finished or skipped in this session, even if saving that to the vault failed
@@ -888,8 +957,8 @@ async function viewFeedback(v) {
     const page = mountFeedback(el, {
       buttonClass: 'btn ghost small', primaryClass: 'btn', actionClass: 'btn small', author: feedbackAuthor,
       intro: isDemo()
-        ? "Ideas, problems, or questions? In this demo only you and the developers can see what you post here. Tap a post to open its chat. Please don't include anything personal."
-        : "Ideas, problems, or questions? Everyone signed in can read what's posted here and see your profile icon, and people you're connected with see the name they gave you. It isn't encrypted, so please don't include anything personal. Tap a post to open its chat, where anyone can reply.",
+        ? `Ideas, problems, or questions? In this demo only you and the developers can see what you post here. ${Tap} a post to open its chat. Please don't include anything personal.`
+        : `Ideas, problems, or questions? Everyone signed in can read what's posted here and see your profile icon, and people you're connected with see the name they gave you. It isn't encrypted, so please don't include anything personal. ${Tap} a post to open its chat, where anyone can reply.`,
     });
     feedbackPage = { guid: state.me.guid, el, page };
   } else if (!state.feedbackThread) feedbackPage.page.refresh();
@@ -1382,9 +1451,12 @@ async function viewDiscover(v) {
       <button type="button" class="chip filter ${on ? 'on' : ''}" data-${kind}="${esc(value)}" aria-pressed="${on}" ${title ? `title="${esc(title)}"` : ''}>
         ${label} <span class="n">${count}</span></button>`;
     filtersEl.innerHTML = `
-      <details class="filter-box" ${state.filtersOpen ? 'open' : ''}>
-        <summary>Filters${on ? ` <span class="badge">${on}</span>` : ''}</summary>
-        <div class="filter-body">
+      <div class="filter-box">
+        <div class="filter-head">
+          <button type="button" class="filter-toggle" data-filters-toggle aria-expanded="${state.filtersOpen}" aria-controls="filterBody">Filters${on ? ` <span class="badge">${on}</span>` : ''}</button>
+          ${on ? `<button type="button" class="chip filter clear" data-clear>Clear all</button>` : ''}
+        </div>
+        <div class="filter-body" id="filterBody" ${state.filtersOpen ? '' : 'hidden'}>
           <div class="filter-row" role="group" aria-label="Filter by date"><span class="label">When</span>
             ${Object.entries(DATE_FILTERS).map(([key, label]) => chip('date', key, label, dateCount[key] ?? 0, selDate === key)).join('')}</div>
           <div class="filter-row" role="group" aria-label="Filter by distance"><span class="label">Near</span>
@@ -1397,11 +1469,9 @@ async function viewDiscover(v) {
             ${tags.map(({ tag, count }) => chip('tag', tag, `#${esc(tag)}`, count, selTags.has(tag))).join('')}</div>` : ''}
           <div class="filter-row" role="group" aria-label="Filter by cost"><span class="label">Cost</span>
             ${options.costs.map(({ cost, count }) => chip('cost', cost, esc(COST_FILTERS[cost]), count, selCosts.has(cost))).join('')}
-            ${on ? `<button type="button" class="chip filter clear" data-clear>Clear all</button>` : ''}
           </div>
         </div>
-      </details>`;
-    filtersEl.querySelector('details').addEventListener('toggle', (e) => { state.filtersOpen = e.target.open; });
+      </div>`;
   }
 
   // soft: an automatic refresh, which merges into the deck instead of starting it over, and leaves the filters
@@ -1499,6 +1569,12 @@ async function viewDiscover(v) {
         { timeout: 15000, maximumAge: 300000 });
       return;
     }
+    if (b.hasAttribute('data-filters-toggle')) {
+      state.filtersOpen = !state.filtersOpen;
+      b.setAttribute('aria-expanded', String(state.filtersOpen));
+      filtersEl.querySelector('.filter-body').hidden = !state.filtersOpen;
+      return;
+    }
     if (b.hasAttribute('data-clear')) clearAll();
     else if (b.dataset.tag) toggle(state.discoverTags, b.dataset.tag);
     else if (b.dataset.cost) toggle(state.discoverCosts, b.dataset.cost);
@@ -1525,6 +1601,43 @@ async function viewDiscover(v) {
 const MAX_JOIN_NOTE = 280; // what requestJoin keeps (public/mail.js)
 const INTEREST_LABELS = ['Just curious', 'A little interested', 'Somewhat interested', 'Interested', 'Very interested', "Can't wait"];
 const starsText = (n) => '★'.repeat(n) + '☆'.repeat(5 - n);
+// The optional extras when asking to join: how interested (0 to 5 stars, or not rated) and a note for the host. On
+// the back of a Discover card (mountDeck's back), and in askJoin's dialog for a card in the discard pile.
+// intro: the sentence at the top, saying both are optional and how to skip them; rows: the note box's height.
+const joinExtrasHtml = (intro, rows = 3) => `
+  <p class="join-intro">${intro}</p>
+  <fieldset class="interest">
+    <legend>How interested are you?</legend>
+    <div class="interest-picks" role="radiogroup" aria-label="How interested are you, 0 to 5 stars">
+      <button type="button" class="interest-zero" role="radio" aria-checked="false" data-interest="0" aria-label="0 stars: ${esc(INTEREST_LABELS[0])}">0</button>
+      ${[1, 2, 3, 4, 5].map(n => `<button type="button" class="interest-star" role="radio" aria-checked="false" data-interest="${n}"
+        aria-label="${n} star${n === 1 ? '' : 's'}: ${esc(INTEREST_LABELS[n])}">☆</button>`).join('')}
+    </div>
+    <p class="note interest-label" aria-live="polite">Not rated. Only the host sees it.</p>
+  </fieldset>
+  <label>A note for the host
+    <textarea name="note" rows="${rows}" maxlength="${MAX_JOIN_NOTE}" placeholder="e.g. I have a spare headlamp if anyone needs one."></textarea></label>
+  <p class="note"><span class="note-count">0 / ${MAX_JOIN_NOTE}</span> · Only the host can read it, with your request.</p>`;
+// Wires up joinExtrasHtml inside root; returns read() → { note, interest } (interest: 0 to 5, or null).
+function mountJoinExtras(root) {
+  const box = root.querySelector('textarea[name=note]'), count = root.querySelector('.note-count');
+  let interest = null;
+  // Tapping the picked rating again clears it.
+  const pick = (n) => {
+    interest = interest === n ? null : n;
+    root.querySelectorAll('[data-interest]').forEach(b => {
+      const v = Number(b.dataset.interest);
+      b.setAttribute('aria-checked', String(v === interest));
+      if (v > 0) { b.textContent = interest !== null && v <= interest ? '★' : '☆'; b.classList.toggle('on', interest !== null && v <= interest); }
+      else b.classList.toggle('on', interest === 0);
+    });
+    root.querySelector('.interest-label').textContent = interest === null ? 'Not rated. Only the host sees it.'
+      : `${interest} of 5: ${INTEREST_LABELS[interest]}. Only the host sees it.`;
+  };
+  root.querySelectorAll('[data-interest]').forEach(b => b.onclick = () => pick(Number(b.dataset.interest)));
+  box.addEventListener('input', () => { count.textContent = `${box.value.length} / ${MAX_JOIN_NOTE}`; });
+  return () => ({ note: box.value.trim(), interest });
+}
 function askJoin(t) {
   return new Promise((resolve) => {
     const sheet = document.createElement('div');
@@ -1533,44 +1646,18 @@ function askJoin(t) {
       <form class="stack panel">
         <h2>Ask to join</h2>
         <p><b>${esc(t.title)}</b></p>
-        <fieldset class="interest">
-          <legend>How interested are you? (optional)</legend>
-          <div class="interest-picks" role="radiogroup" aria-label="How interested are you, 0 to 5 stars">
-            <button type="button" class="interest-zero" role="radio" aria-checked="false" data-interest="0" aria-label="0 stars: ${esc(INTEREST_LABELS[0])}">0</button>
-            ${[1, 2, 3, 4, 5].map(n => `<button type="button" class="interest-star" role="radio" aria-checked="false" data-interest="${n}"
-              aria-label="${n} star${n === 1 ? '' : 's'}: ${esc(INTEREST_LABELS[n])}">☆</button>`).join('')}
-          </div>
-          <p class="note interest-label" aria-live="polite">Not rated. Only the host sees it.</p>
-        </fieldset>
-        <label>A note for the host (optional)
-          <textarea name="note" rows="3" maxlength="${MAX_JOIN_NOTE}" placeholder="e.g. I have a spare headlamp if anyone needs one."></textarea></label>
-        <p class="note"><span class="note-count">0 / ${MAX_JOIN_NOTE}</span> · Only the host can read it, with your request.</p>
+        ${joinExtrasHtml('These are optional. Leave them blank to just send your request.')}
         <div class="two">
           <button type="button" class="btn ghost" data-cancel>Cancel</button>
           <button class="btn">Send request</button>
         </div>
       </form>`;
     document.body.appendChild(sheet);
-    const box = sheet.querySelector('textarea'), count = sheet.querySelector('.note-count');
-    let interest = null;
-    // Tapping the picked rating again clears it.
-    const pick = (n) => {
-      interest = interest === n ? null : n;
-      sheet.querySelectorAll('[data-interest]').forEach(b => {
-        const v = Number(b.dataset.interest);
-        b.setAttribute('aria-checked', String(v === interest));
-        if (v > 0) { b.textContent = interest !== null && v <= interest ? '★' : '☆'; b.classList.toggle('on', interest !== null && v <= interest); }
-        else b.classList.toggle('on', interest === 0);
-      });
-      sheet.querySelector('.interest-label').textContent = interest === null ? 'Not rated. Only the host sees it.'
-        : `${interest} of 5: ${INTEREST_LABELS[interest]}. Only the host sees it.`;
-    };
-    sheet.querySelectorAll('[data-interest]').forEach(b => b.onclick = () => pick(Number(b.dataset.interest)));
+    const read = mountJoinExtras(sheet);
     const done = (v) => { sheet.remove(); resolve(v); };
-    box.addEventListener('input', () => { count.textContent = `${box.value.length} / ${MAX_JOIN_NOTE}`; });
     sheet.querySelector('[data-cancel]').onclick = () => done(null);
     sheet.onclick = (e) => { if (e.target === sheet) done(null); };
-    sheet.querySelector('form').onsubmit = (e) => { e.preventDefault(); done({ note: box.value.trim(), interest }); };
+    sheet.querySelector('form').onsubmit = (e) => { e.preventDefault(); done(read()); };
     sheet.querySelector('.interest-star').focus();
   });
 }
@@ -1580,15 +1667,25 @@ function deckOptions(events, changed, filters) {
     items: events,
     renderCard: eventCard,
     yesLabel: "I'm in", noLabel: 'Pass',
-    onSwipe: async (t, yes) => {
+    // Saying yes turns the card over: the back has the optional rating and note for the host, and swiping right
+    // again sends the request (with or without them); left turns it back. Guests get no back (they sign in first).
+    back: {
+      yesLabel: 'Send request', noLabel: 'Back',
+      render: (t) => state.me ? `<div class="body join-back">
+        <h2>Ask to join</h2>
+        <p class="join-title"><b>${esc(t.title)}</b></p>
+        ${joinExtrasHtml('These are optional. Swipe right again to skip them and send your request.', 2)}</div>` : null,
+      mount: mountJoinExtras,
+    },
+    onSwipe: async (t, yes, extra = {}) => {
       if (!state.me) {
         // Guests can browse; passing is just local, but saying yes needs an account.
         if (yes) { toast('Sign in or create an account to say yes.'); go('account'); return KEEP_CARD; }
         return;
       }
       if (!yes) { await pass(t.pid); return changed(); }
-      // Saying yes asks how interested they are and for a note for the host first; Cancel puts the card back.
-      const ask = await askJoin(t);
+      // From the card's back: how interested they are and a note for the host (both optional).
+      const ask = extra.back || await askJoin(t);
       if (!ask) return KEEP_CARD;
       t.ch = await requestJoin(t.post, ask.note, ask.interest);
       changed();
@@ -1830,7 +1927,7 @@ function shellRefreshBadges() {
 function mailMatches(view) {
   const row = (r, role, post) => {
     const other = r.hello[role === 'host' ? 'attendee' : 'host']?.guid || (role === 'attendee' ? post.host : null) || null;
-    const last = [...r.timeline].reverse().find(t => t.event === 'chat');
+    const last = [...r.timeline].reverse().find(t => t.event === 'chat' && !t.deleted);
     return { id: `m:${r.id}`, ch: r.id, role, status: r.status, reconfirm: r.reconfirm, other, state: r, post,
       title: post.title, when_text: post.when_text, end_text: post.end_text, location: post.location, location_name: post.location_name, online: post.online,
       last_message: last?.text || '' };
@@ -1873,13 +1970,17 @@ async function viewPlans(v) {
   const who = (m) => `${personAvatar(m.other)}
     <div><b>${m.role === 'attendee' ? `Hosted by ${esc(nameOrSomeone(m.other))}` : `${esc(nameOrSomeone(m.other))} is going`}</b>
       ${m.last_message && !isBlocked({ guid: m.other }) ? `<small>${esc(clean(m.last_message))}</small>` : ''}</div>`;
+  // A plan I'm hosting that's still on can be edited, like it can from Your posts.
+  const hosted = (m) => m.role === 'host' && m.status === 'accepted'
+    && (mail?.hosting || []).find(h => h.post.pid === m.post.pid && LIVE.includes(h.status));
   const card = (m, { deletable = false } = {}) => {
     const [cls, text] = label(m);
     return `
     <div class="card flat plan-card" role="button" tabindex="0" data-id="${m.id}" aria-label="Chat about ${esc(m.title)}">
       <span class="label ${cls}">${esc(text)}</span>
       ${eventCard(mailCard(m.post), { who: who(m), mine: m.role === 'host' })}
-      ${deletable ? `<div class="card-actions"><button class="btn small" data-delete-plan="${esc(m.ch)}">Delete</button></div>` : ''}
+      ${deletable ? `<div class="card-actions"><button class="btn small" data-delete-plan="${esc(m.ch)}">Delete</button></div>`
+        : hosted(m) ? `<div class="card-actions"><button class="btn ghost small" data-edit-plan="${esc(m.post.pid)}">Edit</button></div>` : ''}
     </div>`;
   };
   // Waitlist cards have no chat yet: that opens when a spot does and they're matched.
@@ -1890,7 +1991,7 @@ async function viewPlans(v) {
       <div class="card-actions"><button class="btn small" data-leave-ch="${esc(m.ch)}">Leave</button></div>
     </div>`;
   v.innerHTML = `
-    ${active.length || past.length ? `<p class="hint plans-hint">Click a card to chat. In a chat, tap one of your messages to edit it.</p>` : ''}
+    ${active.length || past.length ? `<p class="hint plans-hint">${Tap} a card to chat. In a chat, ${tap} one of your messages to edit or delete it.</p>` : ''}
     ${active.length ? `<div class="section-title">Happening</div><div class="list">${active.map(card).join('')}</div>` : ''}
     ${waiting.length ? `<div class="section-title">Waitlist</div>
       <p class="note">These posts are full. You'll be matched automatically, in order, when a spot opens.</p>
@@ -1913,6 +2014,10 @@ async function viewPlans(v) {
     const ch = b.dataset.deletePlan;
     try { await vault.update(api, (d) => { d.deletedPlans = [...new Set([...(d.deletedPlans || []), ch])]; }); toast('Deleted'); render(); }
     catch (err) { toast(err.message); }
+  });
+  v.querySelectorAll('[data-edit-plan]').forEach(b => b.onclick = () => {
+    const h = (mail?.hosting || []).find(h => h.post.pid === b.dataset.editPlan);
+    if (h) openPostSheet(hostedPost(h));
   });
   v.querySelectorAll('[data-leave-ch]').forEach(b => b.onclick = async () => {
     if (!confirm('Leave this waitlist?')) return;
@@ -1995,7 +2100,7 @@ async function viewChat(v, id) {
 
   const msgsEl = v.querySelector('#msgs');
   let drawn = '', editing = false;
-  // My messages can be edited (tap one) while we're matched or after it happened.
+  // My messages can be edited or deleted (tap one) while we're matched or after it happened.
   const editable = (x) => ['accepted', 'attended'].includes(x.status);
   const edited = (t) => t.edited ? '<span class="msg-edited">edited</span>' : '';
   function drawMsgs(x) {
@@ -2003,10 +2108,11 @@ async function viewChat(v, id) {
     const nm = esc(nameOrSomeone(x.other)), blocked = isBlocked({ guid: x.other });
     const html = `<div class="msg sys">${x.role === 'attendee' ? `You asked to join and ${nm} said yes!` : `${nm} asked to join and you said yes!`}</div>` +
       x.state.timeline.map(t => t.event === 'chat'
-        ? t.role === x.role
-          ? editable(x) && t.n ? `<div class="msg mine editable" role="button" tabindex="0" data-n="${t.n}" title="Edit this message">${esc(t.text)}${edited(t)}</div>`
-            : `<div class="msg mine">${esc(t.text)}${edited(t)}</div>`
-          : blocked ? '<div class="msg hidden-msg">Message hidden</div>' : `<div class="msg">${esc(clean(t.text))}${edited(t)}</div>`
+        ? t.deleted ? `<div class="msg deleted${t.role === x.role ? ' mine' : ''}">Message deleted</div>`
+        : t.role === x.role
+          ? editable(x) && t.n ? `<div class="msg mine editable" role="button" tabindex="0" data-n="${t.n}" title="Edit or delete this message">${linkify(t.text)}${edited(t)}</div>`
+            : `<div class="msg mine">${linkify(t.text)}${edited(t)}</div>`
+          : blocked ? '<div class="msg hidden-msg">Message hidden</div>' : `<div class="msg">${linkify(clean(t.text))}${edited(t)}</div>`
         : mailSystemLine(t, x) ? `<div class="msg sys notice">${esc(mailSystemLine(t, x))}</div>` : '').join('') +
       (x.status === 'attended' ? '<div class="msg sys">Marked as done. Hope it was fun!</div>'
         : x.status === 'accepted' && x.reconfirm && x.role === 'host' ? `<div class="msg sys">Waiting for ${nm} to re-confirm</div>` : '');
@@ -2016,7 +2122,8 @@ async function viewChat(v, id) {
     window.scrollTo(0, document.body.scrollHeight);
   }
   drawMsgs(m);
-  // Editing one of my messages: it turns into a text box, and saving sends an edit that replaces its text for both of us.
+  // Editing one of my messages: it turns into a text box, and saving sends an edit that replaces its text for both of
+  // us. Delete, there, deletes it for both of us.
   function startEdit(el) {
     if (editing) return;
     const x = find(), t = x?.state.timeline.find(e => e.event === 'chat' && e.role === x.role && e.n === Number(el.dataset.n));
@@ -2025,11 +2132,17 @@ async function viewChat(v, id) {
     el.classList.add('editing'); el.removeAttribute('role'); el.removeAttribute('tabindex');
     el.innerHTML = `<form class="msg-edit"><label class="sr-only" for="msgEditBox">Edit message</label>
       <textarea id="msgEditBox" maxlength="2000" rows="2" required>${esc(t.text)}</textarea>
-      <div class="btns"><button type="button" class="btn ghost small" data-cancel>Cancel</button><button class="btn small">Save</button></div></form>`;
+      <div class="btns"><button type="button" class="btn small" data-delete-msg>Delete</button><span class="grow"></span>
+        <button type="button" class="btn ghost small" data-cancel>Cancel</button><button class="btn small">Save</button></div></form>`;
     const box = el.querySelector('textarea');
     box.focus(); box.setSelectionRange(box.value.length, box.value.length);
     const done = () => { editing = false; drawn = ''; drawMsgs(find()); };
     el.querySelector('[data-cancel]').onclick = done;
+    el.querySelector('[data-delete-msg]').onclick = async () => {
+      if (!confirm(`Delete this message? It's deleted for ${name} too.`)) return;
+      try { await loadMail().catch(() => {}); await sendOn(m.ch, { type: 'delete', of: t.n }); done(); }
+      catch (err) { toast(err.message); }
+    };
     el.querySelector('form').onsubmit = async (e) => {
       e.preventDefault();
       const text = box.value.trim();
@@ -2038,7 +2151,7 @@ async function viewChat(v, id) {
       catch (err) { toast(err.message); }
     };
   }
-  msgsEl.addEventListener('click', (e) => { const el = e.target.closest('.msg.editable'); if (el && !el.classList.contains('editing')) startEdit(el); });
+  msgsEl.addEventListener('click', (e) => { if (e.target.closest('a')) return; const el = e.target.closest('.msg.editable'); if (el && !el.classList.contains('editing')) startEdit(el); });
   msgsEl.addEventListener('keydown', (e) => {
     const el = e.target.closest?.('.msg.editable');
     if (el && e.target === el && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); startEdit(el); }
@@ -2299,8 +2412,8 @@ function audienceInputs(t = {}) {
         <label><input type="radio" name="visibility" value="public" ${vis === 'public' ? 'checked' : ''} ${lockPublic ? 'disabled' : ''}><span>Public</span></label>
       </div></fieldset>
       ${posted ? `<p class="note">A post stays ${vis} once it's posted. To change who can see it, remove it and post it again.</p>`
-      : lockPrivate ? `<p class="note">Private posts are shared with your contacts. You'll have some once you match with
-        someone on a post, or connect through an invitation from Profile.</p>` : ''}
+      : lockPrivate ? `<p class="note">To create a Private post, you need to have some contacts. Create an invitation and send
+        it to your friends to connect with them!</p>` : ''}
       <div class="audience" ${vis === 'public' ? 'hidden' : ''} data-audience="${esc(JSON.stringify(t.audience || emptyAudience()))}"></div>`;
 }
 
@@ -2508,15 +2621,18 @@ function fillPostForm(form, t = {}) {
   mountCostFields(form);
 }
 
+// One of my posts (an entry of the mail view's hosting), as Your posts shows it and openPostSheet edits it.
+const hostedPost = (h) => ({
+  ...h.post, id: `m:${h.post.pid}`, visibility: h.post.kind, tags: h.post.tags || [], status: h.status,
+  pending: h.counts.pending, matched: h.counts.accepted + h.counts.attended, waitlisted: h.counts.waitlisted, awaiting: h.counts.reconfirm,
+  viewers: vault.data.posts?.[h.post.pid]?.sharedWith.length || 0, audience: vault.data.posts?.[h.post.pid]?.audience,
+});
+
 async function viewPost(v) {
   const mail = await loadMail().catch(() => mailView());
   // Removed posts are cancelled (everyone's told); past ones I deleted are just hidden from me (deletedPosts).
   const deletedPosts = new Set(vault.data.deletedPosts || []);
-  const mine = (mail?.hosting || []).filter(h => h.post.status !== 'cancelled' && !deletedPosts.has(h.post.pid)).map(h => ({
-    ...h.post, id: `m:${h.post.pid}`, visibility: h.post.kind, tags: h.post.tags || [], status: h.status,
-    pending: h.counts.pending, matched: h.counts.accepted + h.counts.attended, waitlisted: h.counts.waitlisted, awaiting: h.counts.reconfirm,
-    viewers: vault.data.posts?.[h.post.pid]?.sharedWith.length || 0, audience: vault.data.posts?.[h.post.pid]?.audience,
-  }));
+  const mine = (mail?.hosting || []).filter(h => h.post.status !== 'cancelled' && !deletedPosts.has(h.post.pid)).map(hostedPost);
   // Sorted by state.postSort. Posts made before they recorded `created` count as older than any that did, in the
   // order they were saved (the vault keeps them in that order). "Soonest" goes by start time, with undated posts last.
   const saved = Object.keys(vault.data.posts || {});

@@ -38,6 +38,8 @@
 //   chat       either: accepted or attended, { text }
 //   edit       either: accepted or attended, { of, text }: of is the n of one of the sender's own chat messages,
 //              whose text it replaces (the timeline keeps when, as `edited`)
+//   delete     either: accepted or attended, { of }: deletes one of the sender's own chat messages for both sides (the
+//              timeline keeps the line, with no text, and when, as `deleted`); a deleted message can't be edited
 
 export const POST_STATUSES = ['open', 'full', 'past', 'cancelled'];
 export const LIVE = ['open', 'full'];
@@ -46,7 +48,7 @@ export const MAX_NOTE = 500, MAX_CHAT = 4000;
 const SENDER = {
   join: 'attendee', unjoin: 'attendee', reconfirm: 'attendee', leave: 'attendee',
   answer: 'host', undo: 'host', update: 'host', happened: 'host', cancel: 'host',
-  hello: 'both', chat: 'both', edit: 'both',
+  hello: 'both', chat: 'both', edit: 'both', delete: 'both',
 };
 
 const sameKey = (a, b) => Boolean(a && b && a.x === b.x && a.y === b.y);
@@ -142,8 +144,14 @@ function apply(st, m) {
     case 'edit': {
       if ((s !== 'accepted' && s !== 'attended') || typeof m.text !== 'string' || !m.text.trim()) return false;
       const t = st.timeline.find(x => x.event === 'chat' && x.role === m.role && x.n === m.of);
-      if (!t) return false;
+      if (!t || t.deleted) return false;
       t.text = m.text.slice(0, MAX_CHAT); t.edited = Number(m.at) || 0; return true;
+    }
+    case 'delete': {
+      if (s !== 'accepted' && s !== 'attended') return false;
+      const t = st.timeline.find(x => x.event === 'chat' && x.role === m.role && x.n === m.of);
+      if (!t || t.deleted) return false;
+      t.text = ''; delete t.edited; t.deleted = Number(m.at) || 1; return true;
     }
   }
   return false;

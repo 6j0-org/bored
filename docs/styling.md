@@ -97,7 +97,7 @@ Cards can only be deleted in three places: a discard pile, Past in Plans, and yo
 ## Page structure
 
 - **Section headings** (`.section-title`): centered and bold, between two little tree branches: wood brown, thick
-  next to the title and thinning to a point, with a couple of twigs and green leaves (an SVG in `--branch`, one per
+  next to the title and thinning to a point, crooked and knotty, with kinked, forking twigs and green leaves (an SVG in `--branch`, one per
   theme; the right branch is the left one mirrored). The same room above and below, so sections stand apart.
 - **Notes and hints** (`.note`, `.hint`): small muted text that explains what's around it.
 - **Notices** (`.notice`): a box for something to know, like a blocked person's chat or the demo account.

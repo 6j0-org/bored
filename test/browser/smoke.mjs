@@ -5,7 +5,7 @@ import { browser, finish, wait } from '../lib.mjs';
 const B = await browser('me');
 const evaluate = B.ev, tab = async (id) => { await B.tab(id); await wait(300); };
 const out = {};
-for (const t of ['discover', 'confirm', 'plans', 'post', 'profile']) { await tab(t); out[t] = (await evaluate(`document.getElementById('view').innerText.slice(0, 120).replace(/\\s+/g, ' ')`)); }
+for (const t of ['discover', 'confirm', 'plans', 'post', 'profile']) { await tab(t); out[t] = (await evaluate(`document.getElementById('view').innerText.slice(0, 200).replace(/\\s+/g, ' ')`)); }
 
 // Post a private post to Maya (a demo account: it has no encryption keys, so it can't be reached yet).
 await tab('post');

@@ -22,6 +22,20 @@
 // nothing for spammers to gain.
 
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+// Text as HTML, escaped, with its web addresses (http:// or https://) as links that open in a new tab. Punctuation
+// right after an address (a full stop, a comma, or a closing bracket with no opening one in it) isn't part of it.
+function linkify(text) {
+  return String(text ?? "").split(/(https?:\/\/[^\s<>"']+)/i).map((part, i) => {
+    if (i % 2 === 0) return esc(part);
+    let url = part, after = "";
+    for (let m; (m = url.match(/[.,;:!?'")\]}]$/));) {
+      if (m[0] === ")" && url.split("(").length > url.split(")").length - 1) break; // a bracket that belongs, e.g. Wikipedia
+      after = m[0] + after; url = url.slice(0, -1);
+    }
+    try { new URL(url); } catch { return esc(part); }
+    return `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer nofollow">${esc(url)}</a>${esc(after)}`;
+  }).join("");
+}
 const when = (t) => new Date(t).toLocaleString(undefined, { year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
 const time = (t) => `<time datetime="${new Date(t).toISOString()}">${esc(when(t))}</time>`;
 const editedTag = (m) => (m.edited ? `<span class="fb-edited" title="Edited ${esc(when(m.edited))}">edited</span>` : "");
@@ -30,7 +44,7 @@ const STATUS_LABELS = { open: "Open", done: "Done", wontdo: "Won't do" };
 export function mountFeedback(el, {
   endpoint = "/api/feedback",
   title = "Feedback",
-  intro = "Ideas, problems, or questions? Everyone signed in can read what's posted here, and it isn't encrypted, so please don't include anything personal. Tap a post to open its chat, where anyone can reply.",
+  intro = `Ideas, problems, or questions? Everyone signed in can read what's posted here, and it isn't encrypted, so please don't include anything personal. Tap or click a post to open its chat, where anyone can reply.`,
   adminLabel = "Developer",
   authorLabel = "Tester", // the post's author, in its thread
   author = null,          // (key) → { icon, name, hidden } or null, for posts with an "author"; see above
@@ -83,7 +97,9 @@ export function mountFeedback(el, {
     return `${w.icon ? `<span class="fb-avatar">${w.icon}</span>` : ""}${name ? `<span class="fb-name">${esc(name)}</span>` : ""}` +
       `${m.admin ? `<strong class="fb-admin">${esc(adminLabel)}</strong>` : ""}${op && !m.admin ? `<strong class="fb-author">${esc(authorLabel)}</strong>` : ""}`;
   };
-  const text = (m) => (whoIs(m).hidden && !m.mine ? `<p class="fb-text fb-hidden">Hidden</p>` : `<p class="fb-text">${esc(m.body)}</p>`);
+  // links: web addresses as links (in a thread; in the list, the whole post is one button).
+  const text = (m, links = false) => (whoIs(m).hidden && !m.mine ? `<p class="fb-text fb-hidden">Hidden</p>`
+    : `<p class="fb-text">${links ? linkify(m.body) : esc(m.body)}</p>`);
 
   // ---- the list ----
   function drawList({ items, maxLength: max, isAdmin }) {
@@ -109,7 +125,7 @@ export function mountFeedback(el, {
     // key: "post" for the post itself, else the reply's id, for editing.
     const bubble = (m, op, key) => `<div class="fb-msg${m.mine ? " fb-msg-mine" : ""}${m.admin ? " fb-msg-admin" : ""}" data-key="${esc(key)}">
         <div class="fb-meta">${byline(m, op)}${time(m.created)}${editedTag(m)}
-          ${m.mine ? `<button type="button" class="fb-edit ${esc(buttonClass)}" data-edit="${esc(key)}">Edit</button>` : ""}</div>${text(m)}</div>`;
+          ${m.mine ? `<button type="button" class="fb-edit ${esc(buttonClass)}" data-edit="${esc(key)}">Edit</button>` : ""}</div>${text(m, true)}</div>`;
     const closed = t.status === "done" ? `A developer marked this as done.${t.mine ? " Thank you!" : ""}`
       : t.status === "wontdo" ? "A developer closed this as won't do." : "";
     return bubble(t, true, "post") + t.messages.map((m) => bubble(m, m.op, m.id)).join("") + (closed ? `<p class="fb-sys">${esc(closed)}</p>` : "");

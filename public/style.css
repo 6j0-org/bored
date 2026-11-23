@@ -11,7 +11,7 @@
   --accent-soft: #e0e9d5;
   --shadow: 0 10px 30px rgba(43, 34, 25, .12);
   --wood-line: #934e23; /* the board's wood brown, for outlined buttons */
-  --branch: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 140 20'%3E%3Cg fill='%23934e23'%3E%3Cpath d='M0 12C30 11.5 70 13 140 9L140 13C70 15.5 30 13 0 12.6Z'/%3E%3Cpath d='M96 11C90 7 84 4.5 77 3C84 5.6 89 8.2 93 11.6Z'/%3E%3Cpath d='M57 12.9C51 15 46 16.5 40 18C46 15.6 51 13.6 54 12.6Z'/%3E%3C/g%3E%3Cg fill='%232f6b3a'%3E%3Cpath d='M77 3C72 .5 67 1.5 65 4C70 5 74 4.6 77 3Z'/%3E%3Cpath d='M40 18C35 19.8 31 18.5 29 16C33 15.6 37 16.4 40 18Z'/%3E%3Cpath d='M18 12C14 8.5 9 8 6 9.5C10 11.5 14 12.2 18 12Z'/%3E%3C/g%3E%3C/svg%3E"); /* section headings' branches (wood) and leaves (fir green) */
+  --branch: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 140 20'%3E%3Cg fill='%23934e23'%3E%3Cpath d='M141.4 8.9 139.5 8.7 136.7 8.3 133.5 7.9 130.1 7.6 126.9 7.5 123.9 7.9 121.2 8.6 118.6 9.3 116.2 9.9 114.0 10.2 111.7 10.0 109.3 9.3 106.8 8.1 104.0 7.2 101.0 7.1 98.2 7.8 95.7 8.7 93.3 9.5 91.0 10.1 88.8 10.5 86.4 10.8 84.0 11.2 81.6 11.4 79.3 11.5 77.2 11.5 75.1 11.2 73.0 10.6 70.8 9.9 68.6 9.3 66.1 9.0 63.7 8.9 61.2 9.1 58.7 9.3 56.3 9.7 53.8 10.0 51.4 10.5 48.9 11.1 46.6 11.7 44.3 12.2 42.0 12.4 39.7 12.3 37.3 11.8 34.9 11.3 32.5 10.8 30.0 10.6 27.6 10.8 25.3 11.2 23.2 11.6 21.0 12.0 19.0 12.2 17.0 11.9 15.0 11.5 13.0 10.9 11.0 10.4 9.0 10.1 7.0 10.2 4.8 10.5 2.8 10.9 1.1 11.2 -0.1 11.5 0.1 12.1 1.3 11.9 3.0 11.6 5.0 11.3 7.0 11.1 9.0 11.1 10.8 11.4 12.7 11.9 14.7 12.6 16.8 13.1 19.0 13.4 21.2 13.4 23.4 13.0 25.6 12.6 27.8 12.3 30.0 12.2 32.2 12.5 34.5 13.0 37.0 13.6 39.5 14.2 42.0 14.4 44.5 14.2 47.0 13.8 49.5 13.3 51.8 12.7 54.2 12.4 56.6 12.2 59.0 12.2 61.4 12.3 63.7 12.3 65.8 12.3 67.9 12.3 70.0 12.8 72.1 13.4 74.4 14.1 76.8 14.5 79.3 14.6 81.8 14.6 84.3 14.4 86.8 14.2 89.2 13.9 91.7 13.5 94.2 13.0 96.5 12.5 98.8 12.1 101.0 12.0 103.2 12.2 105.7 12.8 108.3 13.5 111.1 14.1 114.0 14.4 116.9 14.1 119.7 13.5 122.3 12.9 124.7 12.3 127.1 12.1 129.8 12.2 132.9 12.6 136.0 13.1 138.7 13.6 140.6 13.9Z'/%3E%3Cpath d='M104.4 9.5 103.4 9.1 102.0 8.5 100.3 7.8 98.7 7.1 97.2 6.7 96.0 6.4 94.9 6.4 94.0 6.4 93.1 6.3 92.2 6.2 91.1 5.9 89.9 5.4 88.6 5.0 87.4 4.5 86.1 4.2 84.7 4.0 83.3 3.9 82.0 3.9 80.8 4.0 80.0 4.0 80.0 4.4 80.8 4.5 82.0 4.6 83.3 4.6 84.7 4.8 85.9 5.0 87.1 5.4 88.3 5.9 89.5 6.5 90.7 7.0 91.8 7.4 93.0 7.6 93.9 7.7 94.9 7.8 95.8 7.9 96.8 8.1 98.1 8.7 99.6 9.4 101.2 10.1 102.6 10.8 103.6 11.3Z'/%3E%3Cpath d='M93.3 7.4 93.7 7.1 94.4 6.6 95.1 6.0 95.7 5.5 96.2 5.0 96.4 4.5 96.5 4.1 96.4 3.8 96.2 3.5 96.2 3.3 95.8 3.5 95.8 3.6 95.9 3.9 96.0 4.1 95.9 4.4 95.8 4.6 95.3 5.0 94.7 5.4 93.9 5.9 93.2 6.3 92.7 6.6Z'/%3E%3Cpath d='M69.6 11.0 68.8 11.4 67.7 11.9 66.4 12.5 65.0 13.1 63.8 13.5 62.7 13.7 61.6 13.8 60.5 13.8 59.2 13.9 57.9 14.0 56.5 14.4 55.0 14.8 53.6 15.3 52.2 15.7 50.9 16.0 49.8 16.2 48.6 16.2 47.6 16.2 46.7 16.2 46.0 16.2 46.0 16.6 46.6 16.7 47.5 16.8 48.6 16.8 49.8 16.9 51.1 16.8 52.4 16.5 53.8 16.2 55.3 15.8 56.8 15.4 58.1 15.2 59.3 15.1 60.5 15.1 61.7 15.1 62.9 15.1 64.2 14.9 65.5 14.5 67.0 14.0 68.4 13.5 69.5 13.0 70.4 12.6Z'/%3E%3Cpath d='M33.4 11.3 32.8 10.9 32.0 10.3 31.1 9.6 30.1 8.9 29.2 8.4 28.3 8.1 27.4 8.1 26.6 8.1 25.8 8.1 25.1 8.0 24.3 7.7 23.3 7.3 22.4 6.9 21.6 6.5 21.1 6.2 20.9 6.6 21.4 6.9 22.2 7.3 23.1 7.8 24.0 8.3 24.9 8.6 25.8 8.8 26.6 8.9 27.4 8.9 28.1 9.0 28.8 9.2 29.6 9.7 30.5 10.4 31.3 11.1 32.1 11.8 32.6 12.3Z'/%3E%3C/g%3E%3Cg fill='%232f6b3a'%3E%3Cpath d='M80.0 4.2Q77.4 1.0 73.3 2.0Q76.0 5.2 80.0 4.2Z'/%3E%3Cpath d='M96.0 3.4Q94.6 1.0 91.9 1.5Q93.3 3.9 96.0 3.4Z'/%3E%3Cpath d='M46.0 16.4Q42.0 15.3 39.3 18.4Q43.3 19.5 46.0 16.4Z'/%3E%3Cpath d='M21.0 6.4Q19.2 3.3 15.7 3.6Q17.5 6.7 21.0 6.4Z'/%3E%3Cpath d='M6.0 11.0Q3.2 8.8 0.0 10.4Q2.8 12.6 6.0 11.0Z'/%3E%3Cpath d='M58.0 14.6Q55.7 15.6 56.0 18.1Q58.3 17.1 58.0 14.6Z'/%3E%3C/g%3E%3C/svg%3E"); /* section headings' branches (wood) and leaves (fir green) */
   /* The title board's wood, for buttons and other solid brown things; the same in light and dark. */
   --wood: linear-gradient(180deg, #a05a28, #8a4720); --wood-edge: #472610; --wood-text: #f6ecda;
   --warn-bg: #fef3c7; --warn-line: #fcd34d; --warn-text: #78350f; --warn-pill-bg: #fef3c7; --warn-pill-text: #92400e;
@@ -31,7 +31,7 @@
     --accent: #4e9258;
     --accent-soft: #24382a;
     --wood-line: #a75e25;
-    --branch: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 140 20'%3E%3Cg fill='%23a75e25'%3E%3Cpath d='M0 12C30 11.5 70 13 140 9L140 13C70 15.5 30 13 0 12.6Z'/%3E%3Cpath d='M96 11C90 7 84 4.5 77 3C84 5.6 89 8.2 93 11.6Z'/%3E%3Cpath d='M57 12.9C51 15 46 16.5 40 18C46 15.6 51 13.6 54 12.6Z'/%3E%3C/g%3E%3Cg fill='%234e9258'%3E%3Cpath d='M77 3C72 .5 67 1.5 65 4C70 5 74 4.6 77 3Z'/%3E%3Cpath d='M40 18C35 19.8 31 18.5 29 16C33 15.6 37 16.4 40 18Z'/%3E%3Cpath d='M18 12C14 8.5 9 8 6 9.5C10 11.5 14 12.2 18 12Z'/%3E%3C/g%3E%3C/svg%3E");
+    --branch: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 140 20'%3E%3Cg fill='%23a75e25'%3E%3Cpath d='M141.4 8.9 139.5 8.7 136.7 8.3 133.5 7.9 130.1 7.6 126.9 7.5 123.9 7.9 121.2 8.6 118.6 9.3 116.2 9.9 114.0 10.2 111.7 10.0 109.3 9.3 106.8 8.1 104.0 7.2 101.0 7.1 98.2 7.8 95.7 8.7 93.3 9.5 91.0 10.1 88.8 10.5 86.4 10.8 84.0 11.2 81.6 11.4 79.3 11.5 77.2 11.5 75.1 11.2 73.0 10.6 70.8 9.9 68.6 9.3 66.1 9.0 63.7 8.9 61.2 9.1 58.7 9.3 56.3 9.7 53.8 10.0 51.4 10.5 48.9 11.1 46.6 11.7 44.3 12.2 42.0 12.4 39.7 12.3 37.3 11.8 34.9 11.3 32.5 10.8 30.0 10.6 27.6 10.8 25.3 11.2 23.2 11.6 21.0 12.0 19.0 12.2 17.0 11.9 15.0 11.5 13.0 10.9 11.0 10.4 9.0 10.1 7.0 10.2 4.8 10.5 2.8 10.9 1.1 11.2 -0.1 11.5 0.1 12.1 1.3 11.9 3.0 11.6 5.0 11.3 7.0 11.1 9.0 11.1 10.8 11.4 12.7 11.9 14.7 12.6 16.8 13.1 19.0 13.4 21.2 13.4 23.4 13.0 25.6 12.6 27.8 12.3 30.0 12.2 32.2 12.5 34.5 13.0 37.0 13.6 39.5 14.2 42.0 14.4 44.5 14.2 47.0 13.8 49.5 13.3 51.8 12.7 54.2 12.4 56.6 12.2 59.0 12.2 61.4 12.3 63.7 12.3 65.8 12.3 67.9 12.3 70.0 12.8 72.1 13.4 74.4 14.1 76.8 14.5 79.3 14.6 81.8 14.6 84.3 14.4 86.8 14.2 89.2 13.9 91.7 13.5 94.2 13.0 96.5 12.5 98.8 12.1 101.0 12.0 103.2 12.2 105.7 12.8 108.3 13.5 111.1 14.1 114.0 14.4 116.9 14.1 119.7 13.5 122.3 12.9 124.7 12.3 127.1 12.1 129.8 12.2 132.9 12.6 136.0 13.1 138.7 13.6 140.6 13.9Z'/%3E%3Cpath d='M104.4 9.5 103.4 9.1 102.0 8.5 100.3 7.8 98.7 7.1 97.2 6.7 96.0 6.4 94.9 6.4 94.0 6.4 93.1 6.3 92.2 6.2 91.1 5.9 89.9 5.4 88.6 5.0 87.4 4.5 86.1 4.2 84.7 4.0 83.3 3.9 82.0 3.9 80.8 4.0 80.0 4.0 80.0 4.4 80.8 4.5 82.0 4.6 83.3 4.6 84.7 4.8 85.9 5.0 87.1 5.4 88.3 5.9 89.5 6.5 90.7 7.0 91.8 7.4 93.0 7.6 93.9 7.7 94.9 7.8 95.8 7.9 96.8 8.1 98.1 8.7 99.6 9.4 101.2 10.1 102.6 10.8 103.6 11.3Z'/%3E%3Cpath d='M93.3 7.4 93.7 7.1 94.4 6.6 95.1 6.0 95.7 5.5 96.2 5.0 96.4 4.5 96.5 4.1 96.4 3.8 96.2 3.5 96.2 3.3 95.8 3.5 95.8 3.6 95.9 3.9 96.0 4.1 95.9 4.4 95.8 4.6 95.3 5.0 94.7 5.4 93.9 5.9 93.2 6.3 92.7 6.6Z'/%3E%3Cpath d='M69.6 11.0 68.8 11.4 67.7 11.9 66.4 12.5 65.0 13.1 63.8 13.5 62.7 13.7 61.6 13.8 60.5 13.8 59.2 13.9 57.9 14.0 56.5 14.4 55.0 14.8 53.6 15.3 52.2 15.7 50.9 16.0 49.8 16.2 48.6 16.2 47.6 16.2 46.7 16.2 46.0 16.2 46.0 16.6 46.6 16.7 47.5 16.8 48.6 16.8 49.8 16.9 51.1 16.8 52.4 16.5 53.8 16.2 55.3 15.8 56.8 15.4 58.1 15.2 59.3 15.1 60.5 15.1 61.7 15.1 62.9 15.1 64.2 14.9 65.5 14.5 67.0 14.0 68.4 13.5 69.5 13.0 70.4 12.6Z'/%3E%3Cpath d='M33.4 11.3 32.8 10.9 32.0 10.3 31.1 9.6 30.1 8.9 29.2 8.4 28.3 8.1 27.4 8.1 26.6 8.1 25.8 8.1 25.1 8.0 24.3 7.7 23.3 7.3 22.4 6.9 21.6 6.5 21.1 6.2 20.9 6.6 21.4 6.9 22.2 7.3 23.1 7.8 24.0 8.3 24.9 8.6 25.8 8.8 26.6 8.9 27.4 8.9 28.1 9.0 28.8 9.2 29.6 9.7 30.5 10.4 31.3 11.1 32.1 11.8 32.6 12.3Z'/%3E%3C/g%3E%3Cg fill='%234e9258'%3E%3Cpath d='M80.0 4.2Q77.4 1.0 73.3 2.0Q76.0 5.2 80.0 4.2Z'/%3E%3Cpath d='M96.0 3.4Q94.6 1.0 91.9 1.5Q93.3 3.9 96.0 3.4Z'/%3E%3Cpath d='M46.0 16.4Q42.0 15.3 39.3 18.4Q43.3 19.5 46.0 16.4Z'/%3E%3Cpath d='M21.0 6.4Q19.2 3.3 15.7 3.6Q17.5 6.7 21.0 6.4Z'/%3E%3Cpath d='M6.0 11.0Q3.2 8.8 0.0 10.4Q2.8 12.6 6.0 11.0Z'/%3E%3Cpath d='M58.0 14.6Q55.7 15.6 56.0 18.1Q58.3 17.1 58.0 14.6Z'/%3E%3C/g%3E%3C/svg%3E");
     --shadow: 0 10px 30px rgba(0, 0, 0, .5);
     --warn-bg: #451a03; --warn-line: #92400e; --warn-text: #fde68a; --warn-pill-bg: #78350f; --warn-pill-text: #fef3c7;
     color-scheme: dark;
@@ -48,7 +48,7 @@
   --accent: #4e9258;
   --accent-soft: #24382a;
   --wood-line: #a75e25;
-  --branch: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 140 20'%3E%3Cg fill='%23a75e25'%3E%3Cpath d='M0 12C30 11.5 70 13 140 9L140 13C70 15.5 30 13 0 12.6Z'/%3E%3Cpath d='M96 11C90 7 84 4.5 77 3C84 5.6 89 8.2 93 11.6Z'/%3E%3Cpath d='M57 12.9C51 15 46 16.5 40 18C46 15.6 51 13.6 54 12.6Z'/%3E%3C/g%3E%3Cg fill='%234e9258'%3E%3Cpath d='M77 3C72 .5 67 1.5 65 4C70 5 74 4.6 77 3Z'/%3E%3Cpath d='M40 18C35 19.8 31 18.5 29 16C33 15.6 37 16.4 40 18Z'/%3E%3Cpath d='M18 12C14 8.5 9 8 6 9.5C10 11.5 14 12.2 18 12Z'/%3E%3C/g%3E%3C/svg%3E");
+  --branch: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 140 20'%3E%3Cg fill='%23a75e25'%3E%3Cpath d='M141.4 8.9 139.5 8.7 136.7 8.3 133.5 7.9 130.1 7.6 126.9 7.5 123.9 7.9 121.2 8.6 118.6 9.3 116.2 9.9 114.0 10.2 111.7 10.0 109.3 9.3 106.8 8.1 104.0 7.2 101.0 7.1 98.2 7.8 95.7 8.7 93.3 9.5 91.0 10.1 88.8 10.5 86.4 10.8 84.0 11.2 81.6 11.4 79.3 11.5 77.2 11.5 75.1 11.2 73.0 10.6 70.8 9.9 68.6 9.3 66.1 9.0 63.7 8.9 61.2 9.1 58.7 9.3 56.3 9.7 53.8 10.0 51.4 10.5 48.9 11.1 46.6 11.7 44.3 12.2 42.0 12.4 39.7 12.3 37.3 11.8 34.9 11.3 32.5 10.8 30.0 10.6 27.6 10.8 25.3 11.2 23.2 11.6 21.0 12.0 19.0 12.2 17.0 11.9 15.0 11.5 13.0 10.9 11.0 10.4 9.0 10.1 7.0 10.2 4.8 10.5 2.8 10.9 1.1 11.2 -0.1 11.5 0.1 12.1 1.3 11.9 3.0 11.6 5.0 11.3 7.0 11.1 9.0 11.1 10.8 11.4 12.7 11.9 14.7 12.6 16.8 13.1 19.0 13.4 21.2 13.4 23.4 13.0 25.6 12.6 27.8 12.3 30.0 12.2 32.2 12.5 34.5 13.0 37.0 13.6 39.5 14.2 42.0 14.4 44.5 14.2 47.0 13.8 49.5 13.3 51.8 12.7 54.2 12.4 56.6 12.2 59.0 12.2 61.4 12.3 63.7 12.3 65.8 12.3 67.9 12.3 70.0 12.8 72.1 13.4 74.4 14.1 76.8 14.5 79.3 14.6 81.8 14.6 84.3 14.4 86.8 14.2 89.2 13.9 91.7 13.5 94.2 13.0 96.5 12.5 98.8 12.1 101.0 12.0 103.2 12.2 105.7 12.8 108.3 13.5 111.1 14.1 114.0 14.4 116.9 14.1 119.7 13.5 122.3 12.9 124.7 12.3 127.1 12.1 129.8 12.2 132.9 12.6 136.0 13.1 138.7 13.6 140.6 13.9Z'/%3E%3Cpath d='M104.4 9.5 103.4 9.1 102.0 8.5 100.3 7.8 98.7 7.1 97.2 6.7 96.0 6.4 94.9 6.4 94.0 6.4 93.1 6.3 92.2 6.2 91.1 5.9 89.9 5.4 88.6 5.0 87.4 4.5 86.1 4.2 84.7 4.0 83.3 3.9 82.0 3.9 80.8 4.0 80.0 4.0 80.0 4.4 80.8 4.5 82.0 4.6 83.3 4.6 84.7 4.8 85.9 5.0 87.1 5.4 88.3 5.9 89.5 6.5 90.7 7.0 91.8 7.4 93.0 7.6 93.9 7.7 94.9 7.8 95.8 7.9 96.8 8.1 98.1 8.7 99.6 9.4 101.2 10.1 102.6 10.8 103.6 11.3Z'/%3E%3Cpath d='M93.3 7.4 93.7 7.1 94.4 6.6 95.1 6.0 95.7 5.5 96.2 5.0 96.4 4.5 96.5 4.1 96.4 3.8 96.2 3.5 96.2 3.3 95.8 3.5 95.8 3.6 95.9 3.9 96.0 4.1 95.9 4.4 95.8 4.6 95.3 5.0 94.7 5.4 93.9 5.9 93.2 6.3 92.7 6.6Z'/%3E%3Cpath d='M69.6 11.0 68.8 11.4 67.7 11.9 66.4 12.5 65.0 13.1 63.8 13.5 62.7 13.7 61.6 13.8 60.5 13.8 59.2 13.9 57.9 14.0 56.5 14.4 55.0 14.8 53.6 15.3 52.2 15.7 50.9 16.0 49.8 16.2 48.6 16.2 47.6 16.2 46.7 16.2 46.0 16.2 46.0 16.6 46.6 16.7 47.5 16.8 48.6 16.8 49.8 16.9 51.1 16.8 52.4 16.5 53.8 16.2 55.3 15.8 56.8 15.4 58.1 15.2 59.3 15.1 60.5 15.1 61.7 15.1 62.9 15.1 64.2 14.9 65.5 14.5 67.0 14.0 68.4 13.5 69.5 13.0 70.4 12.6Z'/%3E%3Cpath d='M33.4 11.3 32.8 10.9 32.0 10.3 31.1 9.6 30.1 8.9 29.2 8.4 28.3 8.1 27.4 8.1 26.6 8.1 25.8 8.1 25.1 8.0 24.3 7.7 23.3 7.3 22.4 6.9 21.6 6.5 21.1 6.2 20.9 6.6 21.4 6.9 22.2 7.3 23.1 7.8 24.0 8.3 24.9 8.6 25.8 8.8 26.6 8.9 27.4 8.9 28.1 9.0 28.8 9.2 29.6 9.7 30.5 10.4 31.3 11.1 32.1 11.8 32.6 12.3Z'/%3E%3C/g%3E%3Cg fill='%234e9258'%3E%3Cpath d='M80.0 4.2Q77.4 1.0 73.3 2.0Q76.0 5.2 80.0 4.2Z'/%3E%3Cpath d='M96.0 3.4Q94.6 1.0 91.9 1.5Q93.3 3.9 96.0 3.4Z'/%3E%3Cpath d='M46.0 16.4Q42.0 15.3 39.3 18.4Q43.3 19.5 46.0 16.4Z'/%3E%3Cpath d='M21.0 6.4Q19.2 3.3 15.7 3.6Q17.5 6.7 21.0 6.4Z'/%3E%3Cpath d='M6.0 11.0Q3.2 8.8 0.0 10.4Q2.8 12.6 6.0 11.0Z'/%3E%3Cpath d='M58.0 14.6Q55.7 15.6 56.0 18.1Q58.3 17.1 58.0 14.6Z'/%3E%3C/g%3E%3C/svg%3E");
   --shadow: 0 10px 30px rgba(0, 0, 0, .5);
   --warn-bg: #451a03; --warn-line: #92400e; --warn-text: #fde68a; --warn-pill-bg: #78350f; --warn-pill-text: #fef3c7;
   color-scheme: dark;
@@ -89,12 +89,14 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
 
 /* ---------- header / nav ---------- */
 header.top {
-  display: flex; flex-direction: column; align-items: stretch;
+  display: flex; flex-direction: column; align-items: stretch; container-type: inline-size;
   padding: 14px 16px 8px; /* same side gutter as main, so the board lines up with the swipe cards */
 }
-/* Title board spans the content width, matching the swipe cards. */
-.board.wide { display: block; width: 100%; text-align: center; transform: rotate(-1.2deg); }
-.logo { font-size: 2.7rem; margin-top: 4px; }
+/* Title board: the same as on the introduction and privacy pages (public/about.html, .bar .board): 97% of the width,
+   tilted 1.2 degrees, with letters sized to it (12vw there, of a phone-width page; here, of the app's column, which
+   stays narrow on a desktop, so the board keeps the same shape everywhere). */
+.board.wide { display: block; width: 97%; align-self: center; text-align: center; transform: rotate(-1.2deg); }
+.logo { font-size: 2.7rem; font-size: clamp(2.7rem, 13cqi, 5.4rem); margin-top: 4px; }
 main { flex: 1; padding: 8px 16px 96px; display: flex; flex-direction: column; }
 
 .page-title { font-size: 1.5rem; text-align: center; margin: 8px 0 0; }
@@ -196,6 +198,16 @@ nav.tabs svg { width: 26px; height: 26px; filter: drop-shadow(0 1px 0 rgba(40, 1
   transition: transform .3s ease, opacity .3s ease;
 }
 .card.dragging { transition: none; cursor: grabbing; }
+/* A card's faces (mountDeck): the front is the card itself, and the back (on a Discover yes) has the optional rating
+   and note. They lay out as the card's own children. The deck's perspective makes the half turn between them 3D. */
+.deck { perspective: 1200px; }
+.card .face { display: contents; }
+.card.flipped { touch-action: pan-y; } /* the back can scroll; sideways drags still swipe */
+.card .face.back textarea { user-select: text; -webkit-user-select: text; }
+.join-back { gap: 8px; }
+.join-back h2 { text-align: center; }
+.join-back p { margin: 0; }
+.join-back .note { color: var(--muted); font-size: .85rem; }
 .deck .card:not(.top) { transform: scale(.95) translateY(12px); pointer-events: none; }
 .deck .card:not(.top):not(.second) { opacity: 0; }
 .card .hero {
@@ -252,7 +264,8 @@ nav.tabs svg { width: 26px; height: 26px; filter: drop-shadow(0 1px 0 rgba(40, 1
 
 /* ---------- lists, forms ---------- */
 /* Section headings: the title between two little tree branches (wood brown, thick next to the title and thinning
-   to a point, with a couple of twigs and green leaves), with the same room above and below, so sections stand apart.
+   to a point, crooked and knotty, with kinked, forking twigs and green leaves), with the same room above and below,
+   so sections stand apart.
    The branch is an SVG in --branch, one per theme; the right one is the left one mirrored. */
 .section-title {
   display: flex; align-items: center; gap: 12px; margin: 32px 0;
@@ -336,6 +349,9 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
 .msg-edit { display: grid; gap: 6px; }
 .msg-edit textarea { width: 100%; color: var(--text); }
 .msg-edit .btns { display: flex; gap: 6px; justify-content: flex-end; }
+.msg-edit .btns .grow { flex: 1; }
+.msg.deleted { background: none; border: 1px dashed var(--line); color: var(--muted); font-style: italic; font-size: .9rem; }
+.msg a, .fb-msg .fb-text a { color: inherit; text-decoration: underline; overflow-wrap: anywhere; } /* readable on any bubble */
 .msg-edited { display: block; font-size: .7rem; opacity: .75; text-align: right; }
 .msg.sys { align-self: center; background: none; border: 0; color: var(--muted); font-size: .85rem; text-align: center; }
 .composer { display: flex; gap: 8px; position: sticky; bottom: 80px; background: var(--bg); padding-top: 6px; }
@@ -476,14 +492,16 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
 
 /* ---------- Discover filters ---------- */
 .filters { margin-bottom: 8px; }
-.filter-box summary {
-  display: inline-flex; align-items: center; gap: 6px; cursor: pointer; padding: 4px 2px;
-  font-size: .85rem; font-weight: 700; color: var(--muted); list-style: none;
+/* The Filters toggle, with Clear all beside it once any filter is on. */
+.filter-head { display: flex; align-items: center; gap: 10px; }
+.filter-toggle {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer; padding: 4px 2px; background: none; border: 0;
+  font: inherit; font-size: .85rem; font-weight: 700; color: var(--muted);
 }
-.filter-box summary::-webkit-details-marker { display: none; }
-.filter-box summary::before { content: '\25B8'; transition: transform .15s; } /* ▸, turned down when open */
-.filter-box[open] summary::before { transform: rotate(90deg); }
-.filter-box summary .badge { position: static; }
+.filter-toggle::before { content: '\25B8'; transition: transform .15s; } /* ▸, turned down when open */
+.filter-toggle[aria-expanded="true"]::before { transform: rotate(90deg); }
+.filter-toggle .badge { position: static; }
+.filter-toggle:focus-visible { outline: 2px solid var(--wood-line); outline-offset: 2px; border-radius: 6px; }
 nav.tabs .badge { top: -7px; left: calc(50% + 8px); border: 1.5px solid var(--surface); }
 .filter-body { display: flex; flex-direction: column; gap: 6px; padding-top: 6px; }
 button.chip { font: inherit; font-size: .82rem; cursor: pointer; }
@@ -504,7 +522,8 @@ button.chip { font: inherit; font-size: .82rem; cursor: pointer; }
 .cost-field label { min-width: 0; }
 .cost-field select { text-overflow: ellipsis; }
 .interest { border: 0; margin: 0; padding: 0; display: grid; gap: 6px; }
-.interest legend { font-weight: 700; padding: 0; margin-bottom: 4px; }
+.interest legend { font-size: .85rem; color: var(--muted); padding: 0; margin-bottom: 4px; } /* like the form's other labels */
+.join-intro { margin: 0; }
 .interest-picks { display: flex; align-items: center; gap: 4px; }
 .interest-picks button { background: none; border: 1.5px solid transparent; border-radius: 8px; min-width: 44px; min-height: 44px;
   font-size: 1.8rem; line-height: 1; color: var(--wood-line); cursor: pointer; }

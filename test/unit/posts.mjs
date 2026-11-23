@@ -240,6 +240,25 @@ for (const [interest, want] of [[0, 0], [4, 4], [5, 5], [6, null], [-1, null], [
   const e2 = c.send('attendee', { type: 'edit', of: mine.n, text: 'see you at 9' });
   assert.equal(c.state().timeline.find(x => x.n === mine.n && x.role === 'attendee').edited, e2.at, 'still editable after it happened');
 }
+// Deleting chat: only your own messages, only while matched or after; a deleted message keeps its place with no text,
+// and can't be edited.
+{
+  const c = channel('pd');
+  c.send('host', { type: 'answer', status: 'accepted' });
+  const mine = c.send('attendee', { type: 'chat', text: 'oops, wrong chat' });
+  const theirs = c.send('host', { type: 'chat', text: 'great' });
+  c.send('host', { type: 'delete', of: 1 });           // the host's n 1 is the answer, not a chat
+  c.send('attendee', { type: 'delete', of: 1 });       // my n 1 is the join, not a chat
+  c.send('attendee', { type: 'delete', of: 99 });
+  c.send('attendee', { type: 'edit', of: mine.n, text: 'edited first' });
+  const d = c.send('attendee', { type: 'delete', of: mine.n });
+  c.send('attendee', { type: 'edit', of: mine.n, text: 'back again' }); // deleted: can't be edited
+  const t = c.state().timeline.filter(x => x.event === 'chat');
+  assert.deepEqual(t.map(x => [x.role, x.text, x.deleted || 0, x.edited || 0]), [['attendee', '', d.at, 0], ['host', 'great', 0, 0]]);
+  c.send('host', { type: 'happened' });
+  const d2 = c.send('host', { type: 'delete', of: theirs.n });
+  assert.equal(c.state().timeline.find(x => x.role === 'host' && x.n === theirs.n).deleted, d2.at, 'still deletable after it happened');
+}
 // The host cancels: from accepted, waitlisted, or pending; the plan is called off, and chat stops.
 for (const before of ['accepted', 'waitlisted', 'pending']) {
   const c = channel('pc');

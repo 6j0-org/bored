@@ -286,9 +286,11 @@ sequenceDiagram
 - **The `hello` signs the claimed GUID and a hash of the channel secret**, so it can't be replayed on another channel,
   and it's checked against the keys pinned for that GUID.
 - **Everything after the join** (answers, the waitlist, `update` and `reconfirm` after an edit, `leave`, `happened`,
-  chat, and edits to chat messages) is a channel message. An edit names one of its sender's own chat messages by
-  that sender's message counter, so every browser applies it to the same message, and nobody can edit the other
-  side's.
+  chat, and edits and deletions of chat messages) is a channel message. An edit or a `delete` names one of its
+  sender's own chat messages by that sender's message counter, so every browser applies it to the same message, and
+  nobody can edit or delete the other side's. Deleting hides the message's text in both browsers ("Message deleted"),
+  but the server can't remove the original: it's still in the channel's mail, sealed so only the two people can read
+  it, and a modified client could still show it.
 
 ### 6.4 The waitlist
 

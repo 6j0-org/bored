@@ -108,3 +108,14 @@ if (deck) {
 
 // "tap", "click", or "tap or click", to match this device (public/pointer.js).
 document.querySelectorAll('[data-tap]').forEach(el => { el.textContent = tap; });
+
+// Arrived through an invitation link ("/#invite=…&name=…", kept here by public/landing.js): the closing button
+// connects with the person who sent it, carrying the link on to the app, which asks to connect after sign-in.
+{
+  const frag = new URLSearchParams(location.hash.slice(1)), open = document.getElementById('openBored');
+  if (frag.get('invite') && open) {
+    const name = (frag.get('name') || '').trim().slice(0, 60);
+    open.textContent = name ? `Connect with ${name}` : 'Connect';
+    open.href = '/?start' + location.hash;
+  }
+}

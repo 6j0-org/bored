@@ -285,7 +285,8 @@ of. Everything else happens in the browser: filtering Discover, who's in, the wa
   its own public GUID, so people can't link your Bored account to your accounts in other apps.
 - **Invitations to connect** are links (`/#invite=<token>`). The token stays in the URL fragment, so it isn't sent
   in requests or logged; the server stores only its SHA-256, and the owner's encrypted vault keeps the link to share
-  again. Connecting is the only way two people become contacts: both say yes, and each picks a nickname for the
+  again. Someone new who opens one sees the About page first, where "Open Bored" becomes "Connect with <name>" and
+  carries the link on to the app. Connecting is the only way two people become contacts: both say yes, and each picks a nickname for the
   other (the server records the pair in `connections`). Matching on a post doesn't connect anyone. Clicking the
   avatar of a post's host you aren't connected with, or "Invite them to connect" in a plan's chat, sends them an
   invitation directly instead, with your nickname for them and the name you suggest for yourself: it's mailed to

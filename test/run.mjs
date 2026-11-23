@@ -49,7 +49,9 @@ async function startServer() {
   const port = await freePort();
   base = `http://127.0.0.1:${port}`;
   let log = '';
-  server = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, DEMO: '1', PORT: String(port), AUTH_MODE: '' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  // NTFY_SERVERS: nothing listens there, so tests never publish to a real ntfy server.
+  server = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, DEMO: '1', PORT: String(port), AUTH_MODE: '',
+    NTFY_SERVERS: 'http://127.0.0.1:9' }, stdio: ['ignore', 'pipe', 'pipe'] });
   server.stdout.on('data', d => log += d); server.stderr.on('data', d => log += d);
   for (let i = 0; i < 100; i++) {
     if (server.exitCode !== null) break;

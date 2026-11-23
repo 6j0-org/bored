@@ -62,7 +62,9 @@ otherwise.
 Env vars: `PORT` (default 3000), `DB_PATH` (default `./data.sqlite`), `ORIGIN` (e.g. `https://bored.example`; required
 behind HTTPS/proxies, passkeys are bound to it; also turns on `Secure` cookies), `RP_ID` (passkey domain; defaults to
 the `ORIGIN` hostname), `VAPID_SUBJECT` (a `mailto:` or `https:` contact for push services; defaults to `ORIGIN`),
-`PUSH_HOSTS` (extra push service hostnames to allow, comma-separated), `DEMO` (`1` for [demo mode](#demo-mode)),
+`PUSH_HOSTS` (extra push service hostnames to allow, comma-separated), `NTFY_SERVERS` (the
+[ntfy](#notifications) servers people can pick, comma-separated origins, each optionally `=<access token>`; default
+`https://ntfy.sh`, empty to turn ntfy off), `DEMO` (`1` for [demo mode](#demo-mode)),
 `FEEDBACK_PATH` (default `feedback.jsonl` next to the database), `ADMIN_SUB` or `ADMIN_GUID` (one more developer for
 [feedback](#feedback), besides `DEVELOPER_GUIDS` in `server.js`: a 6j0.org identity's `sub` with `AUTH_MODE=6j0`, or an
 account's GUID in any mode).
@@ -106,7 +108,17 @@ read, so the app opens the newest thing in the mail once it's loaded: that plan'
 or Discover. Feedback notifications open the post's chat.
 
 On Android, Chromium-based browsers deliver web notifications through Google Play services, so phones without them
-(such as GrapheneOS without sandboxed Google Play) can't turn notifications on; the app says so.
+(such as GrapheneOS without sandboxed Google Play) can't turn notifications on; the app says so, and offers ntfy.
+
+**ntfy**, for those phones: in Profile, "Set up ntfy" gives the account a random topic (`bored_` plus 32 random
+characters) on one of the servers in `NTFY_SERVERS`, which the person subscribes to in the [ntfy](https://ntfy.sh)
+app. From then on every notification is also published there (as JSON to the server's root URL), with the same
+generic text and a link that opens the app on the right screen. Unlike Web Push it isn't end-to-end encrypted: the
+ntfy server, and anyone who learns the topic, can read the generic text. People can get a new topic or turn it off;
+it's one topic per account, used on as many phones as they like. Bored only publishes to the listed servers, so
+nobody can make it send requests anywhere else. Free ntfy.sh limits how much one IP address can publish a day, and
+every notification comes from this server's address, so a busy server should use an access token (a paid ntfy.sh
+account, `NTFY_SERVERS=https://ntfy.sh=tk_…`) or its own ntfy server.
 
 ### Sign-in: standalone or with a 6j0.org identity
 

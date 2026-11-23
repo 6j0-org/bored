@@ -71,6 +71,7 @@ em { font-style: normal; color: var(--accent); } /* emphasis is green, not itali
 /* Links are green and always underlined, so they're never mistaken for emphasis (green, not underlined). */
 a, button.link { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
 a.btn, a.logo { text-decoration: none; }
+a.btn { text-align: center; }
 button { cursor: pointer; }
 h1, h2, h3 { margin: 0; line-height: 1.2; }
 
@@ -509,6 +510,8 @@ button.chip { font: inherit; font-size: .82rem; cursor: pointer; }
 .interest-picks button:focus-visible { outline: 2px solid var(--wood-line); outline-offset: 1px; }
 .interest-shown { margin: 0; color: var(--muted); font-size: .9rem; }
 .interest-shown .stars { color: #c98a14; letter-spacing: 1px; font-size: 1.05rem; }
+.ntfy-topic { display: block; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
+  font-size: .85rem; overflow-wrap: anywhere; user-select: all; }
 .offline { max-width: 420px; margin: 20vh auto 0; padding: 0 16px; text-align: center; }
 .offline p { color: var(--muted); }
 .post-sort { display: flex; align-items: center; justify-content: flex-end; gap: 8px; font-size: .85rem; color: var(--muted); margin-bottom: 8px; }

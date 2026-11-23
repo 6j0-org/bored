@@ -210,6 +210,34 @@ function notify(userId, { body, tag, open = '', throttle = false }) {
       else if (status >= 400) console.warn(`Push to subscription ${s.id} failed with HTTP ${status}`);
     }, (err) => console.warn(`Push to subscription ${s.id} failed: ${err.message}`));
   }
+  const nt = q('SELECT * FROM ntfy_topics WHERE user_id = ?').get(userId);
+  if (nt) sendNtfy(nt, { body, open }).catch((err) => console.warn(`ntfy for user ${userId} failed: ${err.message}`));
+}
+
+// ---------- ntfy ----------
+// For phones without Google Play services (e.g. GrapheneOS), where browsers can't get Web Push: the same
+// notifications, published to a random topic on an ntfy server (https://ntfy.sh, or a self-hosted one) that the
+// person subscribes to in the ntfy app. The text is the same generic text as Web Push, but it isn't encrypted:
+// the ntfy server, and anyone who learns the topic, can read it. Bored only publishes to the servers in
+// NTFY_SERVERS (comma-separated origins, each optionally "=<access token>"; default https://ntfy.sh), so nobody can
+// point it at any other URL. A token goes with every publish to that server, e.g. for a paid ntfy.sh account's
+// higher limits: free ntfy.sh limits how much one IP address (this server, for everyone) can publish a day.
+const NTFY_SERVERS = new Map(String(process.env.NTFY_SERVERS ?? 'https://ntfy.sh').split(',').map(s => s.trim()).filter(Boolean).map(entry => {
+  const i = entry.indexOf('='), origin = i < 0 ? entry : entry.slice(0, i), token = i < 0 ? '' : entry.slice(i + 1);
+  const u = new URL(origin);
+  if (u.origin !== origin || !['https:', 'http:'].includes(u.protocol)) throw new Error(`NTFY_SERVERS: "${origin}" must be a bare origin like https://ntfy.sh`);
+  return [origin, token];
+}));
+async function sendNtfy(nt, { body, open }) {
+  if (!NTFY_SERVERS.has(nt.server)) return; // taken out of NTFY_SERVERS since
+  const token = NTFY_SERVERS.get(nt.server);
+  const r = await fetch(nt.server + '/', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify({ topic: nt.topic, title: 'Bored', message: body, click: `${nt.click}/${open ? `?open=${encodeURIComponent(open)}` : ''}` }),
+    redirect: 'error', signal: AbortSignal.timeout(10000),
+  });
+  if (!r.ok) console.warn(`ntfy publish to ${nt.server} failed with HTTP ${r.status}`);
 }
 
 // ---------- routes ----------
@@ -907,6 +935,27 @@ route('POST', '/api/push/subscribe', async ({ user, body, res }) => {
 route('POST', '/api/push/unsubscribe', async ({ user, body, res }) => {
   q('DELETE FROM push_subscriptions WHERE endpoint = ? AND user_id = ?').run(String(body.endpoint || ''), user.id);
   send(res, 200, { ok: true });
+});
+
+// ntfy: the servers on offer, and my topic if I have one.
+const ntfyView = (user) => {
+  const nt = q('SELECT server, topic FROM ntfy_topics WHERE user_id = ?').get(user.id);
+  return { servers: [...NTFY_SERVERS.keys()], topic: nt && NTFY_SERVERS.has(nt.server) ? { server: nt.server, topic: nt.topic } : null };
+};
+route('GET', '/api/ntfy', async ({ user, res }) => send(res, 200, ntfyView(user)));
+// Turn ntfy on with a new random topic ({ server }), replacing any old one (e.g. if the topic got out).
+route('POST', '/api/ntfy', async ({ req, user, body, res }) => {
+  const server = String(body.server || '');
+  if (!NTFY_SERVERS.has(server)) throw new HttpError(400, "That ntfy server isn't offered here");
+  const topic = `bored_${randomBytes(24).toString('base64url')}`;
+  q(`INSERT INTO ntfy_topics (user_id, server, topic, click) VALUES (?, ?, ?, ?)
+     ON CONFLICT (user_id) DO UPDATE SET server = excluded.server, topic = excluded.topic, click = excluded.click, created_at = datetime('now')`)
+    .run(user.id, server, topic, originOf(req));
+  send(res, 200, ntfyView(user));
+});
+route('POST', '/api/ntfy/off', async ({ user, res }) => {
+  q('DELETE FROM ntfy_topics WHERE user_id = ?').run(user.id);
+  send(res, 200, ntfyView(user));
 });
 
 route('POST', '/api/push/test', async ({ user, res }) => {

@@ -942,7 +942,7 @@ async function turnOnPush() {
     // The browser couldn't reach its push service. On Android, Chromium-based browsers deliver web notifications
     // through Google Play services, so phones without them (e.g. GrapheneOS) get "push service error".
     if (e?.name === 'AbortError' || /push service/i.test(e?.message || '')) {
-      throw new Error("This browser couldn't reach its push service. On Android, most browsers need Google Play services for notifications: on GrapheneOS, turn on sandboxed Google Play and use a browser that supports it, like Chrome.");
+      throw new Error("This browser couldn't reach its push service. On Android, most browsers need Google Play services for notifications. Without them (e.g. on GrapheneOS), use ntfy, below, or turn on sandboxed Google Play and use a browser like Chrome.");
     }
     throw e;
   }
@@ -1031,6 +1031,68 @@ async function drawPushSettings(el) {
     try { if (on) { await turnOffPush(); toast('Notifications off for this device'); } else { await turnOnPush(); toast('Notifications on'); } }
     catch (err) { toast(err.message); }
     drawPushSettings(el);
+  });
+  el.querySelector('[data-push-test]')?.addEventListener('click', () =>
+    api('/api/push/test', { method: 'POST' }).then(() => toast('Sent. It should arrive in a moment.'), err => toast(err.message)));
+}
+
+// Profile's ntfy block, for phones without Google Play services (server.js, "ntfy"): one random topic per account,
+// which the person subscribes to in the ntfy app on each phone. "Send a test" goes everywhere, Web Push included.
+async function drawNtfySettings(el) {
+  let nt;
+  try { nt = await api('/api/ntfy'); } catch { el.innerHTML = ''; return; }
+  if (!nt.servers.length) { el.innerHTML = ''; return; }
+  const t = nt.topic, url = t ? `${t.server}/${t.topic}` : '';
+  const host = (s) => new URL(s).host;
+  el.innerHTML = `
+    <h3 class="sub-title">Phones without Google Play services</h3>
+    ${t ? `
+      <p class="note">ntfy is on. In the ntfy app, subscribe to this topic on each phone you want notifications on:</p>
+      <code class="ntfy-topic">${esc(url)}</code>
+      <div class="two">
+        <a class="btn ghost" href="ntfy://${esc(host(t.server))}/${esc(t.topic)}">Open in ntfy</a>
+        <button type="button" class="btn ghost" data-ntfy-copy>Copy</button>
+      </div>
+      <button type="button" class="btn" data-push-test>Send a test</button>
+      <p class="note">Keep the topic to yourself: anyone who has it can read these notifications. If it got out, get a
+        new one (then subscribe to the new one in the app).</p>
+      <div class="two">
+        <button type="button" class="btn small" data-ntfy-new>New topic</button>
+        <button type="button" class="btn small" data-ntfy-off>Turn off ntfy</button>
+      </div>`
+    : `
+      <p class="note">On phones without Google Play services, like GrapheneOS, browsers can't get notifications.
+        Bored can send them through <b>ntfy</b> instead, a free app (on F-Droid and Google Play).</p>
+      <details class="help">
+        <summary>How it works</summary>
+        <p>Bored makes a private, random topic for you. Subscribe to it in the ntfy app, and Bored's notifications
+          arrive there. Tapping one opens Bored.</p>
+        <p>Unlike browser notifications, these aren't encrypted: the ntfy server${nt.servers.length === 1 ? ` (${esc(host(nt.servers[0]))})` : ''},
+          and anyone who learns your topic, can read them. They only ever say things like “New activity”, never
+          names, posts, or messages.</p>
+      </details>
+      ${nt.servers.length > 1 ? `<label>ntfy server
+        <select data-ntfy-server>${nt.servers.map(s => `<option value="${esc(s)}">${esc(host(s))}</option>`).join('')}</select></label>` : ''}
+      <button type="button" class="btn" data-ntfy-on>Set up ntfy</button>`}`;
+  const run = (fn, msg) => async (e) => {
+    e.currentTarget.disabled = true;
+    try { await fn(); if (msg) toast(msg); } catch (err) { toast(err.message); }
+    drawNtfySettings(el);
+  };
+  el.querySelector('[data-ntfy-on]')?.addEventListener('click', run(() =>
+    api('/api/ntfy', { method: 'POST', body: { server: el.querySelector('[data-ntfy-server]')?.value || nt.servers[0] } }),
+    'ntfy is set up. Now subscribe to the topic in the ntfy app.'));
+  el.querySelector('[data-ntfy-new]')?.addEventListener('click', (e) => {
+    if (!confirm('Get a new topic? The old one stops getting notifications, so subscribe to the new one in the ntfy app.')) return;
+    run(() => api('/api/ntfy', { method: 'POST', body: { server: t.server } }), 'New topic. Subscribe to it in the ntfy app.')(e);
+  });
+  el.querySelector('[data-ntfy-off]')?.addEventListener('click', (e) => {
+    if (!confirm('Turn off ntfy? Notifications stop going to your topic.')) return;
+    run(() => api('/api/ntfy/off', { method: 'POST' }), 'ntfy is off')(e);
+  });
+  el.querySelector('[data-ntfy-copy]')?.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(url); toast('Topic copied. In the ntfy app, tap + and paste it.'); }
+    catch { toast(url); }
   });
   el.querySelector('[data-push-test]')?.addEventListener('click', () =>
     api('/api/push/test', { method: 'POST' }).then(() => toast('Sent. It should arrive in a moment.'), err => toast(err.message)));
@@ -2792,6 +2854,7 @@ async function viewProfile(v) {
 
     <div class="section-title">Notifications</div>
     <div class="stack" id="pushSettings"></div>
+    <div class="stack" id="ntfySettings"></div>
 
     <div class="section-title">Invitations</div>
     <p class="note">Send people a link to connect. When someone opens it and asks to connect, they show up in your
@@ -2881,6 +2944,7 @@ async function viewProfile(v) {
     } catch (err) { toast(err.message); }
   });
   drawPushSettings(v.querySelector('#pushSettings'));
+  drawNtfySettings(v.querySelector('#ntfySettings'));
   // The theme stays on this device (public/theme.js), unlike the settings below, which are saved in your vault.
   v.querySelector('#themePick').addEventListener('change', (e) => window.boredTheme?.set(e.target.value));
   v.querySelector('#prefsForm').addEventListener('change', async (e) => {

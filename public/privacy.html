@@ -96,10 +96,11 @@
         <li>Who you've connected with through an invitation. This isn't encrypted.</li>
         <li>Feedback you post, and your replies to feedback. This isn't encrypted, so please don't put anything personal in it. It's filed under your account's random ID, so you can delete it, and deleting a post also deletes its replies. Deleted feedback is gone from the server's disk after its next restart.</li>
         <li>Your device's push address, if you turn on notifications.</li>
+        <li>Your ntfy topic and which ntfy server it's on, if you set up ntfy.</li>
       </ul>
 
       <h2>Deleting your account</h2>
-      <p>You can delete your account at the bottom of your Profile page. To confirm, you type the last 4 characters of your Account ID, which is shown just below. Bored's server then erases everything above that belongs to the account, right away: the account and its keys, your vault, your public posts and the reports you made, the mail in your inboxes (including your side of every chat), your invitations and connections, your feedback and replies, and your push address. There's no recovery, not even by the developers. Posts you're hosting that are still on are cancelled first, so the people they're shared with are told. The people you've chatted with keep their own side of the conversation, and private posts you shared stay in their encrypted mail, marked cancelled. Deleted feedback is gone from the server's disk after its next restart.</p>
+      <p>You can delete your account at the bottom of your Profile page. To confirm, you type the last 4 characters of your Account ID, which is shown just below. Bored's server then erases everything above that belongs to the account, right away: the account and its keys, your vault, your public posts and the reports you made, the mail in your inboxes (including your side of every chat), your invitations and connections, your feedback and replies, your push address, and your ntfy topic. There's no recovery, not even by the developers. Posts you're hosting that are still on are cancelled first, so the people they're shared with are told. The people you've chatted with keep their own side of the conversation, and private posts you shared stay in their encrypted mail, marked cancelled. Deleted feedback is gone from the server's disk after its next restart.</p>
       <p>If you sign in with a 6j0.org identity, your Bored account belongs to that identity, so you delete it at the identity server instead. That deletes all of your accounts on 6j0.org services, not just Bored. The identity server then tells Bored, which erases your account the same way, with two differences: your side of each chat stays, though it's no longer tied to any account and only the person you chatted with can read it, and your posts aren't cancelled for you, so remove them first.</p>
 
       <h2>What Bored doesn't keep</h2>
@@ -121,6 +122,7 @@
         <li>OpenStreetMap, while you have the map open to pick a place: your browser loads the map from them, so they see your IP address and the area you're looking at.</li>
         <li>Everyone signed in to Bored can read all feedback and its replies. Each post and reply shows its author's profile icon, but never their account ID. People you've connected with also see the name they gave you; nobody else sees a name. Developers can mark feedback as done or won't do, and how much of yours is marked done shows as a Tester badge on your own Profile page.</li>
         <li>Your browser's push service (Google, Apple, Mozilla, or Microsoft), if you turn on notifications. It delivers an encrypted “New activity” ping that it can't read.</li>
+        <li>The ntfy server you picked, if you set up ntfy. Notifications sent through it aren't encrypted, so it, and anyone who learns your topic, can read them. They only ever say generic things like “New activity”, never names, posts, or messages.</li>
       </ul>
 
       <p>For how the encryption works, see <a href="https://codeberg.org/6j0-org/bored/src/branch/main/docs/encryption.md">the encryption spec</a>. Questions? <a href="/?start&amp;open=feedback">Send feedback</a>.</p>

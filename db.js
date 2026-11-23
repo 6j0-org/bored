@@ -143,6 +143,15 @@ const MIGRATIONS = [
   // session unused for SESSION_DAYS (server.js) stops working. Existing sessions count from when they were made.
   `ALTER TABLE sessions ADD COLUMN seen_at TEXT;
    UPDATE sessions SET seen_at = created_at;`,
+  // 3. Notifications through ntfy (server.js, "ntfy"), for phones without Google Play services: at most one topic per
+  // account, on one of the servers in NTFY_SERVERS. click is the app's origin, for the link a tapped notification opens.
+  `CREATE TABLE ntfy_topics (
+     user_id    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+     server     TEXT NOT NULL,
+     topic      TEXT NOT NULL UNIQUE,
+     click      TEXT NOT NULL,
+     created_at TEXT NOT NULL DEFAULT (datetime('now'))
+   );`,
 ];
 
 export function migrate() {

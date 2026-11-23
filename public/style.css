@@ -81,6 +81,10 @@ h1, h2, h3 { margin: 0; line-height: 1.2; }
   min-height: 100dvh;
   display: flex;
   flex-direction: column;
+  /* A swiped card flies off the side and waits there while a dialog is open (Ask to join); clipping keeps it from
+     widening the page, which on phones zooms out and leaves fixed dialogs off screen. clip, not hidden, so nothing
+     scrolls and sticky elements still work. */
+  overflow-x: clip;
 }
 
 /* ---------- header / nav ---------- */

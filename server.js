@@ -67,11 +67,15 @@ function send(res, status, body, headers = {}) {
   res.end(JSON.stringify(body));
 }
 
+// Sessions last SESSION_DAYS from when they were last used: each day someone uses Bored, the cookie is renewed
+// (sessionCookie, from the request handler), so only a browser left unused that long has to sign in again.
+const SESSION_DAYS = 30;
+const sessionCookie = (token) => `sid=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${60 * 60 * 24 * SESSION_DAYS}${
+  String(process.env.ORIGIN || '').startsWith('https:') ? '; Secure' : ''}`;
 function newSession(res, userId) {
   const token = randomBytes(24).toString('hex');
-  q('INSERT INTO sessions (token, user_id) VALUES (?, ?)').run(token, userId);
-  const secure = String(process.env.ORIGIN || '').startsWith('https:') ? '; Secure' : '';
-  return { 'Set-Cookie': `sid=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${60 * 60 * 24 * 30}${secure}` };
+  q("INSERT INTO sessions (token, user_id, seen_at) VALUES (?, ?, datetime('now'))").run(token, userId);
+  return { 'Set-Cookie': sessionCookie(token) };
 }
 
 // What anyone may learn about an account: its GUID. Never a name, and no activity counts: the server no longer
@@ -974,7 +978,14 @@ const server = http.createServer(async (req, res) => {
       let user = null;
       if (r.auth) {
         const { sid } = parseCookies(req.headers.cookie);
-        user = (sid && q('SELECT u.* FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token = ?').get(sid)) || null;
+        const s = sid && q(`SELECT s.user_id, s.seen_at < datetime('now', '-${SESSION_DAYS} days') AS expired,
+          s.seen_at < datetime('now', '-1 day') AS stale FROM sessions s WHERE s.token = ?`).get(sid);
+        if (s?.expired) q('DELETE FROM sessions WHERE token = ?').run(sid);
+        else if (s) {
+          user = q('SELECT * FROM users WHERE id = ?').get(s.user_id) || null;
+          // Renew a session last renewed over a day ago. A route that sets its own cookie (sign out) replaces this one.
+          if (user && s.stale) { q("UPDATE sessions SET seen_at = datetime('now') WHERE token = ?").run(sid); res.setHeader('Set-Cookie', sessionCookie(sid)); }
+        }
         if (!user && r.auth !== 'optional') throw new HttpError(401, 'Please sign in');
       }
       // Basic CSRF guard: state-changing requests must be same-origin JSON.

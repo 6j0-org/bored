@@ -139,6 +139,10 @@ const MIGRATIONS = [
      reason TEXT NOT NULL,
      PRIMARY KEY (pid, who, reason)
    ) WITHOUT ROWID;`,
+  // 2. When each session was last used, so the sign-in cookie can be renewed while someone keeps using Bored, and a
+  // session unused for SESSION_DAYS (server.js) stops working. Existing sessions count from when they were made.
+  `ALTER TABLE sessions ADD COLUMN seen_at TEXT;
+   UPDATE sessions SET seen_at = created_at;`,
 ];
 
 export function migrate() {

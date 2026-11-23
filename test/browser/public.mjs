@@ -27,8 +27,11 @@ for (let i = 0; i < 30; i++) {
   await B.ev(`document.querySelector('.round.no').click()`); await wait(900);
 }
 r.strangerCard = await B.ev(`document.querySelector('.card.top').innerText.replace(/\\s+/g, ' ').slice(0, 200)`);
-await B.ev(`document.querySelector('.with-note').click()`);
+// I'm in opens Ask to join: 4 stars (tapping the 2nd then the 4th) and a note.
+await B.ev(`document.querySelector('.round.yes').click()`);
 await B.until(`document.querySelector('.sheet textarea[name=note]')`);
+await B.ev(`document.querySelector('.sheet [data-interest="2"]').click(); document.querySelector('.sheet [data-interest="4"]').click()`);
+r.stars = await B.ev(`[...document.querySelectorAll('.sheet .interest-star')].map(b => b.textContent).join('') + ' ' + document.querySelector('.sheet .interest-label').textContent`);
 await B.ev(`(() => { const f = document.querySelector('.sheet form'); f.note.value = 'I can bring a spare kite.'; f.requestSubmit(); })()`);
 await wait(2500);
 r.asked = await B.ev(`document.getElementById('toast').textContent`);
@@ -72,6 +75,8 @@ assert.match(r.strangerCard, new RegExp(TITLE));
 assert.match(r.asked, /^Asked to join/);
 assert.match(r.request, /Someone you don't know yet/);
 assert.match(r.request, /“I can bring a spare kite\.”/, "the host sees the stranger's note");
+assert.equal(r.stars, '★★★★☆ 4 of 5: Very interested. Only the host sees it.', 'tapping a star picks up to it');
+assert.match(r.request, /★★★★☆ Very interested/, 'and how interested they are');
 assert.match(r.strangerPlans, new RegExp(`${TITLE}[\\s\\S]*Hosted by`));
 assert.match(r.overlay, /teaming up[\s\S]*Invite them to connect from the chat/, "the match screen doesn't say they're contacts");
 assert.match(r.connectNote, /not connected/);

@@ -301,9 +301,11 @@ export function hostContact(post) {
 
 // Ask to join a post. The channel secret goes into my vault before anything is sent, so it can't be lost.
 // To a contact, the request says who it's from (signed), so they see my name; to anyone else it's anonymous.
-export async function requestJoin(post, note = '') {
+// interest: how interested I am, 0 to 5 stars, or null for no answer. Like the note, only the host sees it.
+export async function requestJoin(post, note = '', interest = null) {
   if (!post.reply?.chat || !post.reply?.inbox) throw new Error("This post can't take requests.");
-  const join = nextMessage([], 'attendee', { type: 'join', pid: post.pid, note: String(note).slice(0, 280) });
+  const join = nextMessage([], 'attendee', { type: 'join', pid: post.pid, note: String(note).slice(0, 280),
+    ...(Number.isInteger(interest) && interest >= 0 && interest <= 5 ? { interest } : {}) });
   const { body, channel } = await sealTo(post.reply.chat, post.reply.inbox, join, { identify: Boolean(hostContact(post)) });
   await vault.update(api, (d) => { d.requests ||= {}; d.requests[channel] = { pid: post.pid, join, reply: post.reply, at: join.at }; });
   try { await postMail([{ inbox: post.reply.inbox, body }]); }
@@ -373,6 +375,7 @@ export async function savePost({ pid, kind, fields, audience, guids = [], status
   const me = myPublicKeys();
   const post = {
     ...(before || {}), ...fields, pid: pid || randomId(), v: (before?.v || 0) + 1, kind,
+    created: before ? before.created : Date.now(), // ms; posts from before this was added have none
     status: status || before?.status || 'open', reply: { chat: me.chat, inbox: me.inbox },
   };
   const record = await signRecord('post', post);

@@ -20,7 +20,14 @@ const r = { posted: await A.ev(`document.getElementById('toast').textContent`) }
 await B.tab('confirm'); await B.tab('discover');
 await B.until(`document.querySelector('.card.top h2')?.textContent === 'Two-browser picnic'`).catch(async e => { console.log(JSON.stringify(r), await B.ev(`[...document.querySelectorAll('.card h2')].map(h => h.textContent).slice(0, 5).join(' | ')`), await B.ev(`import('/mail.js').then(m => m.mailView().deck.slice(0,3).map(p => p.title).join(' | '))`)); throw e; });
 r.card = await B.ev(`document.querySelector('.card.top .who b').innerText`);
-await B.ev(`document.querySelector('.round.yes').click()`); await wait(2500);
+// I'm in opens Ask to join; Cancel puts the card back, and sending it without a rating or note works too.
+await B.ev(`document.querySelector('.round.yes').click()`);
+await B.until(`document.querySelector('.sheet [data-cancel]')`);
+await B.ev(`document.querySelector('.sheet [data-cancel]').click()`); await wait(600);
+r.cardBack = await B.ev(`document.querySelector('.card.top h2')?.textContent`);
+await B.ev(`document.querySelector('.round.yes').click()`);
+await B.until(`document.querySelector('.sheet form')`);
+await B.ev(`document.querySelector('.sheet form').requestSubmit()`); await wait(2500);
 r.asked = await B.ev(`document.getElementById('toast').textContent`);
 
 // Host: Confirm shows the request, named (the guest is a contact); yes → It's on! → chat.
@@ -73,6 +80,7 @@ console.log(JSON.stringify(r, null, 2));
 assert.match(r.posted, /^Posted! 1 person/);
 assert.equal(r.card, 'Hosty', 'the card names the host from contacts');
 assert.match(r.asked, /^Asked to join/);
+assert.equal(r.cardBack, 'Two-browser picnic', 'Cancel puts the card back');
 assert.equal(r.badge, '1');
 assert.match(r.request, /Guesty One of your contacts/, 'a contact who asks is named');
 assert.match(r.overlay, /^It's on! You and Guesty/);

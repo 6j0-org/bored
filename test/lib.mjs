@@ -76,8 +76,10 @@ export async function browser(name, path = '/?start') {
   const ws = new WebSocket(targets.find(t => t.type === 'page').webSocketDebuggerUrl);
   await new Promise(r => ws.onopen = r);
   let seq = 0; const pending = new Map();
+  let self = null; // the returned object: its onEvent(message), if set, sees every DevTools event
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data);
+    if (m.method) self?.onEvent?.(m);
     if (m.id && pending.has(m.id)) { pending.get(m.id)(m); pending.delete(m.id); }
     if (m.method === 'Runtime.exceptionThrown') pageErrors.push(`${name}: ` + (m.params.exceptionDetails.exception?.description || m.params.exceptionDetails.text));
     if (m.method === 'Runtime.consoleAPICalled' && ['error', 'warning'].includes(m.params.type)) pageErrors.push(`${name} console.${m.params.type}: ` + m.params.args.map(a => a.value ?? a.description).join(' '));
@@ -92,7 +94,7 @@ export async function browser(name, path = '/?start') {
   const tab = async (id) => { await ev(`document.querySelector('nav.tabs button[data-tab=${id}]').click()`); await wait(1200); };
   const text = () => ev(`document.getElementById('view').innerText.replace(/\\s+/g, ' ')`);
   const reload = async () => { await send('Page.reload'); await ready(); await wait(1500); };
-  return { name, send, ev, until, tab, text, reload, close: () => { ws.close(); proc.kill(); } };
+  return self = { name, send, ev, until, tab, text, reload, onEvent: null, close: () => { ws.close(); proc.kill(); } };
 }
 
 // Prints the page errors and exits: 1 if there were any.

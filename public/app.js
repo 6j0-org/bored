@@ -44,6 +44,8 @@ function loadJson(key, fallback) { try { return JSON.parse(localStorage.getItem(
 
 // Discover's date filter (pick one): day ranges in your own calendar, worked out each time they're used.
 const DATE_FILTERS = { today: 'Today', tomorrow: 'Tomorrow', weekend: 'This weekend', week: 'Next 7 days' };
+// How the Post tab sorts "Your posts" (remembered per browser): newest first unless picked otherwise.
+const POST_SORTS = { newest: 'Newest first', oldest: 'Oldest first', soonest: 'Happening soonest', interested: 'Most interested', title: 'Title (A to Z)' };
 function dateFilterRange(key, now = new Date()) {
   const day = (n) => { const d = new Date(now); d.setDate(d.getDate() + n); return localToday(d); };
   const dow = now.getDay(); // 0 = Sunday
@@ -210,6 +212,7 @@ const state = { config: { authMode: 'local' }, me: null, tab: 'discover', chat: 
   discoverNear: (() => { const n = loadJson('discoverNear', null); return n && Number.isFinite(n.lat) && Number.isFinite(n.lon) ? n : null; })(),
   discoverOnline: loadJson('discoverOnline', false) === true,
   discoverRadius: (() => { const r = Number(loadJson('discoverRadius', 0)); return RADII.includes(r) ? r : 0; })(),
+  postSort: (() => { const s = loadJson('postSort', 'newest'); return s in POST_SORTS ? s : 'newest'; })(),
   filtersOpen: false };
 const app = document.getElementById('app');
 
@@ -549,9 +552,7 @@ function dragToSwipe(el, onSwipe, onDragging = () => {}) {
 }
 
 // No undo: a swiped card goes to the view's discard pile (mountPile), where the answer can be changed.
-// withNote, if given, adds a link under the buttons for saying yes with a note: { label, ask(item) → Promise of the
-// note, or null if they changed their mind }. The note goes to onSwipe(item, true, { note }).
-function mountDeck(root, { items, renderCard, onSwipe, yesLabel, noLabel, empty, withNote = null }) {
+function mountDeck(root, { items, renderCard, onSwipe, yesLabel, noLabel, empty }) {
   root.innerHTML = `
     <div class="deck-wrap">
       <div class="deck"></div>
@@ -559,7 +560,6 @@ function mountDeck(root, { items, renderCard, onSwipe, yesLabel, noLabel, empty,
         <button class="btn round no">${esc(noLabel)}</button>
         <button class="btn round yes">${esc(yesLabel)}</button>
       </div>
-      ${withNote ? `<button type="button" class="link with-note">${esc(withNote.label)}</button>` : ''}
       <div class="hint">Swipe right for <b>${esc(yesLabel)}</b>, left for <b>${esc(noLabel)}</b> · or use ← →</div>
     </div>`;
   const wrap = root.querySelector('.deck-wrap');
@@ -609,11 +609,6 @@ function mountDeck(root, { items, renderCard, onSwipe, yesLabel, noLabel, empty,
 
   root.querySelector('.round.yes').onclick = () => decide(true);
   root.querySelector('.round.no').onclick = () => decide(false);
-  root.querySelector('.with-note')?.addEventListener('click', async () => {
-    if (busy || !queue.length) return;
-    const item = queue[0], note = await withNote.ask(item);
-    if (note !== null && queue[0] === item) decide(true, undefined, { note });
-  });
   mountDeck.keyHandler = (e) => {
     if (e.target.matches('input, textarea, select') || document.querySelector('.overlay, .sheet')) return;
     if (e.key === 'ArrowRight') decide(true);
@@ -732,8 +727,26 @@ function openFeedback() {
   if (state.tab !== 'account') go('account');
 }
 
+// Network trouble (no connection, a timeout, or the server restarting), as opposed to an answer about the account.
+// Phones hit it all the time (waking up, switching networks), so it must never look like being signed out.
+const transient = (e) => e instanceof TypeError || e?.status === 408 || e?.status === 429 || e?.status >= 500;
+// Signed out only when the server says so (a 401 also clears the keys, in api()); network trouble keeps who I am.
 async function refreshMe() {
-  try { state.me = await api('/api/me'); } catch { state.me = null; }
+  try { state.me = await api('/api/me'); } catch (e) { if (!transient(e)) state.me = null; }
+}
+// fn, tried again after network trouble: 3 tries, 1 and 2 seconds apart.
+async function retrying(fn, tries = 3) {
+  for (let i = 0; ; i++) {
+    try { return await fn(); }
+    catch (e) { if (!transient(e) || i >= tries - 1) throw e; await new Promise(r => setTimeout(r, 1000 * 2 ** i)); }
+  }
+}
+// Shown when Bored can't be reached at startup, instead of the sign-in screen: nothing on this device is lost.
+function showOffline() {
+  app.innerHTML = `<main class="offline stack"><h1>Can't reach Bored</h1>
+    <p>Check your connection and try again. You're still signed in.</p>
+    <button class="btn" id="retryStart">Try again</button></main>`;
+  document.getElementById('retryStart').onclick = () => location.reload();
 }
 
 async function render() {
@@ -886,7 +899,14 @@ async function viewFeedback(v) {
 }
 
 // After any successful sign-in/sign-up/unlock.
+// Ask the browser to keep this site's storage (the keys in IndexedDB) even when the device is short on space;
+// otherwise it may clear it, and the account has to be unlocked again. Chromium decides quietly, Firefox may ask.
+function keepStorage() {
+  navigator.storage?.persisted?.().then(kept => kept || navigator.storage.persist()).catch(() => {});
+}
+
 async function enterApp(tab = 'discover') {
+  keepStorage();
   await refreshMe();
   await vault.load(api);
   await ensureKeys(api);
@@ -1367,7 +1387,9 @@ async function viewDiscover(v) {
   // answered) and passes.
   async function reswipe(p, c, yes) {
     if (yes) {
-      await requestJoin(p);
+      const ask = await askJoin(p);
+      if (!ask) return; // cancelled: nothing changes
+      await requestJoin(p, ask.note, ask.interest);
       await unpass(p.pid);
       toast(p.status === 'full' ? `Asked to join the waitlist for “${p.title}”` : `Asked to join “${p.title}”! You'll match if the host swipes yes too.`);
       return;
@@ -1435,10 +1457,13 @@ async function viewDiscover(v) {
   keepFresh(host, () => load({ soft: true }));
 }
 
-// Asking to join with a note: a sheet with the note, and Send request (which says yes, like swiping right) or Cancel.
-// Resolves to the note, or null if cancelled. The note is sealed to the host with the request, so only they read it.
+// After "I'm in" (a swipe right, the button, or →): how interested they are (0 to 5 stars, optional) and a note for
+// the host (optional), then Send request or Cancel. Resolves to { note, interest } (interest null if not picked), or
+// null if cancelled. Both are sealed to the host with the request, so only they see them.
 const MAX_JOIN_NOTE = 280; // what requestJoin keeps (public/mail.js)
-function askJoinNote(t) {
+const INTEREST_LABELS = ['Just curious', 'A little interested', 'Somewhat interested', 'Interested', 'Very interested', "Can't wait"];
+const starsText = (n) => '★'.repeat(n) + '☆'.repeat(5 - n);
+function askJoin(t) {
   return new Promise((resolve) => {
     const sheet = document.createElement('div');
     sheet.className = 'sheet';
@@ -1446,6 +1471,15 @@ function askJoinNote(t) {
       <form class="stack panel">
         <h2>Ask to join</h2>
         <p><b>${esc(t.title)}</b></p>
+        <fieldset class="interest">
+          <legend>How interested are you? (optional)</legend>
+          <div class="interest-picks" role="radiogroup" aria-label="How interested are you, 0 to 5 stars">
+            <button type="button" class="interest-zero" role="radio" aria-checked="false" data-interest="0" aria-label="0 stars: ${esc(INTEREST_LABELS[0])}">0</button>
+            ${[1, 2, 3, 4, 5].map(n => `<button type="button" class="interest-star" role="radio" aria-checked="false" data-interest="${n}"
+              aria-label="${n} star${n === 1 ? '' : 's'}: ${esc(INTEREST_LABELS[n])}">☆</button>`).join('')}
+          </div>
+          <p class="note interest-label" aria-live="polite">Not rated. Only the host sees it.</p>
+        </fieldset>
         <label>A note for the host (optional)
           <textarea name="note" rows="3" maxlength="${MAX_JOIN_NOTE}" placeholder="e.g. I have a spare headlamp if anyone needs one."></textarea></label>
         <p class="note"><span class="note-count">0 / ${MAX_JOIN_NOTE}</span> · Only the host can read it, with your request.</p>
@@ -1456,12 +1490,26 @@ function askJoinNote(t) {
       </form>`;
     document.body.appendChild(sheet);
     const box = sheet.querySelector('textarea'), count = sheet.querySelector('.note-count');
+    let interest = null;
+    // Tapping the picked rating again clears it.
+    const pick = (n) => {
+      interest = interest === n ? null : n;
+      sheet.querySelectorAll('[data-interest]').forEach(b => {
+        const v = Number(b.dataset.interest);
+        b.setAttribute('aria-checked', String(v === interest));
+        if (v > 0) { b.textContent = interest !== null && v <= interest ? '★' : '☆'; b.classList.toggle('on', interest !== null && v <= interest); }
+        else b.classList.toggle('on', interest === 0);
+      });
+      sheet.querySelector('.interest-label').textContent = interest === null ? 'Not rated. Only the host sees it.'
+        : `${interest} of 5: ${INTEREST_LABELS[interest]}. Only the host sees it.`;
+    };
+    sheet.querySelectorAll('[data-interest]').forEach(b => b.onclick = () => pick(Number(b.dataset.interest)));
     const done = (v) => { sheet.remove(); resolve(v); };
     box.addEventListener('input', () => { count.textContent = `${box.value.length} / ${MAX_JOIN_NOTE}`; });
     sheet.querySelector('[data-cancel]').onclick = () => done(null);
     sheet.onclick = (e) => { if (e.target === sheet) done(null); };
-    sheet.querySelector('form').onsubmit = (e) => { e.preventDefault(); done(box.value.trim()); };
-    box.focus();
+    sheet.querySelector('form').onsubmit = (e) => { e.preventDefault(); done({ note: box.value.trim(), interest }); };
+    sheet.querySelector('.interest-star').focus();
   });
 }
 // changed: called after a swipe or an undo is saved (Discover redraws the discard pile).
@@ -1470,16 +1518,17 @@ function deckOptions(events, changed, filters) {
     items: events,
     renderCard: eventCard,
     yesLabel: "I'm in", noLabel: 'Pass',
-    // Saying yes can carry a note for the host (shown with the request in their Confirm tab). Signed in only.
-    withNote: state.me ? { label: 'Add a note for the host', ask: askJoinNote } : null,
-    onSwipe: async (t, yes, { note = '' } = {}) => {
+    onSwipe: async (t, yes) => {
       if (!state.me) {
         // Guests can browse; passing is just local, but saying yes needs an account.
         if (yes) { toast('Sign in or create an account to say yes.'); go('account'); return KEEP_CARD; }
         return;
       }
       if (!yes) { await pass(t.pid); return changed(); }
-      t.ch = await requestJoin(t.post, note);
+      // Saying yes asks how interested they are and for a note for the host first; Cancel puts the card back.
+      const ask = await askJoin(t);
+      if (!ask) return KEEP_CARD;
+      t.ch = await requestJoin(t.post, ask.note, ask.interest);
       changed();
       toast(t.status === 'full'
         ? `Asked to join the waitlist for “${t.title}”. If the host says yes, you'll get the next open spot.`
@@ -1516,7 +1565,7 @@ function connectCard(c) {
 function mailRequests(view) {
   return (view?.hosting || []).filter(h => LIVE.includes(h.post.status)).flatMap(h => h.requests
     .filter(r => r.status === 'pending')
-    .map(r => ({ kind: 'mail', id: `m:${r.id}`, ch: r.id, from: r.from, pid: h.post.pid, title: h.post.title, note: r.note, full: h.status === 'full' })));
+    .map(r => ({ kind: 'mail', id: `m:${r.id}`, ch: r.id, from: r.from, pid: h.post.pid, title: h.post.title, note: r.note, interest: r.interest, full: h.status === 'full' })));
 }
 // A yes on a full post puts them on the waitlist, as the server does for the posts it stores.
 function mailAnswer(view, pid) {
@@ -1532,6 +1581,7 @@ const mailRequestCard = (o) => {
       <div class="body">
         <div class="meta"><span class="chip">Wants to join: <b>${esc(o.title)}</b></span></div>
         ${known ? `<h2>${esc(displayName(o.from) || 'One of your contacts')}</h2>` : ''}
+        ${o.interest != null ? `<p class="interest-shown" aria-label="${o.interest} of 5 stars: ${esc(INTEREST_LABELS[o.interest])}"><span class="stars" aria-hidden="true">${starsText(o.interest)}</span> ${esc(INTEREST_LABELS[o.interest])}</p>` : ''}
         ${o.note ? `<div class="details">“${esc(clean(o.note))}”</div>` : ''}
         ${o.full ? `<p class="note">This post is full, so saying yes puts them on the waitlist. They'll be matched automatically when a spot opens.</p>` : ''}
         <p class="note">${known ? "One of your contacts." : "Someone you don't know yet: you'll see who it is once you say yes."}</p>
@@ -1605,7 +1655,7 @@ async function viewConfirm(v) {
     const declined = await withNames(await api('/api/connection-requests?answered=1').catch(() => []));
     const mail = (mailView()?.hosting || []).filter(h => LIVE.includes(h.post.status)).flatMap(h => h.requests
       .filter(r => r.status === 'declined' || r.status === 'waitlisted' || (r.status === 'accepted' && !r.chatted))
-      .map(r => ({ kind: 'mail', id: `m:${r.id}`, ch: r.id, pid: h.post.pid, title: h.post.title, note: r.note, from: r.from,
+      .map(r => ({ kind: 'mail', id: `m:${r.id}`, ch: r.id, pid: h.post.pid, title: h.post.title, note: r.note, interest: r.interest, from: r.from,
         guid: r.hello.attendee?.guid || null, status: r.status, yes: r.status !== 'declined', at: r.updatedAt })));
     const icons = await blockedIcons();
     return [
@@ -2405,7 +2455,20 @@ async function viewPost(v) {
     pending: h.counts.pending, matched: h.counts.accepted + h.counts.attended, waitlisted: h.counts.waitlisted, awaiting: h.counts.reconfirm,
     viewers: vault.data.posts?.[h.post.pid]?.sharedWith.length || 0, audience: vault.data.posts?.[h.post.pid]?.audience,
   }));
-  const events = mine;
+  // Sorted by state.postSort. Posts made before they recorded `created` count as older than any that did, in the
+  // order they were saved (the vault keeps them in that order). "Soonest" goes by start time, with undated posts last.
+  const saved = Object.keys(vault.data.posts || {});
+  const age = (t) => [t.created || 0, saved.indexOf(t.pid)];
+  const newer = (a, b) => { const [x, y] = [age(a), age(b)]; return y[0] - x[0] || y[1] - x[1]; };
+  const startOf = (t) => parseWhen(t.when_text)?.date.getTime() ?? Infinity;
+  const SORTS = {
+    newest: newer,
+    oldest: (a, b) => newer(b, a),
+    soonest: (a, b) => (startOf(a) - startOf(b)) || newer(a, b),
+    interested: (a, b) => (b.pending - a.pending) || (b.matched - a.matched) || newer(a, b),
+    title: (a, b) => String(a.title || '').localeCompare(String(b.title || ''), undefined, { sensitivity: 'base' }) || newer(a, b),
+  };
+  const events = mine.sort(SORTS[state.postSort] || newer);
   // Full cards, like Discover's: labelled with where the post stands, and who can see it and who's in at the bottom.
   const label = (t) => ({
     open: t.pending ? ['warn', `${t.pending} interested`] : ['done', 'Looking'],
@@ -2439,11 +2502,21 @@ async function viewPost(v) {
     </div>
     <form class="stack post-form" id="newEvent"></form>
     <div class="section-title">Your posts</div>
-    <div class="list">
+    ${events.length > 1 ? `<label class="post-sort">Sort by
+      <select id="postSort">${Object.entries(POST_SORTS).map(([k, label]) =>
+        `<option value="${k}"${k === state.postSort ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label>` : ''}
+    <div class="list" id="yourPosts">
       ${events.length ? events.map(card).join('') : `<p style="color:var(--muted)">Nothing yet. What would you like to host?</p>`}
     </div>`;
   fillPostForm(v.querySelector('#newEvent'));
   rotatePostIdeas(v.querySelector('#postIdea'));
+  v.querySelector('#postSort')?.addEventListener('change', (e) => {
+    state.postSort = e.target.value;
+    try { localStorage.setItem('postSort', JSON.stringify(state.postSort)); } catch {}
+    // Just reorder the cards, so a post half-written in the form above stays as it is.
+    const list = v.querySelector('#yourPosts');
+    events.sort(SORTS[state.postSort]).forEach(t => list.append(list.querySelector(`.post-card[data-id="${CSS.escape(t.id)}"]`)));
+  });
   v.querySelector('#newEvent').onsubmit = async (e) => {
     e.preventDefault();
     try { const r = await saveEvent(e.target); toast(postedMessage(e.target, r)); render(); }
@@ -3001,18 +3074,33 @@ if (state.config.authMode === '6j0' && hasIdCallback()) {
     render(); toast(e.message);
   }
 } else {
-  await refreshMe();
-  if (state.me && await loadKeys(state.me.guid)) {
-    try { await vault.load(api); await ensureKeys(api); await syncConnections(); } catch { await clearKeys(); }
-    if (hasKeys()) await loadMail().catch(err => console.warn(err));
+  // Network trouble is retried, then shown as such: it never signs anyone out or deletes this browser's keys. Only
+  // the server saying I'm signed out, or keys that don't open the vault, do that.
+  let offline = false;
+  try {
+    await retrying(async () => { try { state.me = await api('/api/me'); } catch (e) { if (transient(e)) throw e; state.me = null; } });
+    if (state.me && await loadKeys(state.me.guid)) {
+      try { await retrying(async () => { await vault.load(api); await ensureKeys(api); }); }
+      catch (e) { if (transient(e)) throw e; await clearKeys(); }
+      if (hasKeys()) {
+        keepStorage();
+        await syncConnections().catch(err => console.warn(err));
+        await loadMail().catch(err => console.warn(err));
+      }
+    }
+  } catch (e) {
+    if (!transient(e)) throw e;
+    offline = true; showOffline();
   }
-  // Demo mode: nobody signs in. Without a usable account in this browser, make a new one.
-  if (isDemo() && !(state.me && hasKeys())) {
-    try { if (state.me) await api('/api/logout', { method: 'POST' }); await startDemo(); } catch (e) { toast(e.message); }
+  if (!offline) {
+    // Demo mode: nobody signs in. Without a usable account in this browser, make a new one.
+    if (isDemo() && !(state.me && hasKeys())) {
+      try { if (state.me) await api('/api/logout', { method: 'POST' }); await startDemo(); } catch (e) { toast(e.message); }
+    }
+    render();
+    offerPendingInvite();
+    syncPush();
   }
-  render();
-  offerPendingInvite();
-  syncPush();
 }
 
 // The service worker shows notifications; tapping one opens the app at ?open=… or messages an open window.

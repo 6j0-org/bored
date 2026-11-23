@@ -237,7 +237,6 @@ nav.tabs svg { width: 26px; height: 26px; filter: drop-shadow(0 1px 0 rgba(40, 1
 /* The deck's swipe buttons answer the top card, so they're filled brown buttons (.btn), side by side. */
 .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .round { transition: transform .15s; }
-.with-note { display: block; margin: 10px auto 0; text-align: center; font-weight: 600; }
 .round:active { transform: scale(.96); }
 .hint { text-align: center; color: var(--muted); font-size: .8rem; margin-top: 10px; }
 
@@ -360,7 +359,7 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 
 /* ---------- empty deck ---------- */
-.deck-wrap.is-empty .round.yes, .deck-wrap.is-empty .round.no, .deck-wrap.is-empty .hint, .deck-wrap.is-empty .with-note { display: none; }
+.deck-wrap.is-empty .round.yes, .deck-wrap.is-empty .round.no, .deck-wrap.is-empty .hint { display: none; }
 .deck-wrap.is-empty .deck { display: flex; }
 
 /* ---------- discard pile (Discover) ---------- */
@@ -499,6 +498,21 @@ button.chip { font: inherit; font-size: .82rem; cursor: pointer; }
 .cost-field { display: grid; grid-template-columns: 1fr 9em; gap: 8px; }
 .cost-field label { min-width: 0; }
 .cost-field select { text-overflow: ellipsis; }
+.interest { border: 0; margin: 0; padding: 0; display: grid; gap: 6px; }
+.interest legend { font-weight: 700; padding: 0; margin-bottom: 4px; }
+.interest-picks { display: flex; align-items: center; gap: 4px; }
+.interest-picks button { background: none; border: 1.5px solid transparent; border-radius: 8px; min-width: 44px; min-height: 44px;
+  font-size: 1.8rem; line-height: 1; color: var(--wood-line); cursor: pointer; }
+.interest-picks .interest-zero { font-size: 1rem; font-weight: 800; border-color: var(--line); color: var(--muted); }
+.interest-picks .interest-zero.on { border-color: var(--wood-line); color: var(--text); background: var(--surface); }
+.interest-picks .interest-star.on { color: #c98a14; }
+.interest-picks button:focus-visible { outline: 2px solid var(--wood-line); outline-offset: 1px; }
+.interest-shown { margin: 0; color: var(--muted); font-size: .9rem; }
+.interest-shown .stars { color: #c98a14; letter-spacing: 1px; font-size: 1.05rem; }
+.offline { max-width: 420px; margin: 20vh auto 0; padding: 0 16px; text-align: center; }
+.offline p { color: var(--muted); }
+.post-sort { display: flex; align-items: center; justify-content: flex-end; gap: 8px; font-size: .85rem; color: var(--muted); margin-bottom: 8px; }
+.post-sort select { width: auto; font-size: .9rem; padding: 6px 10px; }
 
 /* ---------- public event switch ---------- */
 /* ---------- segmented choice (who can see a post) ---------- */

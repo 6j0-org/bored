@@ -24,7 +24,7 @@
 // - id: random, for telling copies of the same message apart. at: the sender's clock, in ms, for display only.
 //
 // Message types (sender: what it needs → what it does):
-//   join       attendee: first message, { pid, note }                  → pending
+//   join       attendee: first message, { pid, note, interest }        → pending (interest: 0 to 5 stars, or none)
 //   unjoin     attendee: pending or waitlisted                         → cancelled (take back the request)
 //   answer     host: { status: accepted | waitlisted | declined }
 //              from pending: any of the three; from waitlisted: accepted (a spot opened) or declined
@@ -86,6 +86,7 @@ export function replayChannel(messages) {
   if (!join || join.type !== 'join' || join.role !== 'attendee' || join.n !== 1 || typeof join.pid !== 'string') return null;
   const st = {
     pid: join.pid, note: String(join.note || '').slice(0, MAX_NOTE), status: 'pending', reconfirm: false,
+    interest: Number.isInteger(join.interest) && join.interest >= 0 && join.interest <= 5 ? join.interest : null,
     hello: { host: null, attendee: null }, timeline: [], chatted: false, gap, counts,
     joinedAt: Number(join.at) || 0, updatedAt: Number(join.at) || 0,
   };

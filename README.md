@@ -146,7 +146,7 @@ vault, so it shows once per account. "Show the tutorial" in Profile's settings t
 | Step | Who | Where |
 |---|---|---|
 | Post an event (title, details, up to 5 tags, where (map pin), when (date, time, optional repeat, with quick picks like "In an hour" and ends like "2 hours" or "Sunset"), cost and currency, max attendees or no limit, public or shared with chosen contacts/groups). A post idea fills in the form. The button says who'll see it ("Post it to 3 people"); a private post needs at least one person, and a public one asks first | Host | **Post** |
-| Swipe right on events you're in for (filter by date, distance, tags, and free/paid), or use "Add a note for the host" to say yes with a note; scroll down to the discard pile to change a swipe | Attendee | **Discover** |
+| Swipe right on events you're in for (filter by date, distance, tags, and free/paid), then rate how interested you are (0 to 5 stars) and add a note for the host, both optional; scroll down to the discard pile to change a swipe | Attendee | **Discover** |
 | Swipe right on the people who want to join (anonymous, except your contacts) | Host | **Confirm** |
 | Match → you learn who each other are and chat to sort out details (matching doesn't make you contacts) | Both | **Plans** |
 | "Mark as done" to close it out | Host | Plan chat |

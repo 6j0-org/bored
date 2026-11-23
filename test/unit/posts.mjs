@@ -28,6 +28,13 @@ const ID = (id) => ({ guid: id, chat: { x: id }, sign: { x: id }, inbox: id + '-
   assert.equal(s.hello.attendee.guid, 'guest-guid');
   assert.deepEqual(s.timeline.map(t => t.event), ['chat', 'happened']);
   assert.equal(s.note, 'hi');
+  assert.equal(s.interest, null, 'no rating given');
+}
+
+// 1b. How interested the attendee is: 0 to 5 stars from the join, anything else ignored.
+for (const [interest, want] of [[0, 0], [4, 4], [5, 5], [6, null], [-1, null], [2.5, null], ['3', null]]) {
+  const msgs = [{ ...nextMessage([], 'attendee', { type: 'join', pid: 'p1', note: '', interest }), at: 1 }];
+  assert.equal(replayChannel(msgs).interest, want, `interest ${JSON.stringify(interest)}`);
 }
 
 // 2. Messages that the rules don't allow are ignored.

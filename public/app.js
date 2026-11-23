@@ -755,10 +755,45 @@ function mountPile(el, { items, renderCard, label, onChange, onDelete, yesLabel,
 
 // ---------- views ----------
 
-// Tab badges: connection requests from the server, plus requests and matches from the mail (public/mail.js).
+// Unread chat messages in Plans. What I've read is kept in the vault, so reading a chat on one device clears it on all
+// of them: chatRead is { channel: the highest n of the other side's chat messages I've had open }. Accounts from
+// before this have no chatRead; their first one counts everything already there as read, so old chats don't all
+// light up at once.
+const theirChats = (m) => m.state.timeline.filter(t => t.event === 'chat' && t.role !== m.role);
+const theirLastN = (m) => Math.max(0, ...theirChats(m).map(t => t.n || 0));
+function unreadCount(m) {
+  const read = vault.data.chatRead;
+  if (!read || isBlocked({ guid: m.other })) return 0;
+  return theirChats(m).filter(t => !t.deleted && (t.n || 0) > (read[m.ch] || 0)).length;
+}
+let chatReadSaving = null;
+function markChatsRead(ms) {
+  if (!hasKeys() || chatReadSaving) return chatReadSaving;
+  const read = vault.data.chatRead || {}, todo = ms.filter(m => theirLastN(m) > (read[m.ch] || 0));
+  if (vault.data.chatRead && !todo.length) return null;
+  chatReadSaving = vault.update(api, (d) => {
+    d.chatRead ||= {};
+    for (const m of todo) d.chatRead[m.ch] = Math.max(d.chatRead[m.ch] || 0, theirLastN(m));
+  }).catch(err => console.warn('chatRead', err)).finally(() => { chatReadSaving = null; });
+  return chatReadSaving;
+}
+// The plans whose chats count toward the Plans badge: everything listed there (a deleted past plan isn't).
+function unreadPlans(view = mailView()) {
+  if (!view || !hasKeys()) return [];
+  const deleted = new Set(vault.data.deletedPlans || []);
+  return mailMatches(view).filter(m => m.status !== 'waitlisted' && !deleted.has(m.ch));
+}
+
+// Tab badges: connection requests from the server, plus requests from the mail (public/mail.js), and unread messages
+// in Plans' chats.
 function badgeCounts() {
   const c = state.me?.counts || {}, m = mailView()?.badges || {};
-  return { confirm: (c.confirm || 0) + (m.confirm || 0) + (hasKeys() ? invitesForMe().length : 0), plans: m.plans || 0 };
+  const plans = unreadPlans();
+  if (mailView() && hasKeys() && !vault.data.chatRead) markChatsRead(plans); // first time: start from here
+  return {
+    confirm: (c.confirm || 0) + (m.confirm || 0) + (hasKeys() ? invitesForMe().length : 0),
+    plans: plans.reduce((n, p) => n + unreadCount(p), 0),
+  };
 }
 
 function shell(content) {
@@ -1943,10 +1978,11 @@ async function viewPlans(v) {
   if (state.chat) return viewChat(v, state.chat);
   const mail = await loadMail().catch(() => mailView());
   const matches = mailMatches(mail);
-  const shown = JSON.stringify(matches);
+  // Unread counts too, since reading a chat on another device changes them without changing the mail.
+  const key = (ms) => JSON.stringify([ms, ms.map(unreadCount)]), shown = key(matches);
   keepFresh(v, async () => {
     const m = mailMatches(await loadMail());
-    if (JSON.stringify(m) !== shown && state.tab === 'plans' && !state.chat) { shellRefreshBadges(); await viewPlans(v); }
+    if (key(m) !== shown && state.tab === 'plans' && !state.chat) { shellRefreshBadges(); await viewPlans(v); }
   });
   if (!matches.length) {
     v.innerHTML = `<div class="empty"><h3>No plans yet</h3>
@@ -1974,9 +2010,11 @@ async function viewPlans(v) {
   const hosted = (m) => m.role === 'host' && m.status === 'accepted'
     && (mail?.hosting || []).find(h => h.post.pid === m.post.pid && LIVE.includes(h.status));
   const card = (m, { deletable = false } = {}) => {
-    const [cls, text] = label(m);
+    const [cls, text] = label(m), unread = unreadCount(m);
+    const unreadText = unread ? `, ${unread} unread message${unread === 1 ? '' : 's'}` : '';
     return `
-    <div class="card flat plan-card" role="button" tabindex="0" data-id="${m.id}" aria-label="Chat about ${esc(m.title)}">
+    <div class="card flat plan-card" role="button" tabindex="0" data-id="${m.id}" aria-label="Chat about ${esc(m.title)}${unreadText}">
+      ${unread ? `<span class="badge unread" aria-hidden="true">${unread}</span>` : ''}
       <span class="label ${cls}">${esc(text)}</span>
       ${eventCard(mailCard(m.post), { who: who(m), mine: m.role === 'host' })}
       ${deletable ? `<div class="card-actions"><button class="btn small" data-delete-plan="${esc(m.ch)}">Delete</button></div>`
@@ -2116,6 +2154,8 @@ async function viewChat(v, id) {
         : mailSystemLine(t, x) ? `<div class="msg sys notice">${esc(mailSystemLine(t, x))}</div>` : '').join('') +
       (x.status === 'attended' ? '<div class="msg sys">Marked as done. Hope it was fun!</div>'
         : x.status === 'accepted' && x.reconfirm && x.role === 'host' ? `<div class="msg sys">Waiting for ${nm} to re-confirm</div>` : '');
+    // Open on screen counts as read (and clears the Plans badge, here and on my other devices).
+    if (!document.hidden) markChatsRead([x])?.then(shellRefreshBadges);
     if (html === drawn) return;
     drawn = html; msgsEl.innerHTML = html;
     msgsEl.scrollTop = msgsEl.scrollHeight;

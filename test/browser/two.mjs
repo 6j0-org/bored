@@ -89,6 +89,23 @@ await B.ev(`document.getElementById('chatBody').value = 'The map: https://exampl
 await A.until(`document.querySelector('#msgs a[href="https://example.com/park?x=1"][target=_blank]')`, 20000);
 assert.equal(await A.ev(`document.querySelector('#msgs a[href="https://example.com/park?x=1"]').closest('.msg').innerText`), 'The map: https://example.com/park?x=1.');
 
+// Unread messages: with the host out of the chat, a new one from the guest puts a count on the Plans tab (within a
+// badge refresh) and on the plan's card; opening the chat clears both.
+await A.ev(`document.querySelector('.back').click()`); await A.tab('discover');
+await B.ev(`document.getElementById('chatBody').value = 'see you there'; document.getElementById('composer').requestSubmit()`);
+const picnicCard = `[...document.querySelectorAll('.plan-card')].find(c => c.innerText.includes('Two-browser picnic'))`;
+const unreadSum = `[...document.querySelectorAll('.plan-card .badge.unread')].reduce((n, b) => n + Number(b.textContent), 0)`;
+await A.until(`document.querySelector('nav.tabs button[data-tab=plans] .badge')`, 30000);
+await A.tab('plans');
+await A.until(`${picnicCard}?.querySelector('.badge.unread')?.textContent === '1'`, 20000);
+assert.equal(await A.ev(`document.querySelector('nav.tabs button[data-tab=plans] .badge').textContent`), String(await A.ev(unreadSum)), 'the tab counts every unread message');
+assert.match(await A.ev(`${picnicCard}.getAttribute('aria-label')`), /1 unread message$/);
+await A.ev(`${picnicCard}.querySelector('h2').click()`);
+await A.until(`document.getElementById('msgs')?.innerText.includes('see you there')`, 20000); await wait(1500);
+await A.ev(`document.querySelector('.back').click()`);
+await A.until(`${picnicCard} && !${picnicCard}.querySelector('.badge.unread')`, 10000);
+assert.equal(await A.ev(`document.querySelector('nav.tabs button[data-tab=plans] .badge')?.textContent || '0'`), String(await A.ev(unreadSum)));
+
 // A tapped "New activity" notification (?open=mail) opens the newest thing in the mail: this chat.
 await A.send('Page.navigate', { url: BASE + '/?open=mail' });
 await A.until(`document.getElementById('msgs')?.innerText.includes('hi back')`, 20000);
@@ -115,7 +132,7 @@ assert.equal(r.badge, '1');
 assert.match(r.request, /Guesty One of your contacts/, 'a contact who asks is named');
 assert.match(r.overlay, /^It's on! You and Guesty/);
 assert.match(r.guestPlans, /Two-browser picnic[\s\S]*Hosted by Hosty/);
-assert.match(r.hostPlans, /Two-browser picnic[\s\S]*Guesty is going The map: https:\/\/example\.com\/park/, 'the newest message, not the deleted one');
+assert.match(r.hostPlans, /Two-browser picnic[\s\S]*Guesty is going see you there/, 'the newest message');
 assert.match(r.guestChat, /hi from the guest, edited edited hi back/);
 assert.match(r.hostPostAfterLeave, /^LOOKING .*0\/1 matched/, 'the post opens up again when the guest leaves');
 A.close(); B.close();

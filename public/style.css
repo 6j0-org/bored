@@ -426,6 +426,8 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
 .plan-card[data-id]:hover { filter: brightness(1.05); }
 .plan-card[data-id]:focus-visible { outline: 3px solid var(--wood-line); outline-offset: 2px; }
 .plans-hint { margin: 0 0 4px; }
+/* Unread messages in a plan's chat, on the card's corner like the tab badges. */
+.plan-card .badge.unread { top: -7px; left: -7px; z-index: 2; min-width: 22px; height: 22px; font-size: .75rem; border: 1.5px solid var(--surface); }
 
 /* ---------- edits / re-confirm ---------- */
 .chip.warn { background: var(--warn-pill-bg); color: var(--warn-pill-text); border-color: transparent; }

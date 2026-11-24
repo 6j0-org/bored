@@ -853,12 +853,34 @@ function showOffline() {
   document.getElementById('retryStart').onclick = () => location.reload();
 }
 
+// The browser's Back and Forward buttons move between screens (a tab, or a plan's chat on Plans): each new screen
+// render() shows is a history entry, and going back shows the one before it. Without this, Back left the site.
+let historyStarted = false, replaceScreen = false;
+function syncHistory(forced) {
+  const here = { tab: state.tab, chat: state.chat || null }, was = history.state;
+  if (was && was.tab === here.tab && was.chat === here.chat) return; // the same screen, redrawn
+  // The first screen, one the app chose itself (sign in, unlock), or closing a chat with its back arrow takes the
+  // current entry's place, so Back never lands on a screen that just sends you on again.
+  const replace = !historyStarted || forced || replaceScreen;
+  historyStarted = true; replaceScreen = false;
+  // A chat opened from its plan's list: the chat's back arrow can be the browser's Back.
+  const entry = { ...here, fromList: !replace && !!here.chat && was?.tab === here.tab && !was?.chat };
+  history[replace ? 'replaceState' : 'pushState'](entry, '', location.href);
+}
+window.addEventListener('popstate', (e) => {
+  if (!e.state?.tab) return;
+  state.tab = e.state.tab; state.chat = e.state.chat || null;
+  render();
+});
+
 async function render() {
   mountDeck.keyHandler = null;
   stopFresh(); // the new view starts its own, if it has one
+  const asked = state.tab;
   // Signed in, but this browser doesn't hold the keys (e.g. keys were cleared): unlock with a passkey first.
   if (state.me && !hasKeys()) state.tab = 'account';
   if (!state.me && !GUEST_TABS.some(t => t.id === state.tab)) state.tab = 'discover';
+  syncHistory(state.tab !== asked);
   const views = {
     discover: viewDiscover, confirm: viewConfirm, plans: viewPlans, post: viewPost, profile: viewProfile, account: viewAccount,
     feedback: viewFeedback,
@@ -2127,7 +2149,11 @@ async function viewChat(v, id) {
           <button class="btn">Send</button>
         </form>` : ''}
     </div>`;
-  v.querySelector('.back').onclick = () => { state.chat = null; render(); };
+  // Back to the list: the browser's Back when the list is the entry before this one, so both buttons agree.
+  v.querySelector('.back').onclick = () => {
+    if (history.state?.fromList) return history.back();
+    state.chat = null; replaceScreen = true; render();
+  };
   v.querySelector('#connectChat')?.addEventListener('click', () => inviteToConnect({
     reply: { chat: theirHello.chat, inbox: theirHello.inbox }, to: m.other, icon: m.other, about: `The person you matched with on <b>${esc(m.title)}</b>`,
   }));
@@ -3331,6 +3357,30 @@ if (state.config.authMode === '6j0' && hasIdCallback()) {
     offerPendingInvite();
     syncPush();
   }
+}
+
+// iOS Safari sometimes leaves fixed and sticky things (the tab bar, the chat's message box) floating where the top of
+// the keyboard was after the keyboard closes, with the page showing below them, until the next scroll. Scrolling a
+// pixel and back when the keyboard goes away (the visible area grows taller, or a text field loses focus) makes it
+// put them back.
+if (window.visualViewport) {
+  let last = visualViewport.height, pending = 0;
+  const nudge = () => {
+    cancelAnimationFrame(pending);
+    pending = requestAnimationFrame(() => {
+      const y = window.scrollY;
+      window.scrollTo(window.scrollX, y + 1);
+      window.scrollTo(window.scrollX, y);
+    });
+  };
+  visualViewport.addEventListener('resize', () => {
+    const h = visualViewport.height;
+    if (h > last + 100) nudge(); // much taller than a moment ago: the keyboard just closed
+    last = h;
+  });
+  document.addEventListener('focusout', (e) => {
+    if (e.target.matches?.('input, textarea, select, [contenteditable]')) setTimeout(nudge, 300); // after the keyboard animates away
+  });
 }
 
 // The service worker shows notifications; tapping one opens the app at ?open=… or messages an open window.

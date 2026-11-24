@@ -59,6 +59,22 @@ r.guestPlans = (await B.text()).slice(0, 400);
 assert.equal(await B.ev(`[...document.querySelectorAll('.plan-card')].find(c => c.innerText.includes('Two-browser picnic'))?.querySelector('[data-edit-plan]') === null`), true, 'only the host gets Edit');
 await B.ev(`document.querySelector('.plan-card[data-id^="m:"] h2').click()`); await wait(2000);
 await B.ev(`document.getElementById('chatBody').value = 'hi from the guest'; document.getElementById('composer').requestSubmit()`); await wait(2000);
+// The browser's Back goes from the chat to the Plans list (not off the site), and Forward opens the chat again.
+await B.ev(`history.back()`);
+await B.until(`!document.getElementById('msgs') && document.querySelector('.plan-card[data-id^="m:"]')`);
+assert.equal(await B.ev(`document.querySelector('nav.tabs button.active')?.dataset.tab`), 'plans');
+await B.ev(`history.forward()`);
+await B.until(`document.getElementById('msgs')?.innerText.includes('hi from the guest')`);
+// Back again goes from Plans to the tab before it (Discover).
+await B.ev(`history.back()`); await B.until(`document.querySelector('.plan-card[data-id^="m:"]')`);
+await B.ev(`history.back()`); await B.until(`document.querySelector('nav.tabs button.active')?.dataset.tab === 'discover'`);
+// The chat's own back arrow goes to the list too, and then the browser's Back goes to Discover, not the chat.
+await B.tab('plans');
+await B.ev(`document.querySelector('.plan-card[data-id^="m:"] h2').click()`); await B.until(`document.getElementById('msgs')`);
+await B.ev(`document.querySelector('.back').click()`); await B.until(`!document.getElementById('msgs') && document.querySelector('.plan-card')`);
+await B.ev(`history.back()`); await B.until(`document.querySelector('nav.tabs button.active')?.dataset.tab === 'discover'`);
+await B.tab('plans');
+await B.ev(`document.querySelector('.plan-card[data-id^="m:"] h2').click()`); await B.until(`document.getElementById('msgs')`);
 
 // Host's open chat picks it up within a poll or two, now with the guest's name (from their hello).
 await A.until(`document.getElementById('msgs')?.innerText.includes('hi from the guest')`, 20000);
@@ -99,6 +115,9 @@ await A.until(`document.querySelector('nav.tabs button[data-tab=plans] .badge')`
 await A.tab('plans');
 await A.until(`${picnicCard}?.querySelector('.badge.unread')?.textContent === '1'`, 20000);
 assert.equal(await A.ev(`document.querySelector('nav.tabs button[data-tab=plans] .badge').textContent`), String(await A.ev(unreadSum)), 'the tab counts every unread message');
+// The card's badge hangs off its corner, all of it showing: its top-left corner, outside the card, is still the badge.
+assert.equal(await A.ev(`(() => { const b = ${picnicCard}.querySelector('.badge.unread'); b.scrollIntoView({ block: 'center' });
+  const r = b.getBoundingClientRect(); return document.elementFromPoint(r.left + 3, r.top + 3) === b; })()`), true, 'the unread badge is not clipped');
 assert.match(await A.ev(`${picnicCard}.getAttribute('aria-label')`), /1 unread message$/);
 await A.ev(`${picnicCard}.querySelector('h2').click()`);
 await A.until(`document.getElementById('msgs')?.innerText.includes('see you there')`, 20000); await wait(1500);

@@ -427,6 +427,7 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
 .plan-card[data-id]:focus-visible { outline: 3px solid var(--wood-line); outline-offset: 2px; }
 .plans-hint { margin: 0 0 4px; }
 /* Unread messages in a plan's chat, on the card's corner like the tab badges. */
+.plan-card { overflow: visible; } /* .card clips (for the deck's hero images); plan cards have none, and the badge hangs off the corner */
 .plan-card .badge.unread { top: -7px; left: -7px; z-index: 2; min-width: 22px; height: 22px; font-size: .75rem; border: 1.5px solid var(--surface); }
 
 /* ---------- edits / re-confirm ---------- */

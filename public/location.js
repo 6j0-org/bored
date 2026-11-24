@@ -7,6 +7,7 @@
 // only third-party request the browser makes, so the rest of the app never talks to OSM directly.
 
 import { tap } from './pointer.js';
+import { esc } from './html.js';
 
 // A location pin (the teardrop map marker), drawn in the current text color. Used for the Where field's map button.
 export const PIN_SVG = '<svg class="pin-icon" viewBox="0 0 24 24" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" ' +
@@ -44,8 +45,6 @@ function mapSearchLink(name) {
   if (/iPhone|iPad|iPod|Macintosh/.test(ua)) return { href: `https://maps.apple.com/?q=${q}`, external: true };
   return { href: `https://www.openstreetmap.org/search?query=${q}`, external: true };
 }
-
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // HTML for a location: its name (or, without one, the coordinates), always linked to the map: to the spot when there
 // are coordinates, otherwise to a search for the name. cls is the link's class.

@@ -2,24 +2,16 @@
 // public posts that went up since the last round, but not about their own posts, posts that already ended, or updates
 // to old posts, and not people who turned these off. Runs its own demo server, pointed at a stand-in ntfy server.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
+import { listen, startServer } from '../spawn.mjs';
 
-const listen = (srv) => new Promise(r => srv.listen(0, '127.0.0.1', () => r(srv.address().port)));
 const got = [];
 const ntfy = createServer((req, res) => {
   let body = ''; req.on('data', d => body += d);
   req.on('end', () => { got.push(JSON.parse(body)); res.end('{}'); });
 });
 const NTFY = `http://127.0.0.1:${await listen(ntfy)}`;
-const probe = createServer(), port = await listen(probe);
-await new Promise(r => probe.close(r));
-const BASE = `http://127.0.0.1:${port}`;
-const bored = spawn(process.execPath, ['server.js'], {
-  cwd: new URL('../..', import.meta.url).pathname, stdio: ['ignore', 'pipe', 'pipe'],
-  env: { ...process.env, DEMO: '1', AUTH_MODE: '', PORT: String(port), NTFY_SERVERS: NTFY, DISCOVER_NEWS_HOURS: '10,16' },
-});
-let log = ''; bored.stdout.on('data', d => log += d); bored.stderr.on('data', d => log += d);
+const { base: BASE, proc: bored, log } = await startServer({ DEMO: '1', AUTH_MODE: '', NTFY_SERVERS: NTFY, DISCOVER_NEWS_HOURS: '10,16' });
 const pause = (ms) => new Promise(r => setTimeout(r, ms));
 // Run a round, and return the topics that heard about it.
 const round = async () => {
@@ -29,7 +21,6 @@ const round = async () => {
   return got.slice(before).map(m => { assert.equal(m.message, 'New posts in Discover'); assert.equal(m.click, `${BASE}/?open=discover`); return m.topic; }).sort();
 };
 try {
-  for (let i = 0; i < 100; i++) { try { if ((await fetch(BASE + '/api/config')).ok) break; } catch {} await pause(100); }
   process.env.TEST_BASE = BASE;
   const { person } = await import('../lib.mjs');
   const a = await person('news-a'), b = await person('news-b'), c = await person('news-c');
@@ -70,7 +61,7 @@ try {
   await assert.rejects(a.api('/api/me/discover-news', { method: 'PUT', body: { on: 'yes' } }), /Expected/);
   console.log('discover news: ok');
 } catch (e) {
-  console.log(log);
+  console.log(log());
   throw e;
 } finally {
   bored.kill(); ntfy.close();

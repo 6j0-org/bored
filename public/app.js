@@ -17,6 +17,7 @@ import { CURRENCIES, DEFAULT_CURRENCY, costLabel } from './cost.js';
 import { toSvg as identicon } from './vendor/jdenticon.js';
 import { addToCalendar } from './ics.js';
 import { tap, Tap } from './pointer.js';
+import { esc } from './html.js';
 import {
   builtinTerms, ownTerms, censor, mentions, reportedFor, moderationSettings, parseTerms, reportThreshold, REPORT_REASONS,
   MAX_LISTS, MAX_LIST_WORDS, MAX_THRESHOLD,
@@ -234,7 +235,6 @@ function saveDiscoverFilters() {
   } catch {}
 }
 
-const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 // Text as HTML, escaped, with its web addresses (http:// or https://) as links that open in a new tab. Punctuation
 // right after an address (a full stop, a comma, or a closing bracket with no opening one in it) isn't part of it.
 function linkify(text) {
@@ -267,6 +267,27 @@ function toast(msg) {
   t.textContent = msg; t.classList.add('show');
   clearTimeout(toast.timer);
   toast.timer = setTimeout(() => t.classList.remove('show'), 2400);
+}
+
+// A bottom sheet over the page, with html as its panel. Escape, or tapping outside the panel (unless backdrop is
+// false), dismisses it: onDismiss runs, which closes the sheet unless given. Returns { sheet, close }.
+function openSheet(html, { onDismiss, backdrop = true } = {}) {
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet';
+  sheet.innerHTML = html;
+  const panel = sheet.firstElementChild;
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-modal', 'true');
+  const close = () => sheet.remove();
+  const dismiss = () => (onDismiss || close)();
+  // On the sheet, not the document: a field inside that uses Escape itself (a search list) stops it first.
+  sheet.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); dismiss(); } });
+  if (backdrop) sheet.onclick = (e) => { if (e.target === sheet) dismiss(); };
+  document.body.appendChild(sheet);
+  // Keyboard focus moves into the sheet (so Escape reaches it), unless the caller focuses a field in it right away.
+  panel.tabIndex = -1;
+  queueMicrotask(() => { if (!sheet.contains(document.activeElement)) panel.focus({ preventScroll: true }); });
+  return { sheet, close };
 }
 
 // ---------- people ----------
@@ -341,9 +362,7 @@ const inviteLink = ({ token, key, name }) =>
   `${location.origin}/#${new URLSearchParams({ invite: token, ...(key ? { key } : {}), ...(name ? { name } : {}) })}`;
 // Ask for the nickname to suggest, then create the invitation and share it.
 function createInvite() {
-  const sheet = document.createElement('div');
-  sheet.className = 'sheet';
-  sheet.innerHTML = `
+  const { sheet, close } = openSheet(`
     <form class="stack panel">
       <h2>New invitation</h2>
       <label>What should they call you?
@@ -353,9 +372,8 @@ function createInvite() {
         <button type="button" class="btn ghost" data-cancel>Cancel</button>
         <button class="btn">Create and share</button>
       </div>
-    </form>`;
-  document.body.appendChild(sheet);
-  sheet.querySelector('[data-cancel]').onclick = () => sheet.remove();
+    </form>`);
+  sheet.querySelector('[data-cancel]').onclick = close;
   sheet.querySelector('form').onsubmit = async (e) => {
     e.preventDefault();
     const name = e.target.name.value.trim();
@@ -364,7 +382,7 @@ function createInvite() {
       const inv = await api('/api/invites', { method: 'POST' });
       const entry = { token: inv.token, key: newInviteKey(), name };
       await vault.update(api, (d) => { d.invites ||= {}; d.invites[inv.id] = entry; });
-      sheet.remove();
+      close();
       await shareInvite(entry);
       render();
     } catch (err) { toast(err.message); }
@@ -409,9 +427,8 @@ async function previewInvite(token) {
 // 'no', or 'signin' (not signed in yet).
 function connectSheet({ token, key, name, info, ready }) {
   return new Promise((resolve) => {
-    const sheet = document.createElement('div');
-    sheet.className = 'sheet';
-    sheet.innerHTML = `
+    const done = (r) => { close(); resolve(r); };
+    const { sheet, close } = openSheet(`
     <form class="panel stack">
       <h2>Invitation to connect</h2>
       <div class="invite-from">${avatar(info.icon, 'big')}</div>
@@ -429,9 +446,7 @@ function connectSheet({ token, key, name, info, ready }) {
         <button type="button" class="btn ghost" data-no>No thanks</button>
         <button class="btn">${ready ? 'Ask to connect' : 'Sign in'}</button>
       </div>
-    </form>`;
-    document.body.appendChild(sheet);
-    const done = (r) => { sheet.remove(); resolve(r); };
+    </form>`, { onDismiss: () => done('no') });
     sheet.querySelector('[data-no]').onclick = () => done('no');
     sheet.querySelector('form').onsubmit = async (e) => {
       e.preventDefault();
@@ -465,9 +480,7 @@ function inviteToConnect({ reply, to, icon, about }) {
   if (Object.values(vault.data.invites || {}).some(i => i?.direct && i.to === to)) {
     return toast("You've already invited them. They'll see it in their Confirm tab.");
   }
-  const sheet = document.createElement('div');
-  sheet.className = 'sheet';
-  sheet.innerHTML = `
+  const { sheet, close } = openSheet(`
     <form class="stack panel">
       <h2>Invite them to connect</h2>
       <div class="invite-from">${avatar(icon, 'big')}</div>
@@ -483,10 +496,8 @@ function inviteToConnect({ reply, to, icon, about }) {
         <button type="button" class="btn ghost" data-cancel>Cancel</button>
         <button class="btn">Send invitation</button>
       </div>
-    </form>`;
-  document.body.appendChild(sheet);
-  sheet.querySelector('[data-cancel]').onclick = () => sheet.remove();
-  sheet.onclick = (e) => { if (e.target === sheet) sheet.remove(); };
+    </form>`);
+  sheet.querySelector('[data-cancel]').onclick = close;
   sheet.querySelector('form').onsubmit = async (e) => {
     e.preventDefault();
     const name = e.target.name.value.trim(), their = e.target.their.value.trim();
@@ -498,7 +509,7 @@ function inviteToConnect({ reply, to, icon, about }) {
       const entry = { token: inv.token, key: newInviteKey(), name, direct: true, to, their };
       await vault.update(api, (d) => { d.invites ||= {}; d.invites[id] = entry; });
       await sendInvite(reply, entry);
-      sheet.remove();
+      close();
       toast('Invitation sent.');
     } catch (err) {
       if (id) {
@@ -1305,15 +1316,14 @@ async function viewAccount(v) {
 // "Tap to continue" between passkey prompts (Safari allows only one prompt per tap). Rejects if dismissed.
 function nextStep(message, button = 'Continue') {
   return new Promise((resolve, reject) => {
-    const sheet = document.createElement('div');
-    sheet.className = 'sheet';
-    sheet.innerHTML = `<div class="stack panel" role="dialog" aria-live="polite">
+    const cancel = () => { close(); reject(Object.assign(new Error('Cancelled'), { name: 'NotAllowedError' })); };
+    // No closing by tapping outside: a stray tap mid-sign-up would cancel it.
+    const { sheet, close } = openSheet(`<div class="stack panel" aria-live="polite">
       <h2>One more step</h2><p class="note">${esc(message)}</p>
       <div class="two"><button type="button" class="btn ghost" id="stepCancel">Cancel</button>
-        <button type="button" class="btn" id="stepGo">${esc(button)}</button></div></div>`;
-    document.body.appendChild(sheet);
-    sheet.querySelector('#stepGo').onclick = () => { sheet.remove(); resolve(); };
-    sheet.querySelector('#stepCancel').onclick = () => { sheet.remove(); reject(Object.assign(new Error('Cancelled'), { name: 'NotAllowedError' })); };
+        <button type="button" class="btn" id="stepGo">${esc(button)}</button></div></div>`, { onDismiss: cancel, backdrop: false });
+    sheet.querySelector('#stepGo').onclick = () => { close(); resolve(); };
+    sheet.querySelector('#stepCancel').onclick = cancel;
     sheet.querySelector('#stepGo').focus();
   });
 }
@@ -1697,9 +1707,8 @@ function mountJoinExtras(root) {
 }
 function askJoin(t) {
   return new Promise((resolve) => {
-    const sheet = document.createElement('div');
-    sheet.className = 'sheet';
-    sheet.innerHTML = `
+    const done = (v) => { close(); resolve(v); };
+    const { sheet, close } = openSheet(`
       <form class="stack panel">
         <h2>Ask to join</h2>
         <p><b>${esc(t.title)}</b></p>
@@ -1708,12 +1717,9 @@ function askJoin(t) {
           <button type="button" class="btn ghost" data-cancel>Cancel</button>
           <button class="btn">Send request</button>
         </div>
-      </form>`;
-    document.body.appendChild(sheet);
+      </form>`, { onDismiss: () => done(null) });
     const read = mountJoinExtras(sheet);
-    const done = (v) => { sheet.remove(); resolve(v); };
     sheet.querySelector('[data-cancel]').onclick = () => done(null);
-    sheet.onclick = (e) => { if (e.target === sheet) done(null); };
     sheet.querySelector('form').onsubmit = (e) => { e.preventDefault(); done(read()); };
     sheet.querySelector('.interest-star').focus();
   });
@@ -2604,9 +2610,7 @@ function mountTagEditor(root, suggestions = TAGS) {
 // Bottom sheet with the post form. With t.id it edits that post; without, it creates a new one pre-filled from t.
 function openPostSheet(t = {}) {
   const editing = Boolean(t.id);
-  const sheet = document.createElement('div');
-  sheet.className = 'sheet';
-  sheet.innerHTML = `
+  const { sheet, close } = openSheet(`
     <form class="stack panel post-form" id="sheetForm">
       <h2>${editing ? 'Edit post' : 'New post'}</h2>
       ${eventFormFields(t)}
@@ -2616,17 +2620,14 @@ function openPostSheet(t = {}) {
         <button type="button" class="btn ghost" id="cancelSheet">Cancel</button>
         <button class="btn" ${editing ? '' : 'data-post-button'}>${editing ? 'Save changes' : 'Post it'}</button>
       </div>
-    </form>`;
-  document.body.appendChild(sheet);
+    </form>`);
   sheet.querySelectorAll('.tag-editor').forEach(el => mountTagEditor(el));
   mountAudience(sheet.querySelector('form'));
   mountLocationField(sheet.querySelector('form'));
   mountWhenFields(sheet.querySelector('form'));
   mountPiiCheck(sheet.querySelector('form'));
   mountCostFields(sheet.querySelector('form'));
-  const close = () => sheet.remove();
   sheet.querySelector('#cancelSheet').onclick = close;
-  sheet.onclick = (e) => { if (e.target === sheet) close(); };
   sheet.querySelector('#sheetForm').onsubmit = async (e) => {
     e.preventDefault();
     try {
@@ -2872,9 +2873,7 @@ function openReportSheet(pid) {
   const who = { guid: hostGuid, sign: post.signer || null, name: hostGuid ? displayName(hostGuid) : `Host of “${post.title}”` };
   const blocked = isBlocked(who);
   const hostName = hostGuid ? esc(displayName(hostGuid)) : 'this host';
-  const sheet = document.createElement('div');
-  sheet.className = 'sheet';
-  sheet.innerHTML = `
+  const { sheet, close } = openSheet(`
     <form class="stack panel" id="reportForm">
       <h2>Report or block</h2>
       ${isPublic ? `<fieldset class="checks"><legend>Report this post for</legend>
@@ -2889,11 +2888,8 @@ function openReportSheet(pid) {
         <button type="button" class="btn ghost" id="cancelSheet">Cancel</button>
         <button class="btn">Save</button>
       </div>
-    </form>`;
-  document.body.appendChild(sheet);
-  const close = () => sheet.remove();
+    </form>`);
   sheet.querySelector('#cancelSheet').onclick = close;
-  sheet.onclick = (e) => { if (e.target === sheet) close(); };
   sheet.querySelector('#reportForm').onsubmit = async (e) => {
     e.preventDefault();
     const reasons = [...e.target.querySelectorAll('input[name=reason]:checked')].map(i => i.value);
@@ -2936,9 +2932,7 @@ async function deleteContact(guid) {
 // Edit the nickname and tags you keep for a contact. Saved only in your encrypted vault.
 function openContactSheet(guid, onSaved) {
   const c = vault.data.contacts[guid] || { nickname: '', tags: [] };
-  const sheet = document.createElement('div');
-  sheet.className = 'sheet';
-  sheet.innerHTML = `
+  const { sheet, close } = openSheet(`
     <form class="stack panel" id="contactForm">
       <h2>Contact</h2>
       <p class="note">Only you see the nickname and tags you give them. They pick their own name for you.</p>
@@ -2960,8 +2954,7 @@ function openContactSheet(guid, onSaved) {
       </div>
       <p class="note">Blocking hides their posts and messages and stops sharing your private posts with them. Deleting
         takes them out of your contacts. Neither one tells them.</p>` : ''}
-    </form>`;
-  document.body.appendChild(sheet);
+    </form>`);
   sheet.querySelectorAll('.tag-editor').forEach(el => mountTagEditor(el, CONTACT_TAGS));
   const label = c.nickname || 'this contact';
   sheet.querySelector('#blockContact')?.addEventListener('click', async () => {
@@ -2975,9 +2968,7 @@ function openContactSheet(guid, onSaved) {
     try { await deleteContact(guid); close(); toast(`Deleted ${label}`); onSaved?.(); }
     catch (err) { toast(err.message); }
   });
-  const close = () => sheet.remove();
   sheet.querySelector('#cancelSheet').onclick = close;
-  sheet.onclick = (e) => { if (e.target === sheet) close(); };
   sheet.querySelector('#contactForm').onsubmit = async (e) => {
     e.preventDefault();
     const f = formData(e.target);

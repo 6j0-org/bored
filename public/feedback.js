@@ -21,6 +21,7 @@
 // Everything people write is shown as plain text (no links or formatting), so there's nothing to sanitize and
 // nothing for spammers to gain.
 
+// The same as esc() in html.js, kept here so this file stands alone.
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 // Text as HTML, escaped, with its web addresses (http:// or https://) as links that open in a new tab. Punctuation
 // right after an address (a full stop, a comma, or a closing bracket with no opening one in it) isn't part of it.

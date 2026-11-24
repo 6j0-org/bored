@@ -20,14 +20,7 @@
       --shadow: 0 10px 30px rgba(43, 34, 25, .12); --wood-line: #934e23;
       color-scheme: light dark;
     }
-    /* Dark: when the device asks for it (theme "automatic"), or when chosen (public/theme.js). */
-    @media (prefers-color-scheme: dark) {
-      :root:not([data-theme="light"]) {
-        --bg: #14110d; --surface: #211c16; --text: #f0e9dd; --muted: #a69885; --line: #362e25;
-        --accent: #4e9258; --accent-soft: #24382a; --accent-text: #8cc293; --shadow: 0 10px 30px rgba(0, 0, 0, .5); --wood-line: #a75e25;
-        color-scheme: dark;
-      }
-    }
+    /* Dark: chosen, or the device's setting when the theme is automatic (public/theme.js sets data-theme). */
     :root[data-theme="dark"] {
       --bg: #14110d; --surface: #211c16; --text: #f0e9dd; --muted: #a69885; --line: #362e25;
       --accent: #4e9258; --accent-soft: #24382a; --accent-text: #8cc293; --shadow: 0 10px 30px rgba(0, 0, 0, .5); --wood-line: #a75e25;

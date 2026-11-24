@@ -7,11 +7,11 @@ import { costLabel } from './cost.js';
 import { locationHtml } from './location.js';
 import { toSvg as identicon } from './vendor/jdenticon.js';
 import { tap } from './pointer.js';
+import { esc } from './html.js';
 
 const deck = document.querySelector('.deck');
 const FLING = 100; // px of drag that counts as a swipe, as in the app
 const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const attendeesLabel = (max) => (max == null ? 'No limit' : max === 1 ? '1 person' : `Up to ${max} people`);
 // A fresh shuffle on every visit (Fisher-Yates), so the deck doesn't always open on the same post.
 const DECK = [...EXAMPLES];

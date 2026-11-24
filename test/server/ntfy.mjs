@@ -3,27 +3,18 @@
 // new topic replaces the old one, servers that aren't offered are refused, and turning it off stops them. Runs its own
 // demo server, pointed at a stand-in ntfy server.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
+import { listen, startServer } from '../spawn.mjs';
 
-const listen = (srv) => new Promise(r => srv.listen(0, '127.0.0.1', () => r(srv.address().port)));
 const got = [];
 const ntfy = createServer((req, res) => {
   let body = ''; req.on('data', d => body += d);
   req.on('end', () => { got.push({ path: req.url, auth: req.headers.authorization || '', body: JSON.parse(body) }); res.end('{}'); });
 });
 const NTFY = `http://127.0.0.1:${await listen(ntfy)}`;
-const probe = createServer(), port = await listen(probe);
-await new Promise(r => probe.close(r));
-const BASE = `http://127.0.0.1:${port}`;
-const bored = spawn(process.execPath, ['server.js'], {
-  cwd: new URL('../..', import.meta.url).pathname, stdio: ['ignore', 'pipe', 'pipe'],
-  env: { ...process.env, DEMO: '1', AUTH_MODE: '', PORT: String(port), NTFY_SERVERS: `${NTFY}=tk_test,https://ntfy.example` },
-});
-let log = ''; bored.stdout.on('data', d => log += d); bored.stderr.on('data', d => log += d);
+const { base: BASE, proc: bored, log } = await startServer({ DEMO: '1', AUTH_MODE: '', NTFY_SERVERS: `${NTFY}=tk_test,https://ntfy.example` });
 const until = async (fn, ms = 5000) => { for (let t = 0; t < ms; t += 50) { if (fn()) return; await new Promise(r => setTimeout(r, 50)); } throw new Error('timed out'); };
 try {
-  for (let i = 0; i < 100; i++) { try { if ((await fetch(BASE + '/api/config')).ok) break; } catch {} await new Promise(r => setTimeout(r, 100)); }
   process.env.TEST_BASE = BASE;
   const { person } = await import('../lib.mjs');
   const a = await person('ntfy-a');
@@ -55,7 +46,7 @@ try {
   assert.equal(got.length, 2);
   console.log('ntfy: ok');
 } catch (e) {
-  console.log(log);
+  console.log(log());
   throw e;
 } finally {
   bored.kill(); ntfy.close();

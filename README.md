@@ -350,6 +350,7 @@ See `TODO.md` for the full list of open security and privacy issues.
 - `public/postfields.js`: checks a post's fields, in the browser and (for public posts) on the server
 - `public/location.js`: "lat,lon" locations, links to the viewer's maps app, and a small OpenStreetMap pin picker
 - `public/theme.js`: the automatic / light / dark theme switch, applied before the page draws
+- `public/html.js`: `esc()`, which escapes text for the HTML that pages build from template strings
 - `public/pointer.js`: "tap", "click", or "tap or click" in UI text, to match how the device points
 - `public/board.webp`: the wooden board behind the Bored title
 - `public/when.js`, `public/cost.js`: event time (with repeat rules) and cost formats, shared by server and browser
@@ -361,7 +362,8 @@ See `TODO.md` for the full list of open security and privacy issues.
 - `feedback.js`, `public/feedback.js`: the [feedback](#feedback) page's storage and rules, and the page itself (the same
   files as in Glaze Journal)
 - `demo.js`: demo mode (`DEMO=1`): demo accounts with keys, their signed public posts, and the bot that answers them
-- `test/`: the tests (see [Tests](#tests)); `test/lib.mjs` has the shared helpers
+- `test/`: the tests (see [Tests](#tests)); `test/lib.mjs` has the shared helpers, and `test/spawn.mjs` starts a server
+  for the runner and for tests that need one of their own
 - `docs/encryption.md`: how the encryption and privacy system works, and why
 - `docs/styling.md`: how the app looks: the rule for buttons, filters, and choices, plus colors, cards, the discard pile, and page structure
 - `TODO.md`: open security and privacy issues, by priority

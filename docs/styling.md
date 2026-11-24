@@ -52,13 +52,14 @@ word in green. The "Alpha:" under the board is ordinary emphasized text (`em`).
 | `--text`, `--muted` | `#2b2219`, `#776a5a` | Text, and secondary text (notes, hints, and timestamps) |
 | `--line` | `#e2d9c9` | Borders of fields, rows, and notices |
 | `--accent` | `#2f6b3a` (fir green) | Emphasis, links, badges, and your own chat messages; never controls |
-| `--yes`, `--no` | green, rust | Swipe stamps |
+| `--no` | rust | Swipe stamps |
 | `--wood`, `--wood-edge`, `--wood-text` | brown gradient, dark brown, cream | Filled buttons, the tab bar, and picked choices: the title board's wood, the same in light and dark |
 | `--wood-line` | `#934e23` | Brown outlines: outlined buttons, choices, chips, cards, post ideas, and section flourishes |
 | `--warn-*` | amber | Warnings (`.notice.warn`) |
 
-Dark mode swaps these for dark equivalents, under `@media (prefers-color-scheme: dark)` when the theme is
-Automatic, and under `:root[data-theme="dark"]` when someone picks Dark under Developer settings at the bottom of Profile (`public/theme.js`).
+Dark mode swaps these for dark equivalents under `:root[data-theme="dark"]`. `public/theme.js` sets `data-theme` before
+the page draws: to Dark or Light when someone picks one under Developer settings at the bottom of Profile, and to the
+device's setting (following it as it changes) when the theme is Automatic, so there's only one dark palette to keep up.
 
 ## Type
 

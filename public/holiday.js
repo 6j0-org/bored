@@ -43,10 +43,10 @@
     };
     resize(); pickColor();
     addEventListener('resize', resize);
-    // Right away when the theme changes (Profile, or the device going dark), after its styles apply.
+    // Right away when the theme changes (Profile, or the device going dark: theme.js updates data-theme for both),
+    // after its styles apply.
     const recolor = () => requestAnimationFrame(pickColor);
     new MutationObserver(recolor).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-    matchMedia('(prefers-color-scheme: dark)').addEventListener('change', recolor);
 
     let last = performance.now();
     const tick = (t) => {

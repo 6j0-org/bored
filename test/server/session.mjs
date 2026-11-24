@@ -2,24 +2,15 @@
 // a new seen_at, a recent one isn't touched, and one unused for 30 days stops working and is deleted. Runs its own
 // server on a database file (the shared test server keeps its database in memory), with sessions put in directly.
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
-import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import { join } from 'node:path';
-import { TMP, wait } from '../lib.mjs';
+import { TMP } from '../lib.mjs';
+import { startServer } from '../spawn.mjs';
 
-const probe = createServer();
-const port = await new Promise(r => probe.listen(0, '127.0.0.1', () => r(probe.address().port)));
-await new Promise(r => probe.close(r));
-const BASE = `http://127.0.0.1:${port}`, DB_PATH = join(TMP, `session-${port}.sqlite`);
-const server = spawn(process.execPath, ['server.js'], {
-  cwd: new URL('../..', import.meta.url).pathname, stdio: ['ignore', 'pipe', 'pipe'],
-  env: { ...process.env, DEMO: '', AUTH_MODE: '', PORT: String(port), DB_PATH, FEEDBACK_PATH: join(TMP, `session-${port}.jsonl`) },
-});
-let log = ''; server.stdout.on('data', d => log += d); server.stderr.on('data', d => log += d);
+const DB_PATH = join(TMP, 'session.sqlite');
+const { base: BASE, proc: server, log } = await startServer({ DEMO: '', AUTH_MODE: '', DB_PATH, FEEDBACK_PATH: join(TMP, 'session.jsonl') });
 try {
-  for (let i = 0; i < 100; i++) { try { if ((await fetch(BASE + '/api/config')).ok) break; } catch {} await wait(100); }
   const db = new DatabaseSync(DB_PATH);
   const userId = db.prepare('INSERT INTO users (guid) VALUES (?)').run(crypto.randomUUID()).lastInsertRowid;
   const session = (ago) => {
@@ -55,7 +46,7 @@ try {
   assert.match(r.headers.get('set-cookie') || '', /^sid=; .*Max-Age=0/);
   console.log('session: ok');
 } catch (e) {
-  console.log(log);
+  console.log(log());
   throw e;
 } finally {
   server.kill();

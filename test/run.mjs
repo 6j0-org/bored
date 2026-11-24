@@ -9,10 +9,10 @@
 // is left behind; tests that share it only look at their own posts.
 import { spawn } from 'node:child_process';
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
-import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { findChrome } from './lib.mjs';
+import { startServer } from './spawn.mjs';
 
 const ROOT = new URL('..', import.meta.url).pathname;
 const SUITES = ['unit', 'server', 'browser'];
@@ -23,9 +23,6 @@ const suites = asked.length ? asked : SUITES;
 const files = (suite) => readdirSync(join(ROOT, 'test', suite)).filter(f => f.endsWith('.mjs')).sort().map(f => join('test', suite, f));
 
 const TMP = mkdtempSync(join(tmpdir(), 'bored-test-'));
-const freePort = () => new Promise((resolve, reject) => {
-  const s = createServer().listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); }).on('error', reject);
-});
 
 function run(file, env = {}) {
   return new Promise(resolve => {
@@ -44,22 +41,11 @@ function run(file, env = {}) {
   });
 }
 
-let server = null, base = null;
-async function startServer() {
-  const port = await freePort();
-  base = `http://127.0.0.1:${port}`;
-  let log = '';
+let server = null;
+async function startDemo() {
   // NTFY_SERVERS: nothing listens there, so tests never publish to a real ntfy server.
-  server = spawn(process.execPath, ['server.js'], { cwd: ROOT, env: { ...process.env, DEMO: '1', PORT: String(port), AUTH_MODE: '',
-    NTFY_SERVERS: 'http://127.0.0.1:9' }, stdio: ['ignore', 'pipe', 'pipe'] });
-  server.stdout.on('data', d => log += d); server.stderr.on('data', d => log += d);
-  for (let i = 0; i < 100; i++) {
-    if (server.exitCode !== null) break;
-    try { if ((await fetch(base + '/')).ok) return; } catch {}
-    await new Promise(r => setTimeout(r, 100));
-  }
-  console.error('The demo server did not start:\n' + log);
-  process.exit(1);
+  try { server = await startServer({ DEMO: '1', AUTH_MODE: '', NTFY_SERVERS: 'http://127.0.0.1:9' }); }
+  catch (e) { console.error(e.message); process.exit(1); }
 }
 
 const results = [];
@@ -70,11 +56,11 @@ try {
       else console.log('skip  browser: no Chrome or Chromium found (set CHROME_BIN to run these)');
       continue;
     }
-    if (suite !== 'unit' && !server) await startServer();
-    for (const f of files(suite)) results.push(await run(f, suite === 'unit' ? {} : { TEST_BASE: base }));
+    if (suite !== 'unit' && !server) await startDemo();
+    for (const f of files(suite)) results.push(await run(f, suite === 'unit' ? {} : { TEST_BASE: server.base }));
   }
 } finally {
-  server?.kill();
+  server?.proc.kill();
   // Chromium can still be writing to its profile as it exits.
   try { rmSync(TMP, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); } catch {}
 }

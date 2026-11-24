@@ -18,14 +18,7 @@
       --accent: #2f6b3a; --accent-text: #2a5f33;
       color-scheme: light dark;
     }
-    /* Dark: when the device asks for it (theme "automatic"), or when chosen (public/theme.js). */
-    @media (prefers-color-scheme: dark) {
-      :root:not([data-theme="light"]) {
-        --bg: #14110d; --surface: #211c16; --text: #f0e9dd; --muted: #a69885; --line: #362e25;
-        --accent: #4e9258; --accent-text: #8cc293;
-        color-scheme: dark;
-      }
-    }
+    /* Dark: chosen, or the device's setting when the theme is automatic (public/theme.js sets data-theme). */
     :root[data-theme="dark"] {
       --bg: #14110d; --surface: #211c16; --text: #f0e9dd; --muted: #a69885; --line: #362e25;
       --accent: #4e9258; --accent-text: #8cc293;

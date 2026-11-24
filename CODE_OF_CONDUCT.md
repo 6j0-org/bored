@@ -63,10 +63,9 @@ on any server run by the project.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the community leaders responsible for enforcement by opening a
-**confidential issue** at <https://gitlab.com/6j0-org/bored/-/issues/new> (tick
-"This issue is confidential" before you submit it, so only the maintainers can
-see it). Please don't report conduct in a public issue or on the Feedback page.
+reported to the community leaders responsible for enforcement by email at
+<3uzbcqje@addy.to>. Please don't report conduct in a public issue or on the
+Feedback page.
 All complaints will be reviewed and investigated promptly and fairly.
 
 All community leaders are obligated to respect the privacy and security of the

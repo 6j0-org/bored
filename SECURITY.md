@@ -5,12 +5,8 @@ privacy bugs matter more here than most. Thank you for looking.
 
 ## Reporting a vulnerability
 
-Please report it privately, not in a public issue or on the in-app Feedback page. Either:
-
-- **GitHub**: [report a vulnerability](https://github.com/6j0-org/bored/security/advisories/new) (private vulnerability
-  reporting), or
-- **GitLab**: open a [confidential issue](https://gitlab.com/6j0-org/bored/-/issues/new) (tick "This issue is
-  confidential" before you submit it, so only the maintainers can see it).
+Please report it privately by email to [3uzbcqje@addy.to](mailto:3uzbcqje@addy.to), not in a public issue or on the
+in-app Feedback page.
 
 Include what you found, how to reproduce it, and what an attacker could do with it. A proof of concept helps, but
 please test only against your own server (`npm start`, or `DEMO=1` for demo mode; see the README), never someone

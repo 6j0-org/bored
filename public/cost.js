@@ -1,14 +1,14 @@
 // Event cost, shared by the server (validation, change notices) and the browser (form, labels).
 // Stored as cost_amount (a number; 0 = free) and cost_currency (an ISO 4217 code like "USD").
 
-export const MAX_COST = 1_000_000;
+const MAX_COST = 1_000_000;
 export const DEFAULT_CURRENCY = 'USD';
 
 // Every currency this JavaScript engine knows, e.g. ["AED", "AFN", …].
 export const CURRENCIES = Intl.supportedValuesOf('currency');
 
 // Decimal places the currency uses (USD 2, JPY 0, BHD 3).
-export const currencyDigits = (currency) =>
+const currencyDigits = (currency) =>
   new Intl.NumberFormat('en', { style: 'currency', currency }).resolvedOptions().maximumFractionDigits;
 
 // Form values → { amount, currency }, or { error }. Blank amount = free. Rounds to the currency's decimals.

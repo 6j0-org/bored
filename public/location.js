@@ -31,14 +31,14 @@ const fmt = (lat, lon) => `${lat.toFixed(6)},${lon.toFixed(6)}`;
 // A link that opens in the viewer's default maps app where the platform has a way to say "default":
 // Apple devices hand maps.apple.com to Maps, and Android offers geo: URIs to the default (or a chooser).
 // Elsewhere there is no reliable handler for geo:, so open the spot on openstreetmap.org.
-export function mapLink(lat, lon) {
+function mapLink(lat, lon) {
   const ua = navigator.userAgent;
   if (/Android/i.test(ua)) return { href: `geo:${lat},${lon}?q=${lat},${lon}`, external: false };
   if (/iPhone|iPad|iPod|Macintosh/.test(ua)) return { href: `https://maps.apple.com/?ll=${lat},${lon}&q=${lat},${lon}`, external: true };
   return { href: `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=17/${lat}/${lon}`, external: true };
 }
 // The same, for a place known only by its name: a search for it in the maps app.
-export function mapSearchLink(name) {
+function mapSearchLink(name) {
   const ua = navigator.userAgent, q = encodeURIComponent(name);
   if (/Android/i.test(ua)) return { href: `geo:0,0?q=${q}`, external: false };
   if (/iPhone|iPad|iPod|Macintosh/.test(ua)) return { href: `https://maps.apple.com/?q=${q}`, external: true };

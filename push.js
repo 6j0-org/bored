@@ -25,7 +25,7 @@ export function vapidPublicKey() {
 
 // Authorization header for one request: a short-lived ES256 JWT for the push service's origin.
 // subject is a contact URL for the push service operators (mailto: or https:).
-export function vapidAuth(endpoint, subject) {
+function vapidAuth(endpoint, subject) {
   const header = b64u(JSON.stringify({ typ: 'JWT', alg: 'ES256' }));
   const claims = b64u(JSON.stringify({ aud: new URL(endpoint).origin, exp: Math.floor(Date.now() / 1000) + 12 * 3600, sub: subject }));
   const key = createPrivateKey({ key: vapidJwk(), format: 'jwk' });
@@ -35,7 +35,7 @@ export function vapidAuth(endpoint, subject) {
 
 // RFC 8291: the request body for `payload`, encrypted to a subscription's keys (p256dh, auth) as one aes128gcm
 // record. salt and ecdh (the server's one-off key pair) are only passed in by tests.
-export function encryptPayload(payload, { p256dh, auth }, { salt = randomBytes(16), ecdh } = {}) {
+function encryptPayload(payload, { p256dh, auth }, { salt = randomBytes(16), ecdh } = {}) {
   const uaPublic = Buffer.from(p256dh, 'base64url'), authSecret = Buffer.from(auth, 'base64url');
   if (uaPublic.length !== 65 || uaPublic[0] !== 4 || authSecret.length !== 16) throw new Error('Bad subscription keys');
   if (!ecdh) { ecdh = createECDH('prime256v1'); ecdh.generateKeys(); }

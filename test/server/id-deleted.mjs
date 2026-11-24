@@ -4,7 +4,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
-import { createHash, generateKeyPairSync, generateKeyPair, randomBytes, sign } from 'node:crypto';
+import { generateKeyPairSync, generateKeyPair, randomBytes, sign } from 'node:crypto';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
 import { TMP, wait } from '../lib.mjs';

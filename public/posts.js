@@ -43,7 +43,7 @@
 
 export const POST_STATUSES = ['open', 'full', 'past', 'cancelled'];
 export const LIVE = ['open', 'full'];
-export const MAX_NOTE = 500, MAX_CHAT = 4000;
+const MAX_NOTE = 500, MAX_CHAT = 4000;
 
 const SENDER = {
   join: 'attendee', unjoin: 'attendee', reconfirm: 'attendee', leave: 'attendee',

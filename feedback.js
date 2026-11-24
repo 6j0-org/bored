@@ -50,7 +50,7 @@ export class FeedbackError extends Error {
 }
 
 const DAY = 24 * 3600 * 1000;
-export const STATUSES = ["open", "done", "wontdo"];
+const STATUSES = ["open", "done", "wontdo"];
 
 export function createFeedback({
   file,

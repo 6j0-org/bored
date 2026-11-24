@@ -16,7 +16,7 @@ const fromB64u = (s, what) => {
   return Buffer.from(s, 'base64url');
 };
 
-export const ALGS = { ES256: -7, RS256: -257 };
+const ALGS = { ES256: -7, RS256: -257 };
 const FLAG_UP = 0x01, FLAG_UV = 0x04, FLAG_AT = 0x40;
 
 // ---------- challenges (single use, short-lived, in memory) ----------

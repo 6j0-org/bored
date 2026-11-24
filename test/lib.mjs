@@ -54,7 +54,7 @@ export function findChrome() {
 }
 
 // Page errors and console errors or warnings from every browser opened, for the test to report at the end.
-export const pageErrors = [];
+const pageErrors = [];
 
 // Opens `path` in a new headless browser with its own profile, and waits for the tab bar.
 export async function browser(name, path = '/?start') {

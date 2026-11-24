@@ -75,7 +75,7 @@ export async function verifyIdToken(token, { issuer, audience, nonce, jwksUrl })
 
 // A notice that an identity was deleted (the identity server POSTs it to /api/id/deleted): signed like a sign-in
 // token, but with no nonce and with events: { "6j0/v1/identity-deleted": {} }. Returns its claims or throws.
-export const DELETED_EVENT = '6j0/v1/identity-deleted';
+const DELETED_EVENT = '6j0/v1/identity-deleted';
 export async function verifyDeletionToken(token, { issuer, audience, jwksUrl }) {
   const claims = await check(token, { issuer, audience, jwksUrl });
   if (claims.nonce !== undefined || !claims.events || typeof claims.events !== 'object' || !Object.hasOwn(claims.events, DELETED_EVENT))

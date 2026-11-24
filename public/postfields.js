@@ -4,11 +4,12 @@
 import { composeWhen, composeEnd } from './when.js';
 import { parseCost } from './cost.js';
 
-export const MAX_TAGS = 5, MAX_TAG_LENGTH = 24, MAX_ATTENDEES_LIMIT = 500; // the same as db.js
+export const MAX_TAGS = 5, MAX_ATTENDEES_LIMIT = 500; // the same as db.js
+const MAX_TAG_LENGTH = 24;
 
 export const normalizeTag = (raw) => String(raw ?? '').toLowerCase().trim().replace(/^#+/, '')
   .replace(/[\s_]+/g, '-').replace(/[^a-z0-9-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '').slice(0, MAX_TAG_LENGTH);
-export const parseTags = (input) =>
+const parseTags = (input) =>
   [...new Set((Array.isArray(input) ? input : String(input ?? '').split(',')).map(normalizeTag).filter(Boolean))];
 
 const fail = (message) => { throw new Error(message); };

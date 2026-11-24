@@ -159,7 +159,7 @@ const MIGRATIONS = [
    UPDATE public_posts SET first_seq = seq;`,
 ];
 
-export function migrate() {
+function migrate() {
   const from = db.prepare('PRAGMA user_version').get().user_version;
   if (from > MIGRATIONS.length) throw new Error(`Database is at version ${from}, newer than this code (${MIGRATIONS.length})`);
   for (let v = from; v < MIGRATIONS.length; v++) {

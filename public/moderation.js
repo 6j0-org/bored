@@ -10,11 +10,11 @@
 // The built-in list is David Sojevic's profanity-list (the @dsojevic/profanity-list npm package, MIT), which the
 // server serves from node_modules like the other browser packages, so the words aren't in this repository.
 
-export const MAX_WORDS = 4, MAX_RUN = 3;
+const MAX_WORDS = 4, MAX_RUN = 3;
 
 const WORD = /[\p{L}\p{N}][\p{L}\p{N}\p{M}]*/gu; // marks: a decomposed accent stays in its word
 const capRuns = (w) => w.replace(new RegExp(`(.)\\1{${MAX_RUN},}`, 'gu'), (_, c) => c.repeat(MAX_RUN));
-export const normalizeWord = (w) => capRuns(w.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase());
+const normalizeWord = (w) => capRuns(w.normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase());
 
 // The words in some text, normalized, with where each one is in the original: [{ w, start, end }].
 export function words(text) {
@@ -38,7 +38,7 @@ export function expandTerm(term) {
 }
 
 // A set of terms to look for: { has(phrase), size }.
-export function termSet(phrases) {
+function termSet(phrases) {
   const set = new Set(phrases);
   return { has: (p) => set.has(p), size: set.size };
 }
@@ -113,7 +113,8 @@ const threshold = (v) => { const n = Number(v); return Number.isInteger(n) && n 
 //   blocked:  { [key]: { guid?, sign?: { x, y }, name, at } }  key: the GUID, or "k:x.y" for a signing key
 //   reported: { [pid]: [reason] }                       what I reported, so the report sheet shows it again
 export { threshold as reportThreshold };
-export const MAX_LISTS = 20, MAX_LIST_WORDS = 500, MAX_TERM = 60;
+export const MAX_LISTS = 20, MAX_LIST_WORDS = 500;
+const MAX_TERM = 60;
 export function moderationSettings(saved = {}) {
   const s = saved || {};
   const reports = {};

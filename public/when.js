@@ -65,7 +65,7 @@ export function composeWhen(start, rule = '') {
   return parseWhen(rule ? `${s};${rule}` : s) ? (rule ? `${s};${rule}` : s) : null;
 }
 
-export const MAX_EVENT_DAYS = 14;
+const MAX_EVENT_DAYS = 14;
 const MINUTE = 60000, DAY = 86400000;
 const trimSeconds = (v) => String(v ?? '').trim().replace(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}):\d{2}(\.\d+)?$/, '$1');
 const wallString = (d) => d.toISOString().slice(0, 16);

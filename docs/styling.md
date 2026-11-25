@@ -135,13 +135,3 @@ an edited message says so. Feedback threads label the developers ("Developer") a
 - Choices are real radio buttons and checkboxes under the styling, so keyboards and screen readers work.
 - Check text contrast in both themes when adding colors, and respect `prefers-reduced-motion` for new animations
   (the post ideas already do).
-
-## Holiday season
-
-From November 1 through December 31, by the device's own date, `public/holiday.js` (loaded in `<head>` on every page,
-like `theme.js`) sets `<html data-season="holiday">`. Section headings' branches then get a string of Christmas lights
-(`--lights-a` and `--lights-b` in `style.css`, the same string with the other half of the bulbs lit, swapped every
-0.8 s), and snow falls behind the page on a fixed canvas: blue-gray on light pages, white on dark ones. With reduced
-motion, the lights stay still and there's no snow. The lights' SVGs share the branch's viewBox and follow its lower
-edge, so if the branch changes, they need redrawing to match. To see it any other time of year, set `localStorage.holiday` to `on`
-(or `off` to hide it in season).

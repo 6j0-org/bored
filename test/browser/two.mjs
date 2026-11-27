@@ -115,9 +115,13 @@ await A.until(`document.querySelector('nav.tabs button[data-tab=plans] .badge')`
 await A.tab('plans');
 await A.until(`${picnicCard}?.querySelector('.badge.unread')?.textContent === '1'`, 20000);
 assert.equal(await A.ev(`document.querySelector('nav.tabs button[data-tab=plans] .badge').textContent`), String(await A.ev(unreadSum)), 'the tab counts every unread message');
-// The card's badge hangs off its corner, all of it showing: its top-left corner, outside the card, is still the badge.
+// The card's badge hangs off its corner, all of it showing: the middle of its left edge and of its top edge, both
+// outside the card, are still the badge. (Not its bounding box's corner: that falls outside the rounded shape, and
+// browsers differ on whether a point there hits it.)
 assert.equal(await A.ev(`(() => { const b = ${picnicCard}.querySelector('.badge.unread'); b.scrollIntoView({ block: 'center' });
-  const r = b.getBoundingClientRect(); return document.elementFromPoint(r.left + 3, r.top + 3) === b; })()`), true, 'the unread badge is not clipped');
+  const r = b.getBoundingClientRect(), c = ${picnicCard}.getBoundingClientRect();
+  const pts = [[r.left + 3, r.top + r.height / 2], [r.left + r.width / 2, r.top + 3]];
+  return pts.every(([x, y]) => (x < c.left || y < c.top) && document.elementFromPoint(x, y) === b); })()`), true, 'the unread badge is not clipped');
 assert.match(await A.ev(`${picnicCard}.getAttribute('aria-label')`), /1 unread message$/);
 await A.ev(`${picnicCard}.querySelector('h2').click()`);
 await A.until(`document.getElementById('msgs')?.innerText.includes('see you there')`, 20000); await wait(1500);

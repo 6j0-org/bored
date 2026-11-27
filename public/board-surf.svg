@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 200" preserveAspectRatio="none">
+  <!-- The surfboard: a wooden longboard seen from above, tail on the left and nose on the right, in the app's wood
+       browns, with a pale stringer down the middle. It's stretched to fit the letters, so the outlines don't scale. -->
+  <defs>
+    <linearGradient id="deck" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#c47533"/>
+      <stop offset=".5" stop-color="#a05a28"/>
+      <stop offset="1" stop-color="#83431d"/>
+    </linearGradient>
+    <clipPath id="shape">
+      <path id="outline" d="M18 100C18 52 70 18 250 14C430 10 560 40 626 100C560 160 430 190 250 186C70 182 18 148 18 100Z"/>
+    </clipPath>
+  </defs>
+  <path d="M18 100C18 52 70 18 250 14C430 10 560 40 626 100C560 160 430 190 250 186C70 182 18 148 18 100Z" fill="url(#deck)"/>
+  <g clip-path="url(#shape)" fill="none" stroke-linecap="round">
+    <!-- wood strips running nose to tail, and the rails' darker edge -->
+    <path d="M10 62C150 50 380 52 640 92" stroke="#5e2f12" stroke-opacity=".22" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    <path d="M10 138C150 150 380 148 640 108" stroke="#5e2f12" stroke-opacity=".22" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    <path d="M10 40C160 26 400 30 640 86" stroke="#5e2f12" stroke-opacity=".16" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    <path d="M10 160C160 174 400 170 640 114" stroke="#5e2f12" stroke-opacity=".16" stroke-width="2" vector-effect="non-scaling-stroke"/>
+    <path d="M18 100C18 52 70 18 250 14C430 10 560 40 626 100C560 160 430 190 250 186C70 182 18 148 18 100Z" stroke="#5a2c10" stroke-opacity=".5" stroke-width="14" vector-effect="non-scaling-stroke"/>
+    <!-- the rail catching the light along the top -->
+    <path d="M30 86C40 46 110 24 250 21C420 18 545 44 610 96" stroke="#f6ecda" stroke-opacity=".3" stroke-width="3" vector-effect="non-scaling-stroke"/>
+  </g>
+  <!-- the stringer: a pale strip with a dark line each side -->
+  <path d="M22 100H622" stroke="#472610" stroke-opacity=".45" stroke-width="7" vector-effect="non-scaling-stroke"/>
+  <path d="M22 100H622" stroke="#e8c08c" stroke-opacity=".8" stroke-width="3" vector-effect="non-scaling-stroke"/>
+  <!-- the leash plug, near the tail -->
+  <circle cx="48" cy="100" r="5" fill="#472610" fill-opacity=".6"/>
+  <path d="M18 100C18 52 70 18 250 14C430 10 560 40 626 100C560 160 430 190 250 186C70 182 18 148 18 100Z" fill="none" stroke="#472610" stroke-width="3" vector-effect="non-scaling-stroke"/>
+</svg>

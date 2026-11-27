@@ -1,0 +1,10 @@
+/* The title board's three looks, picked in Profile and set on <html data-board> by public/theme.js before the page
+   draws. Shared by the app (public/style.css), the introduction page, and the privacy page, whose own .board rules
+   draw the rough plank (public/board.webp); these swap the picture, and the surfboard's padding, on top of them.
+   - surf: a wooden longboard (public/board-surf.svg). Slimmer than the planks, with the letters toward the tail,
+     where it's widest, so they stay clear of the nose.
+   - planed: the original cartoon board, squared off and smoothed (public/board-planed.svg).
+   - rough: the plank with worn edges (public/board.webp). */
+[data-board="surf"] .board { padding: .36em 1.25em .34em .75em; }
+[data-board="surf"] .board::before { background-image: url(/board-surf.svg); }
+[data-board="planed"] .board::before { background-image: url(/board-planed.svg); }

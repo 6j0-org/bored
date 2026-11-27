@@ -61,6 +61,13 @@ Dark mode swaps these for dark equivalents under `:root[data-theme="dark"]`. `pu
 the page draws: to Dark or Light when someone picks one under Developer settings at the bottom of Profile, and to the
 device's setting (following it as it changes) when the theme is Automatic, so there's only one dark palette to keep up.
 
+The title board has three looks, picked under Settings in Profile and kept per device: a wooden surfboard (the
+default, `public/board-surf.svg`), a planed board (the original cartoon board squared off, `public/board-planed.svg`),
+and the rough plank (`public/board.webp`). `public/theme.js` sets `<html data-board="surf|planed|rough">` before the
+page draws, and `public/boards.css`, shared by the app, the introduction page, and the privacy page, swaps the picture
+behind the letters. All three are in the same wood browns, with the same dark brown outline (`--wood-edge`), and the
+SVGs stretch to fit the letters without thickening their outlines (`vector-effect: non-scaling-stroke`).
+
 ## Type
 
 Everything is set in National Park (`public/fonts/`, under the OFL), the board's lettering. Buttons use it at weight

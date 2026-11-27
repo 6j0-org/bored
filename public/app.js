@@ -3173,6 +3173,10 @@ async function viewProfile(v) {
       <label class="check"><input type="checkbox" name="tutorial" id="tutorialPref" ${tour || !vault.data.prefs?.tutorialSeen ? 'checked' : ''}>
         <span>Show the tutorial<small>The five steps, from Connect to Plan, in a box above the tabs.</small></span></label>
     </form>
+    <fieldset class="seg-pick" id="boardPick" style="margin-top: 14px"><legend>Title board (on this device)</legend><div class="seg">
+      ${[['surf', 'Surfboard'], ['planed', 'Planed board'], ['rough', 'Rough plank']].map(([value, label]) =>
+        `<label><input type="radio" name="board" value="${value}" ${(window.boredBoard?.get() || 'surf') === value ? 'checked' : ''}><span>${label}</span></label>`).join('')}
+    </div></fieldset>
 
     ${moderationHtml()}
 
@@ -3239,6 +3243,7 @@ async function viewProfile(v) {
   });
   // The theme stays on this device (public/theme.js), unlike the settings below, which are saved in your vault.
   v.querySelector('#themePick').addEventListener('change', (e) => window.boredTheme?.set(e.target.value));
+  v.querySelector('#boardPick').addEventListener('change', (e) => window.boredBoard?.set(e.target.value));
   v.querySelector('#prefsForm').addEventListener('change', async (e) => {
     if (e.target.name === 'tutorial') return setTutorial(e.target.checked);
     const { distanceUnit } = formData(e.currentTarget);

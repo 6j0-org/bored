@@ -1829,13 +1829,18 @@ function deckOptions(events, changed, filters) {
 }
 
 // Confirm: people asking to join my posts, and people asking to connect through my invitation links.
-function connectCard(c) {
+// A request to connect has a field for my nickname for them, starting with the one they suggest for themselves;
+// nickname is what I've typed there so far (kept by viewConfirm, so a redraw doesn't lose it).
+function connectCard(c, nickname) {
+  const suggested = c.suggested ? clean(c.suggested) : '';
   return `
       <div class="hero">${avatar(c.requester.icon, 'big')}</div>
       <div class="body">
         <div class="meta"><span class="chip">Wants to connect${c.via ? ` through your invitation as “${esc(c.via)}”` : ''}</span></div>
-        <h2>${c.suggested ? esc(clean(c.suggested)) : 'Someone'}</h2>
-        ${c.suggested ? '<p class="note">The nickname they suggest for themselves. You can change it after you connect.</p>' : ''}
+        <h2>${suggested ? esc(suggested) : 'Someone'}</h2>
+        <label>Your nickname for them
+          <input data-nickname="${esc(c.id)}" maxlength="60" placeholder="e.g. Sam from book club" value="${esc(nickname ?? suggested)}" autocomplete="off"></label>
+        <p class="note">${suggested ? 'It starts as the nickname they suggest for themselves. ' : ''}Only you see it.</p>
         <p>They opened one of your invitation links and asked to connect. If you say yes, you'll be in each other's
           contacts and can share private posts with each other.</p>
       </div>`;
@@ -1945,7 +1950,18 @@ async function viewConfirm(v) {
       ...(await checkInvites(declinedInvites())).filter(i => !icons.has(i.icon)),
     ].sort((a, b) => b.at - a.at);
   };
-  const renderCard = (o) => o.kind === 'connect' ? connectCard(o) : o.kind === 'invite' ? inviteCard(o) : mailRequestCard(o);
+  // What I've typed for a request's nickname, by request id: the cards are redrawn as they move and on a new search.
+  const nicknames = new Map();
+  for (const el of [host, pileEl]) {
+    el.addEventListener('input', (e) => { const i = e.target.closest('[data-nickname]'); if (i) nicknames.set(i.dataset.nickname, i.value); });
+  }
+  // Enter in the nickname field on the top card says yes, like the button.
+  host.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' || !e.target.closest('.card.top [data-nickname]')) return;
+    e.preventDefault(); host.querySelector('.round.yes')?.click();
+  });
+  const nicknameFor = (o) => (nicknames.get(String(o.id)) ?? (o.suggested ? clean(o.suggested) : '')).trim().slice(0, 60);
+  const renderCard = (o) => o.kind === 'connect' ? connectCard(o, nicknames.get(String(o.id))) : o.kind === 'invite' ? inviteCard(o) : mailRequestCard(o);
   // Answer a request to join, and say what happened.
   const answerJoin = async (o, yes) => {
     const status = yes ? mailAnswer(mailView(), o.pid) : 'declined';
@@ -1957,8 +1973,10 @@ async function viewConfirm(v) {
   const connected = async (r, o) => {
     await refreshMe();
     if (!r.connected) return;
-    await addContacts([r.guid], o.suggested ? { [r.guid]: o.suggested } : {});
-    toast(o.suggested ? `Connected with ${o.suggested}! Change their nickname if you like.` : "Connected! Give them a nickname only you'll see.");
+    const nickname = nicknameFor(o);
+    await addContacts([r.guid], nickname ? { [r.guid]: nickname } : {});
+    if (nickname) return toast(`Connected with ${nickname}!`);
+    toast("Connected! Give them a nickname only you'll see.");
     openContactSheet(r.guid, () => {});
   };
 

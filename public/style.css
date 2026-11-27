@@ -186,7 +186,7 @@ nav.tabs svg { width: 26px; height: 26px; filter: drop-shadow(0 1px 0 var(--wood
 .deck { perspective: 1200px; }
 .card .face { display: contents; }
 .card.flipped { touch-action: pan-y; } /* the back can scroll; sideways drags still swipe */
-.card .face.back textarea { user-select: text; -webkit-user-select: text; }
+.card .face.back textarea, .card input { user-select: text; -webkit-user-select: text; }
 .join-back { gap: 8px; }
 .join-back h2 { text-align: center; }
 .join-back p { margin: 0; }

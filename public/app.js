@@ -940,23 +940,26 @@ async function render() {
 }
 
 // ---------- tutorial ----------
-// A short tour the first time someone signed in opens the app (people skim the About page): the five steps from
+// A short tour the first time someone signed in opens the app (people skim the About page): the six steps from
 // the About page's "How it works", one at a time, in a box above the tab bar. Each step points at its tab and, once
 // you're there, at the thing to use. It doesn't move you around on its own: "Show me", Next, and Back do.
 // Finishing or skipping it is saved in the vault (prefs.tutorialSeen), so it shows once per account; a switch in
-// Profile's settings turns it back on. The highlighting is CSS keyed on <body data-tour-tab data-tour> (public/style.css), so it
-// survives views redrawing themselves.
+// Profile's settings turns it back on. The highlighting is CSS keyed on <body data-tour-tab data-tour> (the step's
+// tab, and its id once you're on that tab; public/style.css), so it survives views redrawing themselves.
 const TOUR = [
-  { tab: 'profile', target: '#newInvite', title: 'Connect', text: `Welcome to Bored! Here's how it works, in five steps. First, invite your
+  { id: 'connect', tab: 'profile', target: '#newInvite', title: 'Connect', text: `Welcome to Bored! Here's how it works, in six steps. First, invite your
     friends: on Profile, create an invitation and send them the link. Once you're connected, you can share posts with
     just them.` },
-  { tab: 'post', target: '#postIdea', title: 'Post', text: `Post something you want to do or need help with. ${Tap} an idea to fill in the
+  { id: 'notify', tab: 'profile', target: '#pushSettings', title: 'Get notified', text: `Turn on notifications, so you
+    hear when someone wants to join your post, when it's a match, and when you get a message. On Profile, under
+    Notifications, ${tap} “Turn on notifications.” On iPhone and iPad, add Bored to your Home Screen first.` },
+  { id: 'post', tab: 'post', target: '#postIdea', title: 'Post', text: `Post something you want to do or need help with. ${Tap} an idea to fill in the
     form, or write your own. When, where, and cost are optional: leave them blank and play it by ear.` },
-  { tab: 'discover', target: '#deckHost', title: 'Discover', text: `Swipe through what other people have posted: right means “I'm in,” and
+  { id: 'discover', tab: 'discover', target: '#deckHost', title: 'Discover', text: `Swipe through what other people have posted: right means “I'm in,” and
     left means pass. Open the filters to narrow it down by tags, distance, date, and more.` },
-  { tab: 'confirm', target: '#deckHost', title: 'Confirm', text: `When people want to join your posts, they show up here. Swipe right for
+  { id: 'confirm', tab: 'confirm', target: '#deckHost', title: 'Confirm', text: `When people want to join your posts, they show up here. Swipe right for
     “Let's do it,” or left if you're not feeling it. There's no obligation.` },
-  { tab: 'plans', title: 'Plan', text: `When you both say yes, it's on, and it shows up in Plans. Chat to sort out the
+  { id: 'plan', tab: 'plans', title: 'Plan', text: `When you both say yes, it's on, and it shows up in Plans. Chat to sort out the
     details, ${tap} When to add it to your calendar, and then go do the thing!` },
 ];
 let tour = null; // { step, el }
@@ -1015,7 +1018,7 @@ function drawTour() {
   }
   const s = TOUR[tour.step], here = state.tab === s.tab && !state.chat, last = tour.step === TOUR.length - 1;
   body.dataset.tourTab = s.tab;
-  if (here) body.dataset.tour = s.tab; else delete body.dataset.tour;
+  if (here) body.dataset.tour = s.id; else delete body.dataset.tour;
   if (!tour.el) {
     tour.el = document.createElement('aside');
     tour.el.className = 'tour';
@@ -3189,7 +3192,7 @@ async function viewProfile(v) {
           <option value="mi" ${useMiles() ? 'selected' : ''}>Miles</option>
         </select></label>
       <label class="check"><input type="checkbox" name="tutorial" id="tutorialPref" ${tour || !vault.data.prefs?.tutorialSeen ? 'checked' : ''}>
-        <span>Show the tutorial<small>The five steps, from Connect to Plan, in a box above the tabs.</small></span></label>
+        <span>Show the tutorial<small>The six steps, from Connect to Plan, in a box above the tabs.</small></span></label>
     </form>
     <fieldset class="seg-pick" id="boardPick" style="margin-top: 14px"><legend>Look (on this device)</legend><div class="seg">
       ${[['surf', 'Surfboard'], ['planed', 'Cartoon board'], ['rough', 'Photo board']].map(([value, label]) =>

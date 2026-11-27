@@ -159,8 +159,8 @@ the server says so on startup, and you delete it to start fresh.
 
 ## How it works
 
-The first time someone signed in opens the app, a short tutorial walks through the five steps (Connect, Post,
-Discover, Confirm, and Plan), one box at a time above the tab bar. Each step rings its tab and, once you're there,
+The first time someone signed in opens the app, a short tutorial walks through the six steps (Connect, Get
+notified, Post, Discover, Confirm, and Plan), one box at a time above the tab bar. Each step rings its tab and, once you're there,
 the thing to use; "Show me", Next, and Back move between them. Finishing or skipping it is saved in the encrypted
 vault, so it shows once per account. "Show the tutorial" in Profile's settings turns it back on (or off).
 

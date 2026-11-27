@@ -1,4 +1,4 @@
-// The first-visit tutorial: it shows for a new account, steps through the five tabs, points at each step's target,
+// The first-visit tutorial: it shows for a new account, steps through the six steps, points at each step's target,
 // and once finished, stays gone after a reload (prefs.tutorialSeen in the vault). A switch in Profile's settings
 // turns it back on or off.
 import assert from 'node:assert/strict';
@@ -17,7 +17,11 @@ await act('show');
 out.onProfile = await ev(`document.body.dataset.tour`);
 out.inviteRing = await ev(`getComputedStyle(document.querySelector('#newInvite')).outlineStyle`);
 const steps = [];
-for (let i = 0; i < 4; i++) {
+for (let i = 0; i < 5; i++) {
+  if (i === 1) { // Get notified: Profile's Notifications are ringed, and the invitation button isn't any more
+    out.pushRing = await ev(`getComputedStyle(document.querySelector('#pushSettings')).outlineStyle`);
+    out.inviteRingAfter = await ev(`getComputedStyle(document.querySelector('#newInvite')).outlineStyle`);
+  }
   await act('next');
   steps.push([await ev(`document.querySelector('nav.tabs button.active')?.dataset.tab`), await ev(`document.getElementById('tourTitle')?.textContent`)]);
 }
@@ -43,20 +47,22 @@ await wait(1500);
 out.switchedOff = await box();
 console.log(JSON.stringify(out, null, 2));
 
-assert.match(out.first, /Step 1 of 5 Connect Welcome to Bored!/);
+assert.match(out.first, /Step 1 of 6 Connect Welcome to Bored!/);
 assert.equal(out.firstTab, 'profile', 'step 1 points at Profile');
 assert.equal(out.notMoved, 'discover', "the tutorial doesn't switch tabs by itself");
-assert.equal(out.onProfile, 'profile', '"Show me" opens Profile');
+assert.equal(out.onProfile, 'connect', '"Show me" opens Profile');
 assert.equal(out.inviteRing, 'solid', 'the invitation button is ringed');
-assert.deepEqual(out.steps, [['post', 'Post'], ['discover', 'Discover'], ['confirm', 'Confirm'], ['plans', 'Plan']]);
-assert.match(out.last, /Step 5 of 5 .* Done$/);
+assert.deepEqual(out.steps, [['profile', 'Get notified'], ['post', 'Post'], ['discover', 'Discover'], ['confirm', 'Confirm'], ['plans', 'Plan']]);
+assert.equal(out.pushRing, 'solid', 'Get notified rings the Notifications settings');
+assert.equal(out.inviteRingAfter, 'none', '...and not the invitation button');
+assert.match(out.last, /Step 6 of 6 .* Done$/);
 assert.equal(out.afterDone, '', 'Done closes it');
 assert.equal(out.afterReload, '', "it doesn't come back after a reload");
 assert.equal(out.switchOff, false, "Profile's switch is off once it's done");
-assert.match(out.replayed, /Step 1 of 5 Connect/, "Profile's switch shows it again");
-assert.equal(out.replayTab, 'profile', 'from step 1, on Profile');
+assert.match(out.replayed, /Step 1 of 6 Connect/, "Profile's switch shows it again");
+assert.equal(out.replayTab, 'connect', 'from step 1, on Profile');
 assert.equal(out.switchOn, true, 'the switch is on while it shows');
-assert.match(out.replayAfterReload, /Step 1 of 5 Connect/, 'turned back on, it lasts through a reload');
+assert.match(out.replayAfterReload, /Step 1 of 6 Connect/, 'turned back on, it lasts through a reload');
 assert.equal(out.switchedOff, '', 'turning the switch off closes it');
 B.close();
 finish('browser tutorial');

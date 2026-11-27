@@ -18,6 +18,7 @@ import { toSvg as identicon } from './vendor/jdenticon.js';
 import { addToCalendar } from './ics.js';
 import { tap, Tap } from './pointer.js';
 import { esc } from './html.js';
+import { INSTAGRAM_POST } from './instagram.js';
 import {
   builtinTerms, ownTerms, censor, mentions, reportedFor, moderationSettings, parseTerms, reportThreshold, REPORT_REASONS,
   MAX_LISTS, MAX_LIST_WORDS, MAX_THRESHOLD,
@@ -237,16 +238,19 @@ function saveDiscoverFilters() {
 
 // Text as HTML, escaped, with its web addresses (http:// or https://) as links that open in a new tab. Punctuation
 // right after an address (a full stop, a comma, or a closing bracket with no opening one in it) isn't part of it.
+// A link to an Instagram post written without https:// (instagram.com/p/…) is a link too.
+const LINKABLE = new RegExp(String.raw`(https?:\/\/[^\s<>"']+|${INSTAGRAM_POST.source})`, 'i');
 function linkify(text) {
-  return String(text ?? '').split(/(https?:\/\/[^\s<>"']+)/i).map((part, i) => {
+  return String(text ?? '').split(LINKABLE).map((part, i) => {
     if (i % 2 === 0) return esc(part);
     let url = part, after = '';
     for (let m; (m = url.match(/[.,;:!?'")\]}]$/));) {
       if (m[0] === ')' && url.split('(').length > url.split(')').length - 1) break; // a bracket that belongs, e.g. Wikipedia
       after = m[0] + after; url = url.slice(0, -1);
     }
-    try { new URL(url); } catch { return esc(part); }
-    return `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer nofollow">${esc(url)}</a>${esc(after)}`;
+    const href = /^https?:\/\//i.test(url) ? url : 'https://' + url;
+    try { new URL(href); } catch { return esc(part); }
+    return `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer nofollow">${esc(url)}</a>${esc(after)}`;
   }).join('');
 }
 
@@ -1441,7 +1445,7 @@ function eventCard(t, { who = null, mine = false } = {}) {
         ${fact('Max attendees', attendeesLabel(t.max_attendees))}
         ${t.tags.length ? fact('Tags', t.tags.map(x => '#' + esc(x)).join(' ')) : ''}
       </dl>
-      ${t.details ? `<div class="details">${esc(t.details)}</div>` : ''}
+      ${t.details ? `<div class="details">${linkify(t.details)}</div>` : ''}
       <div class="who">${who ?? `${personAvatar(t.host.guid, '', { pid: t.post?.pid, icon: t.host.icon })}
         <div>${contactName(t.host.guid) ? `<b>${esc(contactName(t.host.guid))}</b>` : ''}</div>${report}`}
       </div>
@@ -2419,7 +2423,7 @@ function mountPiiCheck(form) {
     input.closest('label').after(msg);
     const check = async () => {
       piiModule ||= import('./pii.js');
-      const { error, warning } = (await piiModule).piiProblems(field, input.value);
+      const { error, warning } = (await piiModule).piiProblems(field, input.value, { instagramPosts: name === 'details' });
       input.setCustomValidity(error || '');
       msg.textContent = error || warning || '';
       msg.hidden = !msg.textContent;

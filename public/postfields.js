@@ -65,7 +65,7 @@ export async function postFields(body, { matched = 0 } = {}) {
   // No contact info or ID numbers: people share contact info in chat after they match.
   const { piiProblems } = await import('./pii.js');
   const check = (field, text, options) => { const { error } = piiProblems(field, text, options); if (error) fail(error); };
-  check('Title', f.title); check('Details', f.details); check('Place', f.location_name, { addresses: false });
+  check('Title', f.title); check('Details', f.details, { instagramPosts: true }); check('Place', f.location_name, { addresses: false });
   f.tags.forEach(tag => check('Tags', tag));
   return f;
 }

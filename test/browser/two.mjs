@@ -11,6 +11,7 @@ await B.ev(`import('/secure.js').then(s => s.vault.update((p, o) => fetch(p, { m
 // Host posts privately to the guest.
 await A.tab('post');
 await A.ev(`(() => { const f = document.getElementById('newEvent'); f.title.value = 'Two-browser picnic'; f.max_attendees.value = '1';
+  f.details.value = 'Flyer: instagram.com/p/Picnic_1/ and more at https://www.instagram.com/reel/Abc-2/?igsh=x.';
   f.querySelector('input[name=visibility][value=private]').click();
   [...f.querySelectorAll('.audience [data-contact]')].find(b => b.textContent.includes('Guesty')).click(); f.requestSubmit(); })()`);
 await wait(3000);
@@ -20,6 +21,10 @@ const r = { posted: await A.ev(`document.getElementById('toast').textContent`) }
 await B.tab('confirm'); await B.tab('discover');
 await B.until(`document.querySelector('.card.top h2')?.textContent === 'Two-browser picnic'`).catch(async e => { console.log(JSON.stringify(r), await B.ev(`[...document.querySelectorAll('.card h2')].map(h => h.textContent).slice(0, 5).join(' | ')`), await B.ev(`import('/mail.js').then(m => m.mailView().deck.slice(0,3).map(p => p.title).join(' | '))`)); throw e; });
 r.card = await B.ev(`document.querySelector('.card.top .who b').innerText`);
+// Links to Instagram posts in the details are links, with or without https://, and open in a new tab.
+assert.deepEqual(JSON.parse(await B.ev(`JSON.stringify([...document.querySelectorAll('.card.top .details a')].map(a => [a.textContent, a.href, a.target]))`)),
+  [['instagram.com/p/Picnic_1/', 'https://instagram.com/p/Picnic_1/', '_blank'],
+   ['https://www.instagram.com/reel/Abc-2/?igsh=x', 'https://www.instagram.com/reel/Abc-2/?igsh=x', '_blank']]);
 // I'm in turns the card over to Ask to join (no dialog); Back turns it face up again, and I'm in then Send request
 // (a second yes) sends it without a rating or note.
 await B.ev(`document.querySelector('.round.yes').click()`);

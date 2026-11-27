@@ -358,6 +358,8 @@ See `TODO.md` for the full list of open security and privacy issues.
 - `public/pii.js`: finds contact info and ID numbers in posts and notes, which the post form points out as you type
   and refuses (and the server refuses in public posts), with [`@devopscoop/eat-the-pii`](https://gitlab.com/devopscoop/eat-the-pii) (installed from
   its git URL, so `.npmrc` sets `allow-git=root`); `public/libphonenumber.js` loads its phone number data in the browser
+- `public/instagram.js`: what a link to an Instagram post or reel looks like; a post's Details may have one (a link to
+  a profile is still refused), and it shows as a link
 - `public/fonts/`: bundled National Park font, used for all text (SIL OFL 1.1, license alongside). The app loads nothing from outside its own server, except OpenStreetMap tiles while the location picker is open. Suggested place names come from OpenStreetMap's Nominatim, asked by the server (`/api/places/reverse`).
 - `feedback.js`, `public/feedback.js`: the [feedback](#feedback) page's storage and rules, and the page itself (the same
   files as in Glaze Journal)

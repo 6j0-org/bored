@@ -20,7 +20,7 @@
   addEventListener('storage', (e) => { if (e.key === KEY) apply(saved()); });
 })();
 
-// The title board's look: a surfboard (the default), a planed board, or the rough plank, as
+// The look: the surfboard with its sand theme (the default), the cartoon board, or the photo board, as
 // <html data-board="surf|planed|rough"> (public/boards.css). Kept in this browser, like the theme; the app sets it
 // from Profile through window.boredBoard.
 (() => {

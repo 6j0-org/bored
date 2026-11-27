@@ -102,10 +102,10 @@ await B.tab('profile');
 await B.until(`document.querySelector('.account-id code')`);
 assert.match(await B.ev(`document.querySelector('.account-id code').textContent`), /^[0-9a-f-]{20,}$/i);
 
-// Profile's sections come in this order, with Theme under Developer settings at the end.
-const order = ['Notifications', 'Invitations', 'Contacts', 'Settings', 'Moderation', 'Developer settings'];
+// Profile's sections come in this order, with light or dark right after the look, under Settings.
+const order = ['Notifications', 'Invitations', 'Contacts', 'Settings', 'Moderation'];
 assert.deepEqual(await B.ev(`[...document.querySelectorAll('#view .section-title')].map(h => h.textContent).filter(t => ${JSON.stringify(order)}.includes(t))`), order);
-assert.equal(await B.ev(`document.getElementById('themePick').previousElementSibling.textContent`), 'Developer settings');
+assert.equal(await B.ev(`document.getElementById('themePick').previousElementSibling.id`), 'boardPick');
 
 B.close();
 finish('browser feedback');

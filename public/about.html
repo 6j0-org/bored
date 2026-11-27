@@ -61,8 +61,8 @@
       font-family: 'National Park', 'Trebuchet MS', sans-serif;
       font-weight: 800; line-height: 1; letter-spacing: .01em;
       /* cream letters, like the buttons, with a dark edge below so they stand off the wood */
-      color: #f6ecda;
-      text-shadow: 0 .06em 0 rgba(40, 18, 5, .7), 0 0 .15em rgba(40, 18, 5, .35);
+      color: var(--board-text, #f6ecda);
+      text-shadow: var(--board-shadow, 0 .06em 0 rgba(40, 18, 5, .7), 0 0 .15em rgba(40, 18, 5, .35));
       /* the shadow follows the board's outline */
       filter: drop-shadow(0 .1em .1em rgba(0, 0, 0, .35));
       transform: rotate(-2.5deg);
@@ -86,9 +86,9 @@
     .alpha-note { margin: 12px 0 0; text-align: center; font-size: .85rem; color: var(--muted); text-wrap: balance; }
     /* the board's wood brown and dark outline, lettered in National Park (same as the app's buttons, public/style.css) */
     .btn {
-      display: inline-block; text-decoration: none; border: 1.5px solid #472610; border-radius: 6px; padding: 12px 20px;
+      display: inline-block; text-decoration: none; border: 1.5px solid var(--wood-edge, #472610); border-radius: 6px; padding: 12px 20px;
       font-family: 'National Park', 'Trebuchet MS', sans-serif; font-weight: 800; font-size: .95rem; letter-spacing: .01em;
-      background: linear-gradient(180deg, #a05a28, #8a4720); color: #f6ecda; text-shadow: 0 1px 0 rgba(40, 18, 5, .5);
+      background: var(--wood, linear-gradient(180deg, #a05a28, #8a4720)); color: var(--wood-text, #f6ecda); text-shadow: 0 1px 0 var(--wood-shadow, rgba(40, 18, 5, .5));
     }
     .btn.ghost { background: transparent; color: var(--text); border-color: var(--wood-line); text-shadow: none; }
     .btn.small { padding: 7px 12px; font-size: .78rem; }

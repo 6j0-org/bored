@@ -3173,9 +3173,13 @@ async function viewProfile(v) {
       <label class="check"><input type="checkbox" name="tutorial" id="tutorialPref" ${tour || !vault.data.prefs?.tutorialSeen ? 'checked' : ''}>
         <span>Show the tutorial<small>The five steps, from Connect to Plan, in a box above the tabs.</small></span></label>
     </form>
-    <fieldset class="seg-pick" id="boardPick" style="margin-top: 14px"><legend>Title board (on this device)</legend><div class="seg">
-      ${[['surf', 'Surfboard'], ['planed', 'Planed board'], ['rough', 'Rough plank']].map(([value, label]) =>
+    <fieldset class="seg-pick" id="boardPick" style="margin-top: 14px"><legend>Look (on this device)</legend><div class="seg">
+      ${[['surf', 'Surfboard'], ['planed', 'Cartoon board'], ['rough', 'Photo board']].map(([value, label]) =>
         `<label><input type="radio" name="board" value="${value}" ${(window.boredBoard?.get() || 'surf') === value ? 'checked' : ''}><span>${label}</span></label>`).join('')}
+    </div></fieldset>
+    <fieldset class="seg-pick" id="themePick"><legend>Light or dark (on this device)</legend><div class="seg">
+      ${[['auto', 'Automatic'], ['light', 'Light'], ['dark', 'Dark']].map(([value, label]) =>
+        `<label><input type="radio" name="theme" value="${value}" ${(window.boredTheme?.get() || 'auto') === value ? 'checked' : ''}><span>${label}</span></label>`).join('')}
     </div></fieldset>
 
     ${moderationHtml()}
@@ -3196,12 +3200,6 @@ async function viewProfile(v) {
         ${passkeys.length > 1 ? `<button class="btn small" data-rmkey="${p.id}" aria-label="Remove passkey">✕</button>` : ''}</div>`).join('')}
     </div>
     <button class="btn" id="addKey">Add another passkey</button>`}
-
-    <div class="section-title">Developer settings</div>
-    <fieldset class="seg-pick" id="themePick"><legend>Theme (on this device)</legend><div class="seg">
-      ${[['auto', 'Automatic'], ['light', 'Light'], ['dark', 'Dark']].map(([value, label]) =>
-        `<label><input type="radio" name="theme" value="${value}" ${(window.boredTheme?.get() || 'auto') === value ? 'checked' : ''}><span>${label}</span></label>`).join('')}
-    </div></fieldset>
 
     <button class="btn" id="logout" style="margin-top:24px">${isDemo() ? 'Start over' : 'Sign out'}</button>
     ${deleteAccountHtml(idMode)}

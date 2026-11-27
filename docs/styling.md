@@ -53,20 +53,28 @@ word in green. The "Alpha:" under the board is ordinary emphasized text (`em`).
 | `--line` | `#e2d9c9` | Borders of fields, rows, and notices |
 | `--accent` | `#2f6b3a` (fir green) | Emphasis, links, badges, and your own chat messages; never controls |
 | `--no` | rust | Swipe stamps |
-| `--wood`, `--wood-edge`, `--wood-text` | brown gradient, dark brown, cream | Filled buttons, the tab bar, and picked choices: the title board's wood, the same in light and dark |
+| `--wood`, `--wood-edge`, `--wood-text`, `--wood-shadow`, `--wood-pressed` | brown gradient, dark brown, cream | Filled buttons, the tab bar (pressed: the open tab), and picked choices: the title board's wood, the same in light and dark |
+| `--board-text`, `--board-shadow` | cream, dark edge | The title board's letters |
 | `--wood-line` | `#934e23` | Brown outlines: outlined buttons, choices, chips, cards, post ideas, and section flourishes |
 | `--warn-*` | amber | Warnings (`.notice.warn`) |
 
 Dark mode swaps these for dark equivalents under `:root[data-theme="dark"]`. `public/theme.js` sets `data-theme` before
-the page draws: to Dark or Light when someone picks one under Developer settings at the bottom of Profile, and to the
+the page draws: to Dark or Light when someone picks one under Settings in Profile, and to the
 device's setting (following it as it changes) when the theme is Automatic, so there's only one dark palette to keep up.
 
-The title board has three looks, picked under Settings in Profile and kept per device: a wooden surfboard (the
-default, `public/board-surf.svg`), a planed board (the original cartoon board squared off, `public/board-planed.svg`),
-and the rough plank (`public/board.webp`). `public/theme.js` sets `<html data-board="surf|planed|rough">` before the
-page draws, and `public/boards.css`, shared by the app, the introduction page, and the privacy page, swaps the picture
-behind the letters. All three are in the same wood browns, with the same dark brown outline (`--wood-edge`), and the
-SVGs stretch to fit the letters without thickening their outlines (`vector-effect: non-scaling-stroke`).
+There are three looks, picked under Settings in Profile (beside light or dark) and kept per device: the surfboard
+(the default, `public/board-surf.svg`), the cartoon board (the original CSS board squared off,
+`public/board-planed.svg`), and the photo board (`public/board.webp`). `public/theme.js` sets
+`<html data-board="surf|planed|rough">` before the page draws, and `public/boards.css`, shared by the app, the
+introduction page, and the privacy page, swaps the picture behind the letters. The SVGs stretch to fit the letters
+without thickening their outlines (`vector-effect: non-scaling-stroke`). In dark, the board is a little dimmer.
+
+- The cartoon and photo boards use the forest floor palette above: wood brown buttons and cream letters.
+- The surfboard is light wood with a sunset nose (bands of yellow, orange, coral, and plum), with its own sand palette in `public/boards.css`, light and dark: sand buttons and
+  picked choices with dark brown letters (`--wood`, `--wood-text`), sand outlines and branches (`--wood-line`,
+  `--branch`), and a sandy page (`--bg`, `--surface`, `--line`). The title's letters are dark brown too, so they read on
+  the light board. Text, links, and the green and rust of yes and no don't change. The introduction and privacy pages
+  read the same variables, with the brown values as fallbacks.
 
 ## Type
 

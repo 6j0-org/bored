@@ -59,7 +59,7 @@
       position: relative; isolation: isolate; display: block; width: 97%; align-self: center; text-align: center;
       padding: .6em .9em .58em; font-size: clamp(2.7rem, 12vw, 5.4rem); text-decoration: none; /* the same size as on the introduction page */
       font-family: 'National Park', 'Trebuchet MS', sans-serif; font-weight: 800; line-height: 1; letter-spacing: .01em;
-      color: #f6ecda; text-shadow: 0 .06em 0 rgba(40, 18, 5, .7), 0 0 .15em rgba(40, 18, 5, .35);
+      color: var(--board-text, #f6ecda); text-shadow: var(--board-shadow, 0 .06em 0 rgba(40, 18, 5, .7), 0 0 .15em rgba(40, 18, 5, .35));
       filter: drop-shadow(0 .1em .1em rgba(0, 0, 0, .35)); transform: rotate(-1.2deg); user-select: none;
     }
     .board::before { content: ""; position: absolute; inset: 0; z-index: -1; background: url(/board.webp) center / 100% 100% no-repeat; }

@@ -356,8 +356,9 @@ See `TODO.md` for the full list of open security and privacy issues.
 - `public/theme.js`: the automatic / light / dark theme switch and the title board's look, applied before the page draws
 - `public/html.js`: `esc()`, which escapes text for the HTML that pages build from template strings
 - `public/pointer.js`: "tap", "click", or "tap or click" in UI text, to match how the device points
-- `public/board-surf.svg`, `public/board-planed.svg`, `public/board.webp`: the boards behind the Bored title (a
-  surfboard, the default; a planed board; and the rough plank), picked in Profile's Settings and swapped by `public/boards.css`
+- `public/board-surf.svg`, `public/board-planed.svg`, `public/board.webp`: the boards behind the Bored title (the
+  surfboard, the default, with its sand theme; the cartoon board; and the photo board), picked in Profile's Settings and
+  swapped, with the surfboard's colors, by `public/boards.css`
 - `public/when.js`, `public/cost.js`: event time (with repeat rules) and cost formats, shared by server and browser
 - `public/moderation.js`: word filters, report thresholds, and moderation settings
 - `public/pii.js`: finds contact info and ID numbers in posts and notes, which the post form points out as you type

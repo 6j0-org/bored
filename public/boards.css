@@ -1,10 +1,31 @@
 /* The title board's three looks, picked in Profile and set on <html data-board> by public/theme.js before the page
    draws. Shared by the app (public/style.css), the introduction page, and the privacy page, whose own .board rules
-   draw the rough plank (public/board.webp); these swap the picture, and the surfboard's padding, on top of them.
-   - surf: a wooden longboard (public/board-surf.svg). Slimmer than the planks, with the letters toward the tail,
-     where it's widest, so they stay clear of the nose.
-   - planed: the original cartoon board, squared off and smoothed (public/board-planed.svg).
-   - rough: the plank with worn edges (public/board.webp). */
+   draw the photo board (public/board.webp); these swap the picture, and the surfboard's padding, on top of them.
+   - surf: a light wooden longboard with a sunset nose (public/board-surf.svg), with its own sand theme below. Slimmer than the planks,
+     with the letters toward the tail, where it's widest, so they stay clear of the nose.
+   - planed: the cartoon board, the original CSS board squared off and smoothed (public/board-planed.svg).
+   - rough: the photo board, a plank with worn edges (public/board.webp).
+   Each comes in light and dark (data-theme): in dark, the board itself is a little dimmer, so it doesn't glare. */
 [data-board="surf"] .board { padding: .36em 1.25em .34em .75em; }
 [data-board="surf"] .board::before { background-image: url(/board-surf.svg); }
 [data-board="planed"] .board::before { background-image: url(/board-planed.svg); }
+[data-theme="dark"] .board::before { filter: brightness(.86) saturate(.92); }
+
+/* The surfboard's sand theme: the brown forest floor's colors swapped for beach sand. Its buttons, picked choices,
+   and tabs are sand with dark brown letters (on the light board, the title's letters are dark too), and outlines and
+   focus rings are a deeper sand. Section headings sit between sand pinstripes, like a surfboard's, instead of branches. Text, links, and the green and rust of yes and no stay
+   as they are. */
+:root[data-board="surf"] {
+  --bg: #f7efe2; --surface: #fffcf7; --text: #2e2618; --muted: #7a6d55; --line: #ecdcc4;
+  --wood-line: #a06f34;
+  --branch: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 140 20' preserveAspectRatio='none'%3E%3Cg fill='%23a06f34'%3E%3Cpath d='M0 9.6C40 9.2 100 8.6 140 8.4V10.6C100 10.6 40 10.2 0 9.8Z'/%3E%3Cpath d='M24 12.6C60 12.9 100 13.1 140 13.2V14C100 13.9 60 13.5 24 12.8Z'/%3E%3C/g%3E%3C/svg%3E"); /* a pinstripe, tapering to a point at the outer end, with a thin one beside it */
+  --wood: linear-gradient(180deg, #eed1a6, #e0bf91); --wood-edge: #8d6333; --wood-text: #3b2a12;
+  --wood-shadow: rgba(255, 250, 236, .55);
+  --wood-pressed: linear-gradient(180deg, #cca169, #dfbc8b); --wood-pressed-shadow: rgba(90, 64, 24, .45);
+  --board-text: #3b2a12; --board-shadow: 0 .05em 0 rgba(255, 250, 236, .7), 0 0 .15em rgba(255, 250, 236, .4);
+}
+:root[data-board="surf"][data-theme="dark"] {
+  --bg: #17140e; --surface: #231f17; --text: #f2ead8; --muted: #ab9e82; --line: #3a3326;
+  --wood-line: #c79d67;
+  --branch: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 140 20' preserveAspectRatio='none'%3E%3Cg fill='%23c79d67'%3E%3Cpath d='M0 9.6C40 9.2 100 8.6 140 8.4V10.6C100 10.6 40 10.2 0 9.8Z'/%3E%3Cpath d='M24 12.6C60 12.9 100 13.1 140 13.2V14C100 13.9 60 13.5 24 12.8Z'/%3E%3C/g%3E%3C/svg%3E"); /* a pinstripe, tapering to a point at the outer end, with a thin one beside it */
+}

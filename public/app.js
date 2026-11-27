@@ -214,6 +214,7 @@ const state = { config: { authMode: 'local' }, me: null, tab: 'discover', chat: 
   discoverDate: (() => { try { const d = localStorage.getItem('discoverDate'); return d in DATE_FILTERS ? d : ''; } catch { return ''; } })(),
   discoverNear: (() => { const n = loadJson('discoverNear', null); return n && Number.isFinite(n.lat) && Number.isFinite(n.lon) ? n : null; })(),
   discoverOnline: loadJson('discoverOnline', false) === true,
+  search: {}, // each tab's search, by tab id: kept while the app is open, not saved (an old search would hide new things)
   discoverRadius: (() => { const r = Number(loadJson('discoverRadius', 0)); return RADII.includes(r) ? r : 0; })(),
   postSort: (() => { const s = loadJson('postSort', 'newest'); return s in POST_SORTS ? s : 'newest'; })(),
   filtersOpen: false };
@@ -252,6 +253,40 @@ function linkify(text) {
     try { new URL(href); } catch { return esc(part); }
     return `<a href="${esc(href)}" target="_blank" rel="noopener noreferrer nofollow">${esc(url)}</a>${esc(after)}`;
   }).join('');
+}
+
+// ---------- search ----------
+// Every tab can be searched. Something matches when every word typed is somewhere in its text, ignoring case and
+// accents; a leading # (for a tag) is optional. Each tab's search is kept in state.search while the app is open.
+const fold = (s) => String(s ?? '').normalize('NFKD').replace(/\p{M}/gu, '').toLowerCase();
+const searchWords = (q) => fold(q).split(/\s+/).map(w => w.replace(/^#+/, '')).filter(Boolean);
+const matchesWords = (text, words) => { const t = fold(text); return words.every(w => t.includes(w)); };
+// The text a card's HTML shows, to search what's on it. A template's content is inert: nothing in it loads.
+const htmlText = (html) => { const t = document.createElement('template'); t.innerHTML = html; return t.content.textContent; };
+const searchQuery = (tab = state.tab) => (state.search[tab] || '').trim();
+const searchBoxHtml = (label) => `
+  <form class="tab-search" role="search">
+    <input type="search" placeholder="${esc(label)}" aria-label="${esc(label)}" autocomplete="off" enterkeyhint="search" value="${esc(state.search[state.tab] || '')}">
+  </form>`;
+// Wires up the search box searchBoxHtml put in root: onSearch(words) runs a moment after typing stops, and right away
+// on Enter (or the keyboard's search key), which also puts a phone's keyboard away so the results show.
+function mountSearch(root, onSearch) {
+  const form = root.querySelector('.tab-search'), input = form?.querySelector('input'), tab = state.tab;
+  if (!form) return;
+  let timer;
+  const run = () => { clearTimeout(timer); state.search[tab] = input.value; onSearch(searchWords(input.value)); };
+  input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 200); });
+  form.addEventListener('submit', (e) => { e.preventDefault(); run(); input.blur(); });
+}
+// For a list already on the page: hides each [data-search-item] that doesn't match, and each [data-search-group]
+// with none showing. [data-search-none] shows when a search matches nothing. Returns how many match.
+function filterShown(root, words) {
+  let n = 0;
+  root.querySelectorAll('[data-search-item]').forEach(el => { el.hidden = !matchesWords(el.textContent, words); if (!el.hidden) n++; });
+  root.querySelectorAll('[data-search-group]').forEach(g => { g.hidden = words.length > 0 && !g.querySelector('[data-search-item]:not([hidden])'); });
+  const none = root.querySelector('[data-search-none]');
+  if (none) { none.hidden = !words.length || n > 0; none.textContent = `Nothing here matches “${searchQuery()}”.`; }
+  return n;
 }
 
 async function api(path, { method = 'GET', body } = {}) {
@@ -1477,6 +1512,8 @@ function mailPostMatches(p) {
   if (km || online) return (km && distanceKm(near, p.location) <= km) || (online && p.online > 0);
   return true;
 }
+// Discover's search matches a post's title, details, place, and tags.
+const postMatchesSearch = (p, words) => matchesWords([p.title, p.details, p.location_name, ...(p.tags || [])].join('\n'), words);
 // How many posts each filter chip would show.
 function postCounts(posts) {
   const tags = new Map(), cost = (p) => (p.cost_amount > 0 ? 'paid' : 'free'), near = state.discoverNear;
@@ -1498,6 +1535,7 @@ async function viewDiscover(v) {
       <b>You're not signed in, so swiping does nothing.</b> Passes aren't saved, and you can't ask to join anything.
       <button type="button" class="btn small" id="guestSignIn">Sign in or create an account</button></div>`}
     <p class="hint pile-hint">${state.me ? 'Scroll up to refresh. Scroll down to see your discard pile.' : 'Scroll up to refresh.'}</p>
+    ${searchBoxHtml('Search posts')}
     <div class="filters" id="filters"></div>
     <p class="note mod-note" id="modNote" hidden></p>
     <div class="deck-host" id="deckHost"></div>
@@ -1553,20 +1591,31 @@ async function viewDiscover(v) {
     // deck and the discard pile, before the filters, so their counts don't include them either.
     hidden = await moderatePosts([...(mail?.deck || []), ...(state.me ? mail?.swiped || [] : [])]);
     if (!document.body.contains(host)) return;
-    const posts = (mail?.deck || []).filter(p => !hidden.has(p.pid)), near = state.discoverNear;
+    const posts = (mail?.deck || []).filter(p => !hidden.has(p.pid));
     modNote.hidden = !hidden.size;
     modNote.innerHTML = `${hidden.size === 1 ? '1 post is' : `${hidden.size} posts are`} hidden by ${state.me ? 'your' : 'the default'} moderation settings.${
       state.me && hasKeys() ? ' <button type="button" class="link" data-mod-settings>Change them</button>' : ''}`;
-    events = posts.filter(mailPostMatches).map(mailCard);
-    const before = JSON.stringify(options);
-    options = postCounts(posts);
-    if (!soft || JSON.stringify(options) !== before) drawFilters();
-    if (soft && deck) deck.update(events);
-    else deck = mountDeck(host, deckOptions(events, drawPile, { tags: [...state.discoverTags], costs: [...state.discoverCosts], date: state.discoverDate,
-      near: [near && state.discoverRadius && `Within ${fmtDistance(state.discoverRadius)} of ${near.label.toLowerCase()}`,
-        state.discoverOnline && 'online'].filter(Boolean).join(' or ').replace(/^online$/, 'Online') }));
+    allPosts = posts; swiped.clear();
+    apply({ soft });
     if (!pile?.busy()) drawPile();
   }
+  // The deck and the filters' counts from the posts load() last got: the search, then the filters. Typing a search
+  // calls this alone, without fetching again. The filters' counts are within the search.
+  let allPosts = [];
+  const swiped = new Set(); // swiped since allPosts was loaded, so a new search doesn't bring them back
+  function apply({ soft = false } = {}) {
+    const near = state.discoverNear, words = searchWords(searchQuery());
+    const found = allPosts.filter(p => !swiped.has(p.pid) && postMatchesSearch(p, words));
+    events = found.filter(mailPostMatches).map(mailCard);
+    const before = JSON.stringify(options);
+    options = postCounts(found);
+    if (!soft || JSON.stringify(options) !== before) drawFilters();
+    if (soft && deck) deck.update(events);
+    else deck = mountDeck(host, swipeTracked(deckOptions(events, drawPile, { query: searchQuery(), tags: [...state.discoverTags], costs: [...state.discoverCosts], date: state.discoverDate,
+      near: [near && state.discoverRadius && `Within ${fmtDistance(state.discoverRadius)} of ${near.label.toLowerCase()}`,
+        state.discoverOnline && 'online'].filter(Boolean).join(' or ').replace(/^online$/, 'Online') })));
+  }
+  const swipeTracked = (opts) => ({ ...opts, onSwipe: async (t, ...rest) => { const r = await opts.onSwipe(t, ...rest); if (r !== KEEP_CARD) swiped.add(t.pid); return r; } });
   // The discard pile: cards I've swiped (passed, or asked to join and still waiting), newest first, each labelled with
   // my answer. Swipe one again, or use its button, to change it. Signed in only: a guest's passes aren't kept.
   let pile = null, pileCards = [];
@@ -1617,6 +1666,8 @@ async function viewDiscover(v) {
   const refresh = () => { saveDiscoverFilters(); load().catch(err => toast(err.message)); };
   const toggle = (set, value) => (set.has(value) ? set.delete(value) : set.add(value));
 
+  mountSearch(v, () => apply());
+
   filtersEl.addEventListener('click', async (e) => {
     const b = e.target.closest('button');
     if (!b) return;
@@ -1659,7 +1710,7 @@ async function viewDiscover(v) {
     if (cal) addToCalendar([...events, ...pileCards].find(t => String(t.id) === cal.dataset.ics));
     if (e.target.id === 'goPost') go('post');
     if (e.target.closest('[data-mod-settings]')) { state.focus = 'moderation'; go('profile'); }
-    if (e.target.id === 'clearFilters') { clearAll(); saveDiscoverFilters(); load().catch(err => toast(err.message)); }
+    if (e.target.id === 'clearFilters') { clearAll(); state.search.discover = v.querySelector('.tab-search input').value = ''; saveDiscoverFilters(); load().catch(err => toast(err.message)); }
   });
   await load();
 
@@ -1761,10 +1812,10 @@ function deckOptions(events, changed, filters) {
         : `Asked to join “${t.title}”! You'll match if the host swipes yes too.`);
     },
     // No undo: the discard pile, under the deck, is where a swipe is changed.
-    empty: filters.tags.length || filters.costs.length || filters.date || filters.near
-      ? `<div class="empty"><h3>No matches for these filters</h3>
-          <p>${[filters.near && esc(filters.near), filters.date && esc(DATE_FILTERS[filters.date]), filters.tags.length && filters.tags.map(t => '#' + esc(t)).join(' or '), filters.costs.length && filters.costs.map(c => esc(COST_FILTERS[c])).join(' or ')].filter(Boolean).join(' · ')}</p>
-          <p>Nothing open matches right now. Try other filters, or see everything.</p>
+    empty: filters.query || filters.tags.length || filters.costs.length || filters.date || filters.near
+      ? `<div class="empty"><h3>No matches${filters.query ? '' : ' for these filters'}</h3>
+          <p>${[filters.query && `“${esc(filters.query)}”`, filters.near && esc(filters.near), filters.date && esc(DATE_FILTERS[filters.date]), filters.tags.length && filters.tags.map(t => '#' + esc(t)).join(' or '), filters.costs.length && filters.costs.map(c => esc(COST_FILTERS[c])).join(' or ')].filter(Boolean).join(' · ')}</p>
+          <p>Nothing open matches right now. Try ${filters.query ? 'other words or filters' : 'other filters'}, or see everything.</p>
           <button class="btn ghost" id="clearFilters">Show all posts</button></div>`
       : `<div class="empty"><h3>Still bored?</h3>
           ${state.me
@@ -1826,7 +1877,8 @@ const inviteCard = (o) => `
       </div>`;
 
 async function viewConfirm(v) {
-  v.innerHTML = `<p class="hint pile-hint">Scroll up to refresh. Scroll down to see your discard pile.</p>
+  v.innerHTML = `${searchBoxHtml('Search requests')}
+    <p class="hint pile-hint">Scroll up to refresh. Scroll down to see your discard pile.</p>
     <div class="deck-host" id="deckHost"></div>
     <section class="pile" id="pile" hidden></section>`;
   const host = v.querySelector('#deckHost'), pileEl = v.querySelector('#pile');
@@ -1937,8 +1989,12 @@ async function viewConfirm(v) {
     });
   }
 
-  const deck = mountDeck(host, {
-    items: await load(),
+  // The search matches what's on each card: names, notes, and the post's title. A new search starts the deck over,
+  // so the cards stay in order.
+  let all = await load();
+  const answered = new Set(); // swiped since `all` was loaded, so a new search doesn't bring them back
+  const shown = () => { const words = searchWords(searchQuery()); return all.filter(o => !answered.has(o.id) && matchesWords(htmlText(renderCard(o)), words)); };
+  const deckOpts = {
     renderCard,
     yesLabel: "Let's do it", noLabel: 'No thanks',
     onSwipe: async (o, yes) => {
@@ -1957,9 +2013,14 @@ async function viewConfirm(v) {
     empty: `<div class="empty"><h3>Nobody to confirm</h3>
       <p>When someone asks to join one of your posts, or asks to connect through one of your invitation links,
         they'll show up here for you to answer.</p></div>`,
-  });
+  };
+  const emptySearch = () => `<div class="empty"><h3>No matches</h3><p>Nobody waiting matches “${esc(searchQuery())}”.</p></div>`;
+  const mount = () => mountDeck(host, { ...deckOpts, items: shown(), empty: searchQuery() && all.length ? emptySearch() : deckOpts.empty,
+    onSwipe: async (o, ...rest) => { const r = await deckOpts.onSwipe(o, ...rest); if (r !== KEEP_CARD) answered.add(o.id); return r; } });
+  let deck = mount();
+  mountSearch(v, () => { deck = mount(); });
   await drawPile();
-  keepFresh(v, async () => { deck.update(await load()); shellRefreshBadges(); await drawPile(); });
+  keepFresh(v, async () => { all = await load(); answered.clear(); deck.update(shown()); shellRefreshBadges(); await drawPile(); });
 }
 
 function showMatch(otherGuid, title, matchId) {
@@ -2045,7 +2106,7 @@ async function viewPlans(v) {
     const [cls, text] = label(m), unread = unreadCount(m);
     const unreadText = unread ? `, ${unread} unread message${unread === 1 ? '' : 's'}` : '';
     return `
-    <div class="card flat plan-card" role="button" tabindex="0" data-id="${m.id}" aria-label="Chat about ${esc(m.title)}${unreadText}">
+    <div class="card flat plan-card" data-search-item role="button" tabindex="0" data-id="${m.id}" aria-label="Chat about ${esc(m.title)}${unreadText}">
       ${unread ? `<span class="badge unread" aria-hidden="true">${unread}</span>` : ''}
       <span class="label ${cls}">${esc(text)}</span>
       ${eventCard(mailCard(m.post), { who: who(m), mine: m.role === 'host' })}
@@ -2055,18 +2116,23 @@ async function viewPlans(v) {
   };
   // Waitlist cards have no chat yet: that opens when a spot does and they're matched.
   const waitCard = (m) => `
-    <div class="card flat plan-card waiting">
+    <div class="card flat plan-card waiting" data-search-item>
       <span class="label warn">${m.waitlist_pos ? `Waitlist #${m.waitlist_pos}` : 'Waitlist'}</span>
       ${eventCard(mailCard(m.post), { who: `${personAvatar(m.other)}<div>${contactName(m.other) ? `<b>Hosted by ${esc(contactName(m.other))}</b>` : ''}</div>` })}
       <div class="card-actions"><button class="btn small" data-leave-ch="${esc(m.ch)}">Leave</button></div>
     </div>`;
+  // The search matches what's on the cards: the plan, who's in it, and the newest message.
   v.innerHTML = `
+    ${searchBoxHtml('Search plans')}
     ${active.length || past.length ? `<p class="hint plans-hint">${Tap} a card to chat. In a chat, ${tap} one of your messages to edit or delete it.</p>` : ''}
-    ${active.length ? `<div class="section-title">Happening</div><div class="list">${active.map(card).join('')}</div>` : ''}
-    ${waiting.length ? `<div class="section-title">Waitlist</div>
+    <p class="note" data-search-none hidden></p>
+    ${active.length ? `<section data-search-group><div class="section-title">Happening</div><div class="list">${active.map(card).join('')}</div></section>` : ''}
+    ${waiting.length ? `<section data-search-group><div class="section-title">Waitlist</div>
       <p class="note">These posts are full. You'll be matched automatically, in order, when a spot opens.</p>
-      <div class="list">${waiting.map(waitCard).join('')}</div>` : ''}
-    ${past.length ? `<div class="section-title">Past</div><div class="list">${past.map(m => card(m, { deletable: true })).join('')}</div>` : ''}`;
+      <div class="list">${waiting.map(waitCard).join('')}</div></section>` : ''}
+    ${past.length ? `<section data-search-group><div class="section-title">Past</div><div class="list">${past.map(m => card(m, { deletable: true })).join('')}</div></section>` : ''}`;
+  mountSearch(v, (words) => filterShown(v, words));
+  filterShown(v, searchWords(searchQuery()));
   const all = [...active, ...waiting, ...past];
   v.onclick = (e) => {
     const cal = e.target.closest('[data-ics]');
@@ -2730,7 +2796,7 @@ async function viewPost(v) {
   const card = (t) => {
     const [cls, text] = label(t);
     return `
-        <div class="card flat post-card" data-id="${t.id}">
+        <div class="card flat post-card" data-search-item data-id="${t.id}">
           <span class="label ${cls}">${esc(text)}</span>
           ${eventCard(mailCard(t), { who: who(t), mine: true })}
           <div class="card-actions">${t.status !== 'past' ? `
@@ -2751,12 +2817,17 @@ async function viewPost(v) {
     </div>
     <form class="stack post-form" id="newEvent"></form>
     <div class="section-title">Your posts</div>
+    ${events.length > 1 ? searchBoxHtml('Search your posts') : ''}
     ${events.length > 1 ? `<label class="post-sort">Sort by
       <select id="postSort">${Object.entries(POST_SORTS).map(([k, label]) =>
         `<option value="${k}"${k === state.postSort ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></label>` : ''}
+    <p class="note" data-search-none hidden></p>
     <div class="list" id="yourPosts">
       ${events.length ? events.map(card).join('') : `<p style="color:var(--muted)">Nothing yet. What would you like to host?</p>`}
     </div>`;
+  // The search looks through Your posts, not the form above them.
+  mountSearch(v, (words) => filterShown(v, words));
+  filterShown(v, searchWords(searchQuery()));
   fillPostForm(v.querySelector('#newEvent'));
   rotatePostIdeas(v.querySelector('#postIdea'));
   v.querySelector('#postSort')?.addEventListener('change', (e) => {
@@ -3014,7 +3085,12 @@ async function viewProfile(v) {
   const shown = sel.size ? contacts.filter(c => (c.tags || []).some(t => sel.has(t))) : contacts;
   const fmt = (iso) => iso ? new Date(iso.replace(' ', 'T') + 'Z').toLocaleDateString() : 'never';
 
+  // The search finds invitations and contacts (by name and tag); while it's on, the rest of Profile is hidden.
   v.innerHTML = `
+    ${searchBoxHtml('Search contacts and invitations')}
+    <div class="profile-body">
+    <p class="note" data-search-none hidden></p>
+    <div class="search-hide">
     <div class="me-head">${avatar(me.guid)}
       <div class="grow">
         <label class="sr-only" for="myName">Your name</label>
@@ -3036,20 +3112,24 @@ async function viewProfile(v) {
       <span>Tell me about new posts in Discover<small>At most ${state.me.discoverNews.perDay === 1 ? 'once' : state.me.discoverNews.perDay === 2 ? 'twice' : `${state.me.discoverNews.perDay} times`} a day, when
         someone has posted something since the last one. It doesn't know your Discover filters, so some may be too
         far away or not your thing.</small></span></label>` : ''}
+    </div>
 
+    <section data-search-group>
     <div class="section-title">Invitations</div>
     <p class="note">Send people a link to connect. When someone opens it and asks to connect, they show up in your
       Confirm tab; once you say yes, you're in each other's contacts and can share private posts. Anyone with the link
       can use it until you delete it; deleting it doesn't disconnect anyone.</p>
     ${invites.length ? `<div class="list">${invites.map((inv, i) => `
-      <div class="row">
+      <div class="row" data-search-item>
         <div class="grow"><div class="title">${inviteOf(inv.id)?.name ? `${inviteOf(inv.id).direct ? 'Sent to a host as' : 'As'} “${esc(inviteOf(inv.id).name)}”` : `Invitation ${invites.length - i}`}</div>
           <div class="sub">Created ${fmt(inv.created_at)} · ${inv.uses === 1 ? '1 person' : `${inv.uses} people`} connected</div></div>
         <button class="btn ghost small" data-share-invite="${inv.id}">Share</button>
         <button class="btn small" data-del-invite="${inv.id}">Delete</button>
       </div>`).join('')}</div>` : ''}
     <button class="btn" id="newInvite">Create an invitation</button>
+    </section>
 
+    <section data-search-group>
     <div class="section-title">Contacts</div>
     <p class="note">People you've connected with: you both said yes to an invitation. Names and tags here are yours alone: they're encrypted with your passkey, and nobody else, including the server, can read them.</p>
     ${allTags.length ? `<div class="filter-row" role="group" aria-label="Filter contacts by tag"><span class="label">Tags</span>
@@ -3057,13 +3137,15 @@ async function viewProfile(v) {
       ${sel.size ? `<button type="button" class="chip filter clear" data-cclear>Clear</button>` : ''}</div>` : ''}
     <div class="list">
       ${shown.length ? shown.map(c => `
-        <button class="row" data-contact="${esc(c.guid)}">${avatar(c.guid)}
+        <button class="row" data-search-item data-contact="${esc(c.guid)}">${avatar(c.guid)}
           <div class="grow"><div class="title">${esc(c.nickname || 'Unnamed contact')}</div>
             <div class="sub">${isBlocked({ guid: c.guid }) ? 'Blocked · ' : ''}${(c.tags || []).map(t => '#' + esc(t)).join(' ')}${c.tags?.length ? ' · ' : ''}${c.together || 0} event${c.together === 1 ? '' : 's'} together</div></div>
           </button>`).join('')
         : `<p style="color:var(--muted)">${contacts.length ? 'No contacts with those tags.' : "No contacts yet. Invite someone to connect from a plan's chat, or share an invitation above. Once you both say yes, they'll show up here."}</p>`}
     </div>
+    </section>
 
+    <div class="search-hide">
     <div class="section-title">Settings</div>
     <form class="stack" id="prefsForm">
       <label>Distance units
@@ -3102,7 +3184,13 @@ async function viewProfile(v) {
 
     <button class="btn" id="logout" style="margin-top:24px">${isDemo() ? 'Start over' : 'Sign out'}</button>
     ${deleteAccountHtml(idMode)}
-    <p class="note account-id" id="accountId">Account ID: <code>${esc(me.guid)}</code></p>`;
+    <p class="note account-id" id="accountId">Account ID: <code>${esc(me.guid)}</code></p>
+    </div>
+    </div>`;
+  const profileBody = v.querySelector('.profile-body');
+  const searchProfile = (words) => { profileBody.classList.toggle('searching', words.length > 0); filterShown(profileBody, words); };
+  mountSearch(v, searchProfile);
+  searchProfile(searchWords(searchQuery()));
 
   v.querySelector('#newInvite').addEventListener('click', createInvite);
   v.querySelector('#myName').addEventListener('change', async (e) => {

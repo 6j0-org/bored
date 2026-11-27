@@ -256,7 +256,7 @@ nav.tabs svg { width: 26px; height: 26px; filter: drop-shadow(0 1px 0 rgba(40, 1
 }
 .section-title::before { margin-left: auto; }
 .section-title::after { margin-right: auto; transform: scaleX(-1); }
-.section-title:first-child { margin-top: 8px; }
+.section-title:first-child:not([data-search-group] > *) { margin-top: 8px; } /* not a heading at the top of a searched group */
 .list { display: flex; flex-direction: column; gap: 10px; }
 .row {
   background: var(--surface); border: 1px solid var(--line); border-radius: 14px;
@@ -472,6 +472,13 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
 .tag-suggest { display: flex; flex-wrap: wrap; gap: 6px; }
 .tag-suggest small { color: var(--muted); }
 .chip.suggest, .chip.filter { cursor: pointer; font: inherit; font-size: .82rem; background: transparent; border: 1.5px solid var(--wood-line); color: var(--text); font-weight: 600; }
+
+/* ---------- search ---------- */
+/* Each tab's search box (searchBoxHtml in app.js). The browser's own clear button (×) stays. */
+.tab-search { margin: 0 0 8px; }
+.tab-search input { padding: 8px 12px; font-size: 1rem; } /* 16px or more, so iPhone Safari doesn't zoom in */
+/* Profile while searching: just the invitations and contacts that match. */
+.profile-body.searching .search-hide { display: none; }
 
 /* ---------- Discover filters ---------- */
 .filters { margin-bottom: 8px; }

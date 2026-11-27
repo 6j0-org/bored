@@ -1256,7 +1256,7 @@ function viewAccountId(v) {
       <button class="btn" id="idSignIn">${unlocking ? 'Unlock' : 'Continue'} with ${esc(idHost())}</button>
       <div class="error" id="authErr"></div>
       <div class="notice"><b>No names or email.</b> Bored uses your anonymous 6j0.org identity: one sign-in, with a
-        passkey or a username and password, for every 6j0.org app. New here? You can create one on the next screen.
+        username and password, for every 6j0.org app. New here? You can create one on the next screen.
         Nobody sees a name for you unless they've connected with you, and then only the nickname <em>they</em> chose.
         Your contacts and chats are encrypted with a key only you can unlock.</div>
       ${unlocking ? `<button class="btn" id="logout">Sign out</button>` : ''}
@@ -3077,8 +3077,8 @@ async function viewProfile(v) {
     <div class="notice">This is a demo account, made just for this browser. It's deleted after a day, and everything
       resets when the server restarts. Start over to get a fresh account with the demo content back.</div>`
     : idMode ? `<div class="section-title">Sign-in</div>
-    <div class="notice">You sign in with your 6j0.org identity. Manage your passkeys and password at
-      <a href="${esc(state.config.idOrigin)}/">${esc(idHost())}</a>. Keep at least two ways to sign in, so losing one doesn't lose your account.</div>` : `
+    <div class="notice">You sign in with your 6j0.org identity. Manage your password at
+      <a href="${esc(state.config.idOrigin)}/">${esc(idHost())}</a>. Keep it in a password manager: nobody can reset it.</div>` : `
     <div class="section-title">Passkeys</div>
     <div class="notice ${passkeys.length < 2 ? 'warn' : ''}">${passkeys.length < 2
       ? `<b>You only have one passkey.</b> If you lose it, your account is gone for good. Add another one: on your phone (scan the QR code your browser offers) or on a security key.`

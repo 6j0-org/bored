@@ -118,10 +118,15 @@ assert.equal(await A.ev(`document.querySelector('nav.tabs button[data-tab=plans]
 // The card's badge hangs off its corner, all of it showing: the middle of its left edge and of its top edge, both
 // outside the card, are still the badge. (Not its bounding box's corner: that falls outside the rounded shape, and
 // browsers differ on whether a point there hits it.)
+// On a miss, it says what was hit there instead, and where the badge and card are.
 assert.equal(await A.ev(`(() => { const b = ${picnicCard}.querySelector('.badge.unread'); b.scrollIntoView({ block: 'center' });
   const r = b.getBoundingClientRect(), c = ${picnicCard}.getBoundingClientRect();
   const pts = [[r.left + 3, r.top + r.height / 2], [r.left + r.width / 2, r.top + 3]];
-  return pts.every(([x, y]) => (x < c.left || y < c.top) && document.elementFromPoint(x, y) === b); })()`), true, 'the unread badge is not clipped');
+  const box = (q) => [q.left, q.top, q.width, q.height].map(Math.round).join(',');
+  const name = (e) => e ? e.tagName.toLowerCase() + (e.id ? '#' + e.id : '') + (e.className ? '.' + [...e.classList].join('.') : '') : 'nothing';
+  const misses = pts.filter(([x, y]) => !(x < c.left || y < c.top) || document.elementFromPoint(x, y) !== b)
+    .map(([x, y]) => \`(\${Math.round(x)},\${Math.round(y)}) hit \${name(document.elementFromPoint(x, y))}\`);
+  return misses.length ? \`badge \${box(r)}, card \${box(c)}, viewport \${innerWidth}x\${innerHeight}: \${misses.join('; ')}\` : 'ok'; })()`), 'ok', 'the unread badge is not clipped');
 assert.match(await A.ev(`${picnicCard}.getAttribute('aria-label')`), /1 unread message$/);
 await A.ev(`${picnicCard}.querySelector('h2').click()`);
 await A.until(`document.getElementById('msgs')?.innerText.includes('see you there')`, 20000); await wait(1500);

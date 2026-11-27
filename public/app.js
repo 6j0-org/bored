@@ -20,7 +20,7 @@ import { tap, Tap } from './pointer.js';
 import { esc } from './html.js';
 import { INSTAGRAM_POST } from './instagram.js';
 import {
-  builtinTerms, ownTerms, censor, mentions, reportedFor, moderationSettings, parseTerms, reportThreshold, REPORT_REASONS,
+  builtinTerms, ownTerms, censor, findTerms, mentions, reportedFor, moderationSettings, parseTerms, reportThreshold, REPORT_REASONS,
   MAX_LISTS, MAX_LIST_WORDS, MAX_THRESHOLD,
 } from './moderation.js';
 
@@ -1466,6 +1466,8 @@ function whereHtml(e) {
 // own post. Someone else's post has the words my filters catch starred out.
 function eventCard(t, { who = null, mine = false } = {}) {
   const fact = (label, value) => `<dt>${label}</dt><dd>${value}</dd>`;
+  // My own post is shown as I wrote it, with a note naming the words others see starred out (starredNote).
+  const starred = mine ? starredNote(t) : '';
   if (!mine) t = { ...t, title: clean(t.title), details: clean(t.details), location_name: clean(t.location_name), tags: t.tags.map(clean) };
   const report = !mine && who === null && t.post?.pid && state.me && hasKeys()
     ? `<button type="button" class="link report-link" data-report="${esc(t.post.pid)}">Report or block</button>` : '';
@@ -1481,6 +1483,7 @@ function eventCard(t, { who = null, mine = false } = {}) {
         ${t.tags.length ? fact('Tags', t.tags.map(x => '#' + esc(x)).join(' ')) : ''}
       </dl>
       ${t.details ? `<div class="details">${linkify(t.details)}</div>` : ''}
+      ${starred}
       <div class="who">${who ?? `${personAvatar(t.host.guid, '', { pid: t.post?.pid, icon: t.host.icon })}
         <div>${contactName(t.host.guid) ? `<b>${esc(contactName(t.host.guid))}</b>` : ''}</div>${report}`}
       </div>
@@ -2882,6 +2885,20 @@ function wordFilters() {
     wordCache = { key, all: on.map(x => x.set), hide: on.filter(x => x.hide).map(x => x.set) };
   }
   return wordCache;
+}
+// On my own post: which of its words the built-in word list stars out for everyone else. The list is on unless they
+// turn it off (and some set it to hide such posts), so it's how most people see the post; their own word lists
+// aren't known. '' when it has none.
+const andList = (items) => items.length < 3 ? items.join(' and ') : `${items.slice(0, -1).join(', ')}, and ${items.at(-1)}`;
+function starredNote(t) {
+  const found = new Set();
+  for (const text of [t.title, t.details, t.location_name, ...(t.tags || [])]) {
+    for (const { start, end } of findTerms(String(text ?? ''), [builtinWords.set])) found.add(text.slice(start, end).toLowerCase());
+  }
+  if (!found.size) return '';
+  const words = [...found].map(w => `“${esc(w)}”`);
+  return `<p class="note starred-note">People using the built-in word list see ${andList(words)} starred out, and anyone
+    who hides posts with ${found.size === 1 ? 'that word' : 'those words'} won't see this post.</p>`;
 }
 // Someone else's text with the filtered words starred out.
 const clean = (text) => censor(String(text ?? ''), wordFilters().all);

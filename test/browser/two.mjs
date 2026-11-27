@@ -118,7 +118,10 @@ assert.equal(await A.ev(`document.querySelector('nav.tabs button[data-tab=plans]
 // The card's badge hangs off its corner, all of it showing: the middle of its left edge and of its top edge, both
 // outside the card, are still the badge. (Not its bounding box's corner: that falls outside the rounded shape, and
 // browsers differ on whether a point there hits it.)
-// On a miss, it says what was hit there instead, and where the badge and card are.
+// On a miss, it says what was hit there instead, and where the badge and card are. The first-visit tour goes first:
+// it's fixed above the tab bar, and on a short window (with wider fallback fonts) it reaches up over the badge.
+await A.ev(`document.querySelector('.tour [data-tour-action=skip]')?.click()`);
+await A.until(`!document.querySelector('.tour:not([hidden])')`, 5000);
 assert.equal(await A.ev(`(() => { const b = ${picnicCard}.querySelector('.badge.unread'); b.scrollIntoView({ block: 'center' });
   const r = b.getBoundingClientRect(), c = ${picnicCard}.getBoundingClientRect();
   const pts = [[r.left + 3, r.top + r.height / 2], [r.left + r.width / 2, r.top + 3]];

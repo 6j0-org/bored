@@ -305,6 +305,15 @@ textarea.details-input { min-height: 160px; } /* the post's Details: twice the u
 .btn.ghost { background: transparent; color: var(--text); border-color: var(--wood-line); text-shadow: none; }
 .btn.small { padding: 6px 10px; font-size: .75rem; }
 .btn:disabled { opacity: .5; }
+/* Buttons are centered by default: one on a line of its own (in a section, a form, or any other block) sits in the
+   middle. Rows and grids of controls place their own buttons, and stacks (.stack, the sheets' forms) stretch them
+   across, so they're left out. :where() keeps this easy to override. */
+:where(:not(.two, .actions, .card-actions, .pile-actions, .fb-actions, .chat-head, .composer, .map-zoom, .tour-actions,
+  .who, .stack, .guest-warning, .row)) > .btn { display: block; width: fit-content; max-width: 100%; margin-inline: auto; }
+/* A button alone in a pair (e.g. "Turn on notifications", before there's a "Send a test" beside it) fills the row. */
+.two > .btn:only-child { grid-column: 1 / -1; }
+/* Space between a warning or notice and the button or form after it (e.g. Profile's Delete account). */
+.notice + .btn, .notice + form { margin-top: 12px; }
 .error { color: var(--no); font-size: .9rem; min-height: 1.2em; }
 
 .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
@@ -562,7 +571,7 @@ button.chip { font: inherit; font-size: .82rem; cursor: pointer; }
 }
 .notice.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn-text); }
 .guest-warning { display: grid; gap: 8px; margin-bottom: 12px; font-size: 1rem; border-width: 2px; }
-.guest-warning .btn { justify-self: start; }
+.guest-warning .btn { justify-self: center; }
 .pii-notice { margin: 0; } /* under a post form field: contact info or an address (mountPiiCheck in app.js) */
 .note { color: var(--muted); font-size: .85rem; margin: 0 0 10px; }
 button.link { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-size: .9rem; cursor: pointer; text-align: left; }

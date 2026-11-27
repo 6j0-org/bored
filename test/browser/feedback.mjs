@@ -106,6 +106,13 @@ assert.match(await B.ev(`document.querySelector('.account-id code').textContent`
 const order = ['Notifications', 'Invitations', 'Contacts', 'Settings', 'Moderation'];
 assert.deepEqual(await B.ev(`[...document.querySelectorAll('#view .section-title')].map(h => h.textContent).filter(t => ${JSON.stringify(order)}.includes(t))`), order);
 assert.equal(await B.ev(`document.getElementById('themePick').previousElementSibling.id`), 'boardPick');
+// Buttons on a line of their own are centered, and a warning has room before the form or button after it.
+const centered = (sel) => B.ev(`(() => { const b = document.querySelector(${JSON.stringify(sel)}), p = b.parentElement.getBoundingClientRect(), r = b.getBoundingClientRect();
+  return Math.abs((r.left - p.left) - (p.right - r.right)) <= 2 && r.width < p.width - 20; })()`);
+assert.equal(await centered('#newInvite'), true, '"Create an invitation" is centered');
+assert.equal(await centered('#logout'), true, '"Start over" is centered');
+assert.ok(await B.ev(`(() => { const f = document.getElementById('deleteAccount'); return f.getBoundingClientRect().top - f.previousElementSibling.getBoundingClientRect().bottom; })()`) >= 8,
+  "Delete account's warning doesn't touch the form under it");
 
 B.close();
 finish('browser feedback');

@@ -37,6 +37,12 @@ to confirm first instead.
 Add `.small` for a compact version of either button (`.btn.small`, `.btn.ghost.small`), on cards, in rows, and in
 chat headers.
 
+Buttons are centered by default: one on a line of its own sits in the middle at its natural width. Rows and grids of
+controls (`.two`, `.actions`, `.card-actions`, a chat's header, and the others listed in `public/style.css`) place
+their own buttons, stacks (`.stack`, the sheets' forms) stretch them across, and a button alone in a `.two` fills the
+row. A new row or grid that holds buttons goes in that list. A notice (`.notice`) has 12px of space before a button or
+form right after it.
+
 ## Labels that aren't controls
 
 Anything that only says something has no box, outline, or fill, so it can't be mistaken for a button or a filter.

@@ -2,7 +2,7 @@
 // reload, and on the introduction and privacy pages too (they load the same theme.js and boards.css). The cartoon and
 // photo boards keep the wood browns. Each has a light and a dark theme.
 import assert from 'node:assert/strict';
-import { browser, finish } from '../lib.mjs';
+import { browser, finish, wait, BASE } from '../lib.mjs';
 
 const A = await browser('boards');
 const board = () => A.ev(`[document.documentElement.dataset.board, getComputedStyle(document.querySelector('.board'), '::before').backgroundImage]`);
@@ -41,5 +41,14 @@ assert.match((await board())[1], /\/board\.webp/, 'the photo board');
 assert.deepEqual(await A.ev(`[...document.querySelectorAll('#boardPick span')].map(s => s.textContent)`), ['Surfboard', 'Cartoon board', 'Photo board']);
 await A.ev(`document.querySelector('#boardPick input[value=surf]').click()`);
 assert.equal(await A.ev(`localStorage.getItem('board') === null`), true, 'the default isn\'t saved');
+// The board is the same shape on the introduction and privacy pages as in the app, even on a wide screen.
+await A.send('Emulation.setDeviceMetricsOverride', { width: 1280, height: 800, deviceScaleFactor: 1, mobile: false });
+const shape = () => A.ev(`(() => { const b = document.querySelector('.board').getBoundingClientRect(); return b.width / b.height; })()`);
+const inApp = await shape();
+for (const page of ['/about', '/privacy']) {
+  await A.send('Page.navigate', { url: BASE + page }); await A.until(`document.querySelector('.board')`); await wait(800);
+  const there = await shape();
+  assert.ok(Math.abs(there - inApp) < 0.15, `${page}: ${there.toFixed(2)} wide for 1 high, ${inApp.toFixed(2)} in the app`);
+}
 for (const page of ['/about', '/privacy']) assert.equal(await A.ev(`fetch('${page}').then(r => r.text()).then(t => t.includes('href="/boards.css"') && t.includes('src="/theme.js"'))`), true, page);
 finish('boards');

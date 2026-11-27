@@ -78,7 +78,9 @@
     /* The title board spans almost the whole width, like in the app. */
     .bar { display: flex; flex-direction: column; padding: 20px 0 8px; }
     .bar .board {
-      display: block; width: 97%; align-self: center; text-align: center;
+      /* 97% of the width, but no wider than the app's board for its letters (97% of the column, with letters 13% of
+         it: 7.46em), so it's the same shape as in the app and isn't stretched on a wide screen */
+      display: block; width: min(97%, 7.46em); align-self: center; text-align: center;
       font-size: clamp(2.7rem, 12vw, 5.4rem); transform: rotate(-1.2deg);
     }
     /* "Alpha" under the board, asking for feedback, the same as in the app (public/style.css). Its link opens the

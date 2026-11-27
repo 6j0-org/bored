@@ -56,7 +56,7 @@
     /* Title on an oak plank, linking back to the introduction page. */
     .bar { display: flex; flex-direction: column; padding: 20px 0 8px; }
     .board {
-      position: relative; isolation: isolate; display: block; width: 97%; align-self: center; text-align: center;
+      position: relative; isolation: isolate; display: block; width: min(97%, 7.46em); align-self: center; text-align: center; /* the app's shape (public/about.html) */
       padding: .6em .9em .58em; font-size: clamp(2.7rem, 12vw, 5.4rem); text-decoration: none; /* the same size as on the introduction page */
       font-family: 'National Park', 'Trebuchet MS', sans-serif; font-weight: 800; line-height: 1; letter-spacing: .01em;
       color: var(--board-text, #f6ecda); text-shadow: var(--board-shadow, 0 .06em 0 rgba(40, 18, 5, .7), 0 0 .15em rgba(40, 18, 5, .35));

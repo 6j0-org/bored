@@ -1,8 +1,8 @@
 // Example posts, shared by the demo (demo.js, DEMO=1), where demo accounts host them, and the sample deck on the
-// introduction page (about.js). Most places are in San Diego; a third of the life-stage examples are elsewhere, in
-// the local language. when: [days from today, hour, minute, repeat kind], where the optional repeat kind is one of
-// repeatOptions (public/when.js), e.g. 'weekly', or null for no time yet. location '' = no place. max: null = no
-// limit. Posts asking for a hand are tagged 'help', which counts toward "people helped" for whoever shows up.
+// introduction page (about.js). All in English; most places are in San Diego. when: [days from today, hour, minute,
+// repeat kind], where the optional repeat kind is one of repeatOptions (public/when.js), e.g. 'weekly', or null for
+// no time yet. location '' = no place. max: null = no limit. Posts asking for a hand are tagged 'help', which counts
+// toward "people helped" for whoever shows up.
 import { repeatOptions } from './when.js';
 
 export const EXAMPLES = [
@@ -36,38 +36,26 @@ export const EXAMPLES = [
     tags: ["food"], location: '32.748500,-117.098800', place: "City Heights", when: [4, 17], max: 6 },
   { host: 'ellie', title: "Thrift flip: make ugly clothes cute", details: "Hit three thrift stores, then my sewing machine. Your grandpa's bowling shirt is about to slap.",
     tags: ["crafts", "shopping"], location: '32.763100,-117.122900', place: "Normal Heights", when: [5, 11], max: 3 },
-  { host: 'valeria', title: "Lucha libre y tacos al pastor", details: "¡Vamos a la Arena México el viernes! Máscaras opcionales, gritar es obligatorio. Después, tacos en la esquina.",
-    tags: ["sports", "food"], location: '19.424700,-99.151500', place: "Arena México, CDMX", when: [3, 19, 30], max: 5, cost: 250, currency: 'MXN' },
   { host: 'nate', title: "Toddler meltdown support group (at the playground)", details: "Our kids run around, we drink cold coffee and pretend everything is fine. Juice boxes provided.",
     tags: ["kids"], location: '32.739800,-117.212000', place: "Liberty Station", when: [2, 9, 30], max: null },
   { host: 'aisha', title: "Help me build a backyard playhouse", details: "I bought the plans. I own a drill. I have never used the drill. Pizza and gratitude.",
     tags: ["fixing", "kids", "help"], location: '32.640100,-117.084200', place: "Chula Vista", when: [6, 10], max: 3 },
-  { host: 'camille', title: "Pique-nique des petits au Luxembourg", details: "On amène les enfants, les petits voiliers du bassin et beaucoup trop de fromage. Parents épuisés bienvenus.",
-    tags: ["kids", "food"], location: '48.846200,2.337200', place: "Jardin du Luxembourg, Paris", when: [5, 12], max: null },
   { host: 'tom', title: "Learn to drive stick before my kid does", details: "My 15-year-old wants my old Civic, and I never learned manual. Empty parking lot, lots of patience, no judgment.",
     tags: ["cars", "help"], location: '32.783000,-117.119600', place: "Mission Valley", when: [4, 8], max: 1 },
   { host: 'lena', title: "Escape the house while the teens have a party", details: "I said yes to the sleepover. I did not say I would be there for it. Wine bar, two hours, phones face down.",
     tags: ["drinks"], location: '32.721600,-117.168600', place: "Little Italy", when: [5, 19], max: 3 },
-  { host: 'rodrigo', title: "Pais contra filhos: futebol no parque", details: "Os adolescentes acham que estamos velhos demais. Vamos provar o contrário (e depois chamar a ambulância).",
-    tags: ["sports"], location: '-23.587400,-46.657600', place: "Parque Ibirapuera, São Paulo", when: [6, 9], max: 22 },
   { host: 'gloria', title: "Get a real Caesar salad", details: "You ever had a real, OG caesar salad at Caesar's in TJ?",
     tags: ["food", "travel"], location: '32.533100,-117.036000', place: "Caesar's, Tijuana", when: [7, 13], max: 4 },
   { host: 'craig', title: "Restore a 1972 VW bus with me", details: "She doesn't run. She barely rolls. But she's beautiful. Bring rags.",
     tags: ["cars", "fixing", "help"], location: '32.794800,-116.962500', place: "El Cajon", when: [3, 9], max: 3 },
-  { host: 'jihoon', title: "북한산 등산하고 막걸리 한잔", details: "아침 7시 출발, 정상 찍고 내려와서 파전에 막걸리. 초보도 환영합니다!",
-    tags: ["hiking"], location: '37.658300,126.977900', place: "북한산, 서울", when: [4, 7], max: 6 },
   { host: 'hank', title: "Beer Can Races", details: "Join the crew for a casual \"beer can\" race. Looks like it'll be a good day for sailing!",
     tags: ["sailing"], location: '32.717500,-117.229000', place: "Shelter Island", when: [1, 17, 30, 'weekly'], max: 4 },
   { host: 'linda', title: "Pickleball, but trash talk is required", details: "I'm 64 and I will destroy you. Paddles to borrow if you need one.",
     tags: ["fitness"], location: '32.750600,-117.230900', place: "Point Loma", when: [2, 8], max: 3 },
-  { host: 'wanjiru', title: "Tupande miti pamoja Karura", details: "Jumamosi asubuhi tunapanda miti katika Msitu wa Karura. Leteni kofia na maji; chai iko kwangu.",
-    tags: ["gardening", "volunteering"], location: '-1.243300,36.835000', place: "Msitu wa Karura, Nairobi", when: [4, 8], max: null },
   { host: 'walt', title: "Ballroom dancing for people with new hips", details: "My doctor says dancing is good for me. My wife says I step on her feet. Help me prove her wrong.",
     tags: ["dancing", "help"], location: '32.731000,-117.150300', place: "Balboa Park", when: [3, 14], max: 2 },
   { host: 'dottie', title: "Card sharks wanted: Tuesday night poker", details: "Nickel ante. I've been playing since Eisenhower. Bring snacks and humility.",
     tags: ["board-games"], location: '32.767800,-117.023000', place: "La Mesa", when: [7, 19, 0, 'weekly'], max: 5 },
-  { host: 'giuseppe', title: "Bocce e vino a Villa Borghese", details: "Ho 78 anni e non perdo da tre estati. Chi ha il coraggio? Il vino lo porto io.",
-    tags: ["games"], location: '41.914200,12.492300', place: "Villa Borghese, Roma", when: [2, 17], max: 3 },
   // Whims: not plans yet, just something someone's up for. No time (when: null), and some with no place either.
   { host: 'ellie', title: 'I want to go hiking', details: "I'm up for it whenever, and I'm open to hike anywhere close to Santa Cruz.",
     tags: ['hiking'], location: '', place: '', when: null, max: null },

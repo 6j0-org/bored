@@ -34,11 +34,12 @@ const DEMO_USERS = {
   maya: 'Maya', dev: 'Dev', rosa: 'Rosa', sam: 'Sam',
   // Retired: their posts sounded like they were by people under 18.
   jaylen: null, priya: null, hina: null,
-  // Hosts of the life-stage examples in public/examples.js, from twenties to seventies.
-  marcus: 'Marcus', ellie: 'Ellie', valeria: 'Valeria',
-  nate: 'Nate', aisha: 'Aisha', camille: 'Camille', tom: 'Tom', lena: 'Lena', rodrigo: 'Rodrigo',
-  gloria: 'Gloria', craig: 'Craig', jihoon: 'Ji-hoon', hank: 'Hank', linda: 'Linda', wanjiru: 'Wanjiru',
-  walt: 'Walt', dottie: 'Dottie', giuseppe: 'Giuseppe',
+  // Hosts of the life-stage examples in public/examples.js, from twenties to seventies. Retired (null): the hosts of
+  // the examples that weren't in English.
+  marcus: 'Marcus', ellie: 'Ellie', valeria: null,
+  nate: 'Nate', aisha: 'Aisha', camille: null, tom: 'Tom', lena: 'Lena', rodrigo: null,
+  gloria: 'Gloria', craig: 'Craig', jihoon: null, hank: 'Hank', linda: 'Linda', wanjiru: null,
+  walt: 'Walt', dottie: 'Dottie', giuseppe: null,
 };
 const GUID_PREFIX = '00000000-0000-4000-8000-';
 

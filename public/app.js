@@ -450,7 +450,7 @@ async function offerPendingInvite() {
   catch (e) { dropPendingInvite(); return toast(e.message); }
   if (info.skip) { dropPendingInvite(); return toast(info.skip); }
   const result = await connectSheet({ token, key, name, info, ready: state.me && hasKeys() });
-  if (result === 'signin') return go('account'); // enterApp offers it again after sign-in
+  if (result === 'signin') return signInNow(); // enterApp offers it again after sign-in
   dropPendingInvite();
 }
 // Check an invitation before offering it: { icon, skip } (skip: why not to offer it, if there's a reason).
@@ -906,11 +906,20 @@ async function recheckIdentity() {
   store(ID_RECHECKED, now); store(ID_SAVE_CLICKED, 0);
   try { await startIdSignIn(state.config); return true; } catch (e) { console.warn(e); return false; }
 }
+// Send a signed-out guest to sign in. With a 6j0.org identity that's straight to the identity server (the account
+// tab would only offer its one button); otherwise it's the account tab, with `why` as a toast. Someone signed in
+// without their keys here still gets the account tab, to unlock.
+async function signInNow(why) {
+  if (state.config.authMode === '6j0' && !state.me) {
+    try { return await startIdSignIn(state.config); } catch (e) { why = e.message; }
+  }
+  if (why) toast(why);
+  if (state.tab !== 'account') go('account');
+}
 // The feedback page needs an account (posts are filed under it), so anyone else is sent to sign in first.
 function openFeedback() {
   if (state.me && hasKeys()) return go('feedback');
-  toast('Sign in to send feedback.');
-  if (state.tab !== 'account') go('account');
+  signInNow('Sign in to send feedback.');
 }
 
 // Network trouble (no connection, a timeout, or the server restarting), as opposed to an answer about the account.
@@ -1580,7 +1589,7 @@ async function viewDiscover(v) {
     <section class="pile" id="pile" aria-labelledby="pileTitle" hidden></section>`;
   const filtersEl = v.querySelector('#filters'), host = v.querySelector('#deckHost'), pileEl = v.querySelector('#pile');
   const modNote = v.querySelector('#modNote');
-  v.querySelector('#guestSignIn')?.addEventListener('click', () => go('account'));
+  v.querySelector('#guestSignIn')?.addEventListener('click', () => signInNow());
   let options = { tags: [], costs: [], dates: [] }, events = [], deck = null;
   let hidden = new Map(); // posts my moderation settings hide, from the deck and the discard pile (moderatePosts)
 
@@ -1836,7 +1845,7 @@ function deckOptions(events, changed, filters) {
     onSwipe: async (t, yes, extra = {}) => {
       if (!state.me) {
         // Guests can browse; passing is just local, but saying yes needs an account.
-        if (yes) { toast('Sign in or create an account to say yes.'); go('account'); return KEEP_CARD; }
+        if (yes) { signInNow('Sign in or create an account to say yes.'); return KEEP_CARD; }
         return;
       }
       if (!yes) { await pass(t.pid); return changed(); }

@@ -18,7 +18,7 @@ COPY public ./public
 RUN mkdir -p /data && chown node:node /data
 VOLUME /data
 
-# Set ID_ORIGIN (the 6j0.org identity server, e.g. https://id.6j0.org), or DEMO=1. Set ORIGIN (e.g.
+# Set ID_ORIGIN (the 6j0.org ID server, e.g. https://id.6j0.org), or DEMO=1. Set ORIGIN (e.g.
 # https://bored.example) when serving over HTTPS: links in notifications use it, and it turns on Secure cookies.
 ENV PORT=3000 DB_PATH=/data/data.sqlite
 EXPOSE 3000

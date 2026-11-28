@@ -580,7 +580,7 @@ button.chip { font: inherit; font-size: .82rem; cursor: pointer; }
 .notice.warn { background: var(--warn-bg); border-color: var(--warn-line); color: var(--warn-text); }
 .guest-warning { display: grid; gap: 8px; margin-bottom: 12px; font-size: 1rem; border-width: 2px; }
 .guest-warning .btn { justify-self: center; }
-/* An unsaved 6j0.org identity: under the "Alpha" note on every screen (app.js idUnsavedBanner). */
+/* A temporary 6j0 ID, not saved yet: under the "Alpha" note on every screen (app.js idUnsavedBanner). */
 .id-unsaved { margin: 12px 0 0; font-size: .92rem; }
 .pii-notice { margin: 0; } /* under a post form field: contact info or an address (mountPiiCheck in app.js) */
 .note { color: var(--muted); font-size: .85rem; margin: 0 0 10px; }

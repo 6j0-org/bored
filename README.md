@@ -5,9 +5,9 @@ Host an event. Users swipe through posts in **Discover**, and **right = "I'm in"
 In **Confirm**, the host swipes through the requests to join (anonymous, unless they're from one of the host's contacts), and **right = "Let's do it"**. When both sides say yes, it's on:
 it shows up in **Plans**, where you chat and sort out details. Afterwards the host marks it as done.
 
-Accounts are anonymous: a random GUID. You sign in with a 6j0.org identity (see [Sign-in](#sign-in)), and Bored
+Accounts are anonymous: a random GUID. You sign in with a 6j0 ID (see [Sign-in](#sign-in)), and Bored
 itself never asks for a name, email, or password. Bored is only used signed in: anyone who isn't is sent to the
-identity server, where someone new can just start without saving anything yet.
+ID server, where someone new can start with a temporary ID without saving anything yet.
 
 ## Run
 
@@ -19,7 +19,7 @@ npm ci                 # install the exact versions in package-lock.json
 DEMO=1 npm start       # http://localhost:3000, with no sign-in (see Demo mode)
 ```
 
-For real use, Bored needs a 6j0.org identity server: see [Sign-in](#sign-in).
+For real use, Bored needs the 6j0.org ID server: see [Sign-in](#sign-in).
 
 ### Tests
 
@@ -62,7 +62,7 @@ behind HTTPS/proxies, for the links in ntfy notifications; also turns on `Secure
 ["New posts in Discover"](#notifications) notifications: hours from 0 to 23, comma-separated, in the server's time
 zone, set with `TZ`; default `10,16`, empty to turn them off), `DEMO` (`1` for [demo mode](#demo-mode)),
 `FEEDBACK_PATH` (default `feedback.jsonl` next to the database), `ADMIN_SUB` or `ADMIN_GUID` (one more developer for
-[feedback](#feedback), besides `DEVELOPER_GUIDS` in `server.js`: a 6j0.org identity's `sub`, or an account's GUID,
+[feedback](#feedback), besides `DEVELOPER_GUIDS` in `server.js`: a 6j0 ID's `sub`, or an account's GUID,
 which also works in the demo).
 
 ### Feedback
@@ -125,27 +125,27 @@ account, `NTFY_SERVERS=https://ntfy.sh=tk_…`) or its own ntfy server.
 
 ### Sign-in
 
-People sign in with an anonymous identity from a [6j0.org identity server](https://gitlab.com/6j0-org/id), so one
-sign-in (passkey, or username + password) covers every 6j0.org app. Set `ID_ORIGIN` (e.g. `https://id.6j0.org`);
+People sign in with an anonymous 6j0 ID from the [6j0.org ID server](https://gitlab.com/6j0-org/id), so one
+account key covers every 6j0.org app. Set `ID_ORIGIN` (e.g. `https://id.6j0.org`);
 the server won't start without it, unless it's a [demo](#demo-mode). Optional: `ID_APP` (this app's name in the
-identity server's `APPS`; default `bored`) and `ID_JWKS_URL` (where to fetch its public keys; default
+ID server's `APPS`; default `bored`) and `ID_JWKS_URL` (where to fetch its public keys; default
 `ID_ORIGIN/.well-known/jwks.json`). `AUTH_MODE` defaults to `6j0`, its only value. Bored used to run its own passkeys
 (`AUTH_MODE=local`); that was removed, and the server refuses to start with it.
 
-Anyone not signed in, or signed in without this browser's keys, is sent to the identity server as soon as the page
+Anyone not signed in, or signed in without this browser's keys, is sent to the ID server as soon as the page
 loads, and comes back signed in. A deep link (`/?open=…`, or an invitation link) is kept in `sessionStorage` through
 the trip and opened after. The sign-in page, with a button, shows instead when sending them would go round in
 circles or undo what they asked for: they came back less than a minute ago without signing in, sign-in just failed,
-or they signed out on this browser (until they sign in again, since the identity server would sign them straight
+or they signed out on this browser (until they sign in again, since the ID server would sign them straight
 back in). See "signing in" in `public/app.js`.
 
-An identity made with the identity server's "Just start" lives only in the browser that made it until its account
+A temporary 6j0 ID, made with the ID server's temporary-ID button, lives only in the browser that made it until its account
 key is saved (the sign-in token says `saved: false`). Bored records that in `id_accounts.id_saved`, warns on every
 screen with a link to `ID_ORIGIN/#save`, and signs in again (an instant redirect) to see whether it's been saved: on
 the next start after that link is followed, and otherwise once a week. The weekly check also counts as using the
-identity, which the identity server deletes if it's unsaved and unused for 90 days.
+ID, which the ID server deletes if it's unsaved and unused for 90 days.
 
-To try it locally, run the identity server on `localhost` and Bored on `127.0.0.1` (cookies ignore the
+To try it locally, run the ID server on `localhost` and Bored on `127.0.0.1` (cookies ignore the
 port, so two apps on one hostname would overwrite each other's session cookie):
 
 ```sh
@@ -238,9 +238,9 @@ only change what that person sees. Everything is on by default.
   (keys, vault, sessions, public posts and the reports on them, invitations, connections, connection
   requests, and push subscriptions), the mail in those inboxes, the reports it filed, and its feedback posts and
   replies (`eraseUser` in `feedback.js`; gone from disk at the next restart). There's no recovery. That's only in the
-  demo, where a fresh account follows. Otherwise the account belongs to the 6j0.org identity: Profile explains that
-  deleting the identity deletes its accounts on every 6j0.org service and links to the identity server's "Delete your
-  identity" (`ID_ORIGIN/#delete`), and the endpoint refuses. Once the identity is deleted, the identity server POSTs
+  demo, where a fresh account follows. Otherwise the account belongs to the 6j0 ID: Profile explains that
+  deleting the ID deletes everything it has in every 6j0.org app and links to the ID server's "Delete your
+  ID" (`ID_ORIGIN/#delete`), and the endpoint refuses. Once the ID is deleted, the ID server POSTs
   a signed deletion notice to `/api/id/deleted` (`verifyDeletionToken` in `idtoken.js`), and the account is erased
   the same way, except for its side of each chat (the server doesn't know those inboxes without the browser) and
   without cancelling its posts first, so Profile asks people to remove them before they go.
@@ -254,9 +254,9 @@ of. Everything else happens in the browser: filtering Discover, who's in, the wa
 [`docs/encryption.md`](docs/encryption.md) explains the whole design, with diagrams and the reasons for each choice.
 
 - **Accounts** are a server-assigned GUID. Bored never stores a name, email, or password: signing in is the 6j0.org
-  identity server's job (see below).
+  ID server's job (see below).
 - **Keys.** Each account has an ECDH P-256 *chat key* and an ECDSA P-256 *signing key*. The private halves are
-  encrypted with the vault key, so your 6j0.org identity can unlock them on a new device, and the browser keeps them as
+  encrypted with the vault key, so your 6j0 ID can unlock them on a new device, and the browser keeps them as
   non-extractable WebCrypto keys. Each account also has a *main inbox*: a random token only its vault holds; the
   server files mail under the token's SHA-256.
 - **Mail** (`public/envelope.js`) is built from standard parts, with nothing invented at the crypto layer:
@@ -291,9 +291,9 @@ of. Everything else happens in the browser: filtering Discover, who's in, the wa
   which follows a person across their posts.
 - **The vault** (nickname, tags, and saved keys for each contact; your posts and who each is shared with; your
   requests to join and their channel secrets) is encrypted in the browser with a random vault key. That key is
-  wrapped by a key derived from your 6j0.org identity's app key (below), so the server only stores ciphertext. A contact's keys are
+  wrapped by a key derived from your 6j0 ID's app key (below), so the server only stores ciphertext. A contact's keys are
   saved the first time they're used, so the server can't swap them later.
-- **The 6j0.org identity server** holds the passkeys (and the optional password). After sign-in it
+- **The 6j0.org ID server** holds the ways to sign in (account keys, and for older IDs passkeys or a password). After sign-in it
   sends the browser back with a signed token and Bored's own *app key*, encrypted to a one-time key the page made
   and carried in the URL fragment (which never reaches a server). The vault key is wrapped by a key derived from the
   app key. Other 6j0.org apps get different app keys, so they can't read Bored data, and Bored gives the account
@@ -337,10 +337,10 @@ of. Everything else happens in the browser: filtering Discover, who's in, the wa
   sent to a deleted account's inbox afterwards is stored like any other, sealed to a key nobody has. And since the
   server can't tell which side of a channel is whose, someone deleting their account could erase the other side of
   their own chats too.
-- **Deleting a 6j0.org identity leaves more behind**: its side of each chat (ciphertext only the other person can
+- **Deleting a 6j0 ID leaves more behind**: its side of each chat (ciphertext only the other person can
   read, no longer tied to any account), and its private posts, still showing as on for the people they were shared
-  with, unless they were removed first. If Bored is down for 30 days straight, the identity server gives up and
-  logs the identity so it can be erased by hand.
+  with, unless they were removed first. If Bored is down for 30 days straight, the ID server gives up and
+  logs the ID so it can be erased by hand.
 - **Report counts can be gamed** by someone with many accounts, like any vote. Each person's own threshold, and
   being able to turn a reason off, limit the damage.
 
@@ -349,13 +349,13 @@ See `TODO.md` for the full list of open security and privacy issues.
 ## Files
 
 - `server.js`: HTTP server + JSON API (sign-in, mail, public posts, invitations, and push)
-- `idtoken.js`: verifies sign-in tokens from a 6j0.org identity server
+- `idtoken.js`: verifies sign-in tokens from the 6j0.org ID server
 - `db.js`: SQLite schema and migrations
 - `public/about.html`, `public/about.js`: the introduction page, at `/about`, with a
   swipeable deck of example posts
 - `public/examples.js`: the example posts, shared by that deck and the demo (`demo.js`)
 - `public/app.js`: single-page front-end (vanilla JS, swipe deck with pointer/touch/keyboard)
-- `public/secure.js`: 6j0.org identity handoff, encrypted vault, and key storage
+- `public/secure.js`: 6j0 ID handoff, encrypted vault, and key storage
 - `public/hpke.js`: HPKE (RFC 9180) on WebCrypto, one cipher suite
 - `public/envelope.js`: the mail formats: signatures, signed records, sealed envelopes, and channels
 - `public/posts.js`: the rules for posts, requests, matches, and chat as messages, and `derive()`, which replays them

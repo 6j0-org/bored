@@ -83,7 +83,7 @@ Code: `public/secure.js` (key setup, the vault), `public/envelope.js` (using the
 
 ```mermaid
 flowchart TD
-  ID["6j0.org identity server"] -->|"app key, handed to the page"| APP["32-byte app key<br/>(never reaches Bored's server)"]
+  ID["6j0.org ID server"] -->|"app key, handed to the page"| APP["32-byte app key<br/>(never reaches Bored's server)"]
   APP -->|"HKDF 'vault-kek-6j0-v1'"| KEK["key-encryption key"]
   KEK -->|"unwraps (wrapped copy stored on the server)"| VK["vault key<br/>random AES-256"]
   VK -->|encrypts| V["vault: contacts, nicknames, saved keys,<br/>my posts, my requests and channel secrets,<br/>main inbox token"]
@@ -101,9 +101,9 @@ Each account has:
 
 Why these choices:
 
-- **A 6j0.org identity's app key.** However you signed in there (a passkey, or a username and password), the identity
-  server hands the browser this app's own *app key*, and the key-encryption key is derived from that. Bored's server
-  never sees the app key or the password. (Bored used to run its own passkeys, with a key-encryption key from their
+- **A 6j0 ID's app key.** However you signed in there (an account key, or for older IDs a passkey or a password), the
+  ID server hands the browser this app's own *app key*, and the key-encryption key is derived from that. Bored's
+  server never sees the app key or any of those. (Bored used to run its own passkeys, with a key-encryption key from their
   WebAuthn PRF output. That was removed.)
 - **A random vault key, wrapped.** Wrapping one random key, instead of deriving the vault key straight from the app
   key, means the way you sign in can change without re-encrypting anything.
@@ -347,7 +347,7 @@ anything.
 | Which session is sending, as it sends | Yes, in memory | For rate limits; never stored. |
 | Inbox, time, and size of each message | **Yes** | Main inboxes belong to known accounts; channel inboxes don't. |
 | IP addresses | **Yes**, in transit | Not stored by the app; a reverse proxy may log them. |
-| Accounts, sessions, push subscriptions | Yes | Bored stores no names, emails, or passwords. A 6j0.org identity's passkeys and password stay on the identity server. |
+| Accounts, sessions, push subscriptions | Yes | Bored stores no names, emails, or passwords. A 6j0 ID's ways to sign in stay on the ID server. |
 | The vault | No | Encrypted with the vault key. |
 | Invitation connections | **Yes** | Who connected with whom through an invitation link. Still plaintext (see `TODO.md`). |
 | Your location (distance filter) | No | Stays in the browser; Discover filters locally. |

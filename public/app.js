@@ -203,7 +203,7 @@ const POST_IDEAS = [
 ];
 const POST_IDEA_MS = 5000;
 
-// config.authMode: '6j0' (sign in with a 6j0.org identity at config.idOrigin) | 'demo' (no sign-in, see startDemo)
+// config.authMode: '6j0' (sign in with a 6j0 ID at config.idOrigin) | 'demo' (no sign-in, see startDemo)
 //   | 'demo' (server DEMO=1: no sign-in; every browser gets its own throwaway account full of demo content).
 const state = { config: { authMode: '6j0' }, me: null, tab: 'discover', chat: null, discoverTags: loadSet('discoverTags'), discoverCosts: new Set([...loadSet('discoverCosts')].filter(c => c in COST_FILTERS)),
   discoverDate: (() => { try { const d = localStorage.getItem('discoverDate'); return d in DATE_FILTERS ? d : ''; } catch { return ''; } })(),
@@ -907,12 +907,12 @@ function shell(content) {
 
 function go(tab) { state.tab = tab; state.chat = null; render(); }
 
-// ---------- unsaved 6j0.org identities ----------
-// An identity made with "Just start" at the identity server lives only in the browser that made it until its account
+// ---------- temporary 6j0 IDs ----------
+// A 6j0 ID made with the ID server's temporary-ID button lives only in the browser that made it until its account
 // key is saved there (the server's /api/me says idUnsaved). Every screen warns, with a link to save it at
-// <idOrigin>/#save. Sign-in is re-run (an instant redirect while the identity server still has the identity) to see
-// whether it's been saved: on the next start after following that link, and otherwise once a week (idRecheck), which
-// also keeps the identity counting as used, so the identity server doesn't delete it.
+// <idOrigin>/#save. Sign-in is re-run (an instant redirect while the ID server still has the ID) to see whether it's
+// been saved: on the next start after following that link, and otherwise once a week (idRecheck), which also keeps
+// the ID counting as used, so the ID server doesn't delete it.
 const ID_SAVE_CLICKED = 'bored-id-save-clicked', ID_RECHECKED = 'bored-id-rechecked';
 const DAY_MS = 24 * 3600 * 1000;
 const stored = (k) => { try { return Number(localStorage.getItem(k)) || 0; } catch { return 0; } };
@@ -921,14 +921,14 @@ const store = (k, v) => { try { localStorage.setItem(k, String(v)); } catch {} }
 function idUnsavedBanner() {
   if (state.config.authMode !== '6j0' || !state.me?.idUnsaved) return '';
   return `<div class="notice warn guest-warning id-unsaved" role="note">
-    <span><b>You haven't saved your account.</b> If you clear this browser's data or lose this device, you lose
+    <span><b>You haven't saved your 6j0 ID.</b> If you clear this browser's data or lose this device, you lose
       everything here, for good.</span>
-    <a class="btn small ghost" id="idSave" href="${esc(state.config.idOrigin)}/#save">Save my account</a></div>`;
+    <a class="btn small ghost" id="idSave" href="${esc(state.config.idOrigin)}/#save">Save my ID</a></div>`;
 }
 
 // Re-run sign-in if it's time to check again (see above). True when it's sending the browser away. At most once every
-// 10 minutes, so an identity server that can't sign the browser in doesn't send it round in circles.
-async function recheckIdentity() {
+// 10 minutes, so an ID server that can't sign the browser in doesn't send it round in circles.
+async function recheckId() {
   if (state.config.authMode !== '6j0' || !state.me?.idUnsaved) return false;
   const now = Date.now();
   if (!state.me.idRecheck && stored(ID_SAVE_CLICKED) < now - DAY_MS) return false;
@@ -938,13 +938,13 @@ async function recheckIdentity() {
 }
 // ---------- signing in ----------
 // Bored is only used signed in. Anyone who isn't, or is signed in without this browser's keys, is sent to the
-// identity server as soon as the page loads (render() calls autoSignIn) and comes back signed in, with no screen in
+// ID server as soon as the page loads (render() calls autoSignIn) and comes back signed in, with no screen in
 // between. A deep link survives the trip in sessionStorage: "?open=…" here (PENDING_OPEN, opened by openPending
 // after sign-in), and an invitation in PENDING_INVITE.
 // The sign-in page (viewAccount, with a button) shows instead when sending them would go round in circles or undo
 // what they asked for: sign-in just failed (noAutoSignIn), they were sent less than a minute ago in this tab and came
 // back without signing in (SIGNIN_TRIED), or they signed out on this browser (SIGNED_OUT, until they sign in again:
-// the identity server would otherwise sign them straight back in).
+// the ID server would otherwise sign them straight back in).
 const PENDING_OPEN = 'pendingOpen', SIGNIN_TRIED = 'bored-signin-tried', SIGNED_OUT = 'bored-signed-out';
 let noAutoSignIn = false, leaving = false;
 const signedIn = () => Boolean(state.me && hasKeys());
@@ -953,7 +953,7 @@ const session = {
   set: (k, v) => { try { sessionStorage.setItem(k, v); } catch {} },
   drop: (k) => { try { sessionStorage.removeItem(k); } catch {} },
 };
-// Off to the identity server. False if it couldn't start (the reason is a toast).
+// Off to the ID server. False if it couldn't start (the reason is a toast).
 async function goSignIn() {
   if (leaving) return true;
   leaving = true;
@@ -961,7 +961,7 @@ async function goSignIn() {
   try { await startIdSignIn(state.config); return true; }
   catch (e) { leaving = false; toast(e.message); return false; }
 }
-// Called before drawing a screen: true when the browser is on its way to the identity server instead.
+// Called before drawing a screen: true when the browser is on its way to the ID server instead.
 function autoSignIn() {
   if (leaving) return true;
   if (state.config.authMode !== '6j0' || signedIn() || noAutoSignIn || stored(SIGNED_OUT)) return false;
@@ -1386,8 +1386,8 @@ async function drawNtfySettings(el) {
 
 const idHost = () => new URL(state.config.idOrigin).host;
 
-// The sign-in and unlock page, for when autoSignIn doesn't go to the identity server on its own: one button for
-// sign-in, sign-up, and unlock; the identity server does the rest. In the demo (where nobody signs in), only if
+// The sign-in and unlock page, for when autoSignIn doesn't go to the ID server on its own: one button for
+// sign-in, sign-up, and unlock; the ID server does the rest. In the demo (where nobody signs in), only if
 // making the demo account failed.
 async function viewAccount(v) {
   if (isDemo()) {
@@ -1399,14 +1399,14 @@ async function viewAccount(v) {
   const unlocking = Boolean(state.me), signedOut = !unlocking && stored(SIGNED_OUT);
   v.innerHTML = `
     <div class="account stack">
-      <p class="lead">${unlocking ? 'Unlock your account with your 6j0.org identity to see your contacts and chats.'
+      <p class="lead">${unlocking ? 'Unlock your account with your 6j0 ID to see your contacts and chats.'
         : signedOut ? "You're signed out of Bored on this browser."
         : `Swipe through what's happening nearby, and when you and the host both say yes, it's on.
            Join something fun, or host your own.`}</p>
       <button class="btn" id="idSignIn">${unlocking ? 'Unlock' : 'Continue'} with ${esc(idHost())}</button>
       <div class="error" id="authErr"></div>
-      <div class="notice"><b>No names or email.</b> Bored uses your anonymous 6j0.org identity: one sign-in, with a
-        username and password, for every 6j0.org app. New here? You can create one on the next screen.
+      <div class="notice"><b>No names or email.</b> Bored uses your anonymous 6j0 ID: one account key for every
+        6j0.org app. New here? You can make one on the next screen.
         Nobody sees a name for you unless they've connected with you, and then only the nickname <em>they</em> chose.
         Your contacts and chats are encrypted with a key only you can unlock.</div>
       ${unlocking ? `<button class="btn" id="logout">Sign out</button>` : ''}
@@ -1430,14 +1430,14 @@ async function signOut() {
 // ---------- deleting an account ----------
 // At the bottom of Profile. In the demo, the server erases everything it holds for
 // the account (POST /api/account/delete in server.js) once you type the last 4 characters of your Account ID, which
-// is just below. With a 6j0.org identity, the account belongs to the identity, so it's deleted at the identity
-// server (its "Delete your identity", at /#delete), along with the identity's accounts on every other 6j0.org
-// service; the identity server then tells this server (/api/id/deleted), which erases the account.
+// is just below. With a 6j0 ID, the account belongs to the ID, so it's deleted at the ID server (its "Delete your
+// ID", at /#delete), along with everything the ID has in every other 6j0.org app; the ID server then tells this
+// server (/api/id/deleted), which erases the account.
 function deleteAccountHtml(idMode) {
   if (idMode) return `<div class="section-title">Delete account</div>
-    <div class="notice warn">You sign in with a 6j0.org identity, so your Bored account is deleted along with it, at
-      ${esc(idHost())}. <b>Deleting your identity deletes all of your accounts on 6j0.org services</b>, Bored
-      included, and everything in them. There's no recovery. Bored erases your account as soon as it hears. Remove
+    <div class="notice warn">You sign in with a 6j0 ID, so your Bored account is deleted along with it, at
+      ${esc(idHost())}. <b>Deleting your 6j0 ID deletes everything you have in every 6j0.org app</b>, Bored
+      included. There's no recovery. Bored erases your account as soon as it hears. Remove
       the posts you're hosting first (in Post), so the people they're shared with are told.</div>
     <button type="button" class="btn ghost" id="deleteAtId">Go to ${esc(idHost())}</button>`;
   return `<div class="section-title">Delete account</div>
@@ -3393,8 +3393,9 @@ async function viewProfile(v) {
     <div class="notice">This is a demo account, made just for this browser. It's deleted after a day, and everything
       resets when the server restarts. Start over to get a fresh account with the demo content back.</div>`
     : `<div class="section-title">Sign-in</div>
-    <div class="notice">You sign in with your 6j0.org identity. Manage your password at
-      <a href="${esc(state.config.idOrigin)}/">${esc(idHost())}</a>. Keep it in a password manager: nobody can reset it.</div>`}
+    <div class="notice">You sign in with your 6j0 ID. Manage it at
+      <a href="${esc(state.config.idOrigin)}/">${esc(idHost())}</a>. Keep its account key in a password manager:
+      nobody can reset it.</div>`}
 
     <button class="btn" id="logout" style="margin-top:24px">${isDemo() ? 'Start over' : 'Sign out'}</button>
     ${deleteAccountHtml(idMode)}
@@ -3612,13 +3613,13 @@ await Promise.all([api('/api/config').then(c => { state.config = c; }, () => {})
   }
 }
 if (state.config.authMode === '6j0' && hasIdCallback()) {
-  // Back from the 6j0.org identity server with a token and this app's key.
+  // Back from the 6j0.org ID server with a token and this app's key.
   try {
     const res = await finishIdSignIn(api);
     await enterApp(res.created ? 'profile' : 'discover');
     toast(res.created ? 'Account created!' : 'Welcome back!');
   } catch (e) {
-    // The sign-in page with the reason, not straight back to the identity server.
+    // The sign-in page with the reason, not straight back to the ID server.
     noAutoSignIn = true;
     await refreshMe().catch(() => {});
     render(); toast(e.message);
@@ -3647,7 +3648,7 @@ if (state.config.authMode === '6j0' && hasIdCallback()) {
     if (isDemo() && !(state.me && hasKeys())) {
       try { if (state.me) await api('/api/logout', { method: 'POST' }); await startDemo(); } catch (e) { toast(e.message); }
     }
-    if (!(hasKeys() && await recheckIdentity())) {
+    if (!(hasKeys() && await recheckId())) {
       if (signedIn()) signedInHere();
       if (!openPending()) render();
       offerPendingInvite();

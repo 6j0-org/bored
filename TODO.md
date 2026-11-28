@@ -98,7 +98,7 @@ left**, and about the limits of doing end-to-end encryption in a web app.
 - [ ] **P1: CSRF.** Protection relies on `SameSite=Lax` plus requiring `Content-Type: application/json`. Add an
   explicit CSRF token or an `Origin` header check on state-changing requests.
 - [ ] **P1: Secure cookies** are only set when `ORIGIN` starts with `https:`. Make HTTPS the default outside localhost.
-- [ ] **P2: PRF support varies** across browsers and passkey managers. This is now the 6j0.org identity server's
+- [ ] **P2: PRF support varies** across browsers and passkey managers. This is now the 6j0.org ID server's
   concern (Bored's own passkeys were removed), kept here for the research.
   **State as of 2026-11-15:**
   - **Bitwarden** doesn't return PRF results for passkeys stored in it. We tested the browser extension in LibreWolf
@@ -110,18 +110,18 @@ left**, and about the limits of doing end-to-end encryption in a web app.
   - **Proton Pass, KeePassDX:** status unknown.
   - **Works:** security keys with hmac-secret (YubiKey 5, Nitrokey 3, SoloKey 2), Google Password Manager,
     iCloud Keychain (macOS/iOS 18+).
-  - So no free, open-source password manager supports PRF in a released version yet. The 6j0.org identity server
-    is adding a username + password fallback for now. **Follow up:** recheck Bitwarden and KeePassXC, and once one
+  - So no free, open-source password manager supports PRF in a released version yet. The 6j0.org ID server
+    signs in with account keys instead, with passkeys turned off until PRF works in them. **Follow up:** recheck Bitwarden and KeePassXC, and once one
     ships PRF, update the advice text (`PRF_ADVICE` in 6j0-org-id `public/id.js`) to recommend it again.
 
-### The 6j0.org identity
+### The 6j0 ID
 
-- [ ] **P1: The identity server holds every app's keys.** It can't read Bored data on its own (it never sees the root
+- [ ] **P1: The ID server holds every app's keys.** It can't read Bored data on its own (it never sees the root
   secret), but a compromised id.6j0.org page could derive every app's key for whoever signs in there. Keep it small,
   strictly CSP'd, and separately deployed. See the id repo's TODO.
 - [ ] **P1: Signing out of Bored doesn't sign out of id.6j0.org.** After signing out, Bored shows its sign-in page
-  instead of sending the browser to the identity server on its own, but its button signs straight back in without a
-  passkey prompt while the identity session lasts. Say so in the UI, and consider a "sign out of all 6j0.org apps" link.
+  instead of sending the browser to the ID server on its own, but its button signs straight back in without asking
+  for anything while the ID server's session lasts. Say so in the UI, and consider a "sign out of all 6j0.org apps" link.
 - [ ] **P2: Setup tickets and seen-token IDs live in process memory**: a restart between the
   redirect and account creation means signing in again.
 

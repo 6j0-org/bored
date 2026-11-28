@@ -41,9 +41,9 @@ CREATE TABLE IF NOT EXISTS passkeys (
   last_used_at  TEXT
 );
 
--- AUTH_MODE=6j0 only: links an account to a 6j0.org identity instead of to local passkeys. sub is the identity's
--- ID from the identity server; it stays on this server and is never shown to other users (they see users.guid).
--- wrapped_key is the vault key encrypted with a key derived from the app key the identity server hands the browser.
+-- AUTH_MODE=6j0 only: links an account to a 6j0 ID instead of to local passkeys. sub is the 6j0 ID's GUID from
+-- the ID server; it stays on this server and is never shown to other users (they see users.guid).
+-- wrapped_key is the vault key encrypted with a key derived from the app key the ID server hands the browser.
 CREATE TABLE IF NOT EXISTS id_accounts (
   user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   sub         TEXT NOT NULL UNIQUE,
@@ -157,13 +157,13 @@ const MIGRATIONS = [
   `ALTER TABLE users ADD COLUMN discover_news INTEGER NOT NULL DEFAULT 1;
    ALTER TABLE public_posts ADD COLUMN first_seq INTEGER NOT NULL DEFAULT 0;
    UPDATE public_posts SET first_seq = seq;`,
-  // 5. AUTH_MODE=6j0: whether the identity's account key is saved, from the sign-in token's saved claim (0: "Just
-  // start", so the identity lives in one browser and Bored warns), and when that was last checked, so Bored re-runs
-  // sign-in now and then to notice a save (and keep the identity in use, so it isn't deleted as unused). NULL saved
-  // means the identity server didn't say, which counts as saved.
+  // 5. AUTH_MODE=6j0: whether the 6j0 ID's account key is saved, from the sign-in token's saved claim (0: a
+  // temporary ID, so it lives in one browser and Bored warns), and when that was last checked, so Bored re-runs
+  // sign-in now and then to notice a save (and keep the ID in use, so it isn't deleted as unused). NULL saved
+  // means the ID server didn't say, which counts as saved.
   `ALTER TABLE id_accounts ADD COLUMN id_saved INTEGER;
    ALTER TABLE id_accounts ADD COLUMN checked_at TEXT;`,
-  // 6. Bored's own passkeys (AUTH_MODE=local) are gone: everyone signs in with a 6j0.org identity (id_accounts). An
+  // 6. Bored's own passkeys (AUTH_MODE=local) are gone: everyone signs in with a 6j0 ID (id_accounts). An
   // account that had only passkeys can't be signed in to any more.
   `DROP TABLE passkeys;`,
 ];

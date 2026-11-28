@@ -1,13 +1,13 @@
-// Bored client-side security: the 6j0.org identity sign-in, the encrypted vault, and the account's keys.
+// Bored client-side security: the 6j0 ID sign-in, the encrypted vault, and the account's keys.
 //
 // Keys
-// - The 6j0.org identity server hands the page this app's 32-byte *app key* (see the handoff below). HKDF turns it
+// - The 6j0.org ID server hands the page this app's 32-byte *app key* (see the handoff below). HKDF turns it
 //   into a key-encryption key that wraps the account's random 256-bit *vault key*. The server stores the wrapped
 //   copy and never sees the app key or the vault key.
 // - The vault key encrypts the *vault* (contacts, your posts, and your requests to join; see below) and your ECDH
 //   P-256 *chat private key*. Your chat public key is stored in the clear so people can seal mail to you.
 // - After sign-in the vault key and chat key are kept in IndexedDB as non-extractable CryptoKeys, so a page
-//   reload doesn't need the identity server again. Signing out deletes them.
+//   reload doesn't need the ID server again. Signing out deletes them.
 // - Each account also has an ECDSA P-256 *signing key*, encrypted with the vault key like the chat key, which signs
 //   public posts and tells people who sent a message when that should be known.
 //
@@ -139,10 +139,10 @@ export async function ensureKeys(api) {
   await saveKeys();
 }
 
-// ---------- 6j0.org identity ----------
+// ---------- 6j0 ID ----------
 // 1. startIdSignIn: make an ephemeral ECDH P-256 key pair and a random nonce, keep them in IndexedDB, and go to
 //    <idOrigin>/authorize?app=<idApp>&nonce=<nonce>&epk=<x>.<y>.
-// 2. The identity server signs the browser in (one passkey for all 6j0.org apps), derives this app's key, encrypts it
+// 2. The ID server signs the browser in (one account key for all 6j0.org apps), derives this app's key, encrypts it
 //    to our public key, and sends the browser back to this app's origin with
 //    #id_token=<signed token>&epk=<its public key>&key=<iv.ciphertext>&state=<nonce>.
 // 3. finishIdSignIn: check the nonce, decrypt the app key, have the server verify the token, then unlock the vault

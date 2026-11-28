@@ -19,8 +19,8 @@ const originOf = (req) => process.env.ORIGIN || `${req.headers['x-forwarded-prot
 const MAX_SEALED = 200 * 1024; // max size of one encrypted blob (vault, key) in characters
 
 // Who signs people in:
-// - AUTH_MODE=6j0 (the only real mode): a 6j0.org identity server at ID_ORIGIN does. The browser comes back with a
-//   signed token and this app's key from that server. ID_APP is this app's name in the identity server's APPS list
+// - AUTH_MODE=6j0 (the only real mode): the 6j0.org ID server at ID_ORIGIN does. The browser comes back with a
+//   signed token and this app's key from that server. ID_APP is this app's name in the ID server's APPS list
 //   (default "bored"). ID_JWKS_URL overrides where its public keys are fetched from (default ID_ORIGIN +
 //   /.well-known/jwks.json), e.g. an in-cluster Service URL.
 // - DEMO=1 makes it "demo": no sign-in at all. Each browser gets its own throwaway account, filled with demo content
@@ -32,7 +32,7 @@ if (AUTH_MODE === 'local') throw new Error("AUTH_MODE=local (Bored's own passkey
 if (!['6j0', 'demo'].includes(AUTH_MODE)) throw new Error(`AUTH_MODE must be "6j0", not "${AUTH_MODE}"`);
 const ID = AUTH_MODE === '6j0' ? (() => {
   const origin = process.env.ID_ORIGIN;
-  if (!origin || new URL(origin).origin !== origin) throw new Error('Bored needs ID_ORIGIN, the 6j0.org identity server, e.g. https://id.6j0.org (or DEMO=1 to try it out)');
+  if (!origin || new URL(origin).origin !== origin) throw new Error('Bored needs ID_ORIGIN, the 6j0.org ID server, e.g. https://id.6j0.org (or DEMO=1 to try it out)');
   return { origin, app: process.env.ID_APP || 'bored', jwksUrl: process.env.ID_JWKS_URL || `${origin}/.well-known/jwks.json` };
 })() : null;
 
@@ -259,7 +259,7 @@ const route = (method, pattern, handler, { auth = true, mode } = {}) => {
 // demo can't turn into an anonymous message board.
 // Developers can reply to and close anyone's feedback and delete anyone's posts, and get a "Developer" badge and
 // label. They're the accounts in DEVELOPER_GUIDS (each account's GUID is at the bottom of its Profile page), plus
-// ADMIN_GUID (an account's GUID, in any mode) and ADMIN_SUB (a 6j0.org identity's sub, with AUTH_MODE=6j0) if set.
+// ADMIN_GUID (an account's GUID, in any mode) and ADMIN_SUB (a 6j0 ID's sub, with AUTH_MODE=6j0) if set.
 const DEVELOPER_GUIDS = [
   '182b0c35-5956-4e64-a881-e852c397c7f5',
 ];
@@ -328,7 +328,7 @@ feedbackRoute('POST', '/status', async ({ user, id, body, res }) => {
 });
 
 // ---------- setup tickets (single use, short-lived, in memory) ----------
-// /api/id/login hands one to a new identity, and /api/id/register takes it back.
+// /api/id/login hands one to a new ID, and /api/id/register takes it back.
 const tickets = new Map(); // ticket (base64url) -> { kind, data, expires }
 const TICKET_TTL_MS = 5 * 60 * 1000;
 function newChallenge(kind, data = {}) {
@@ -352,9 +352,9 @@ const keyBundle = (user, wrappedKey) => ({
   vault: { data: user.vault, version: user.vault_version },
 });
 
-// ---------- 6j0.org identity ----------
+// ---------- 6j0 ID ----------
 // The browser went to ID_ORIGIN/authorize and came back with a signed token plus this app's key, which only the
-// page can decrypt. Known identity: return the key bundle and start a session. New identity: hand out a short-lived
+// page can decrypt. Known ID: return the key bundle and start a session. New ID: hand out a short-lived
 // setup ticket, and the browser creates the vault and chat keys (wrapped under the app key) and calls /api/id/register.
 
 route('GET', '/api/config', async ({ res }) => {
@@ -368,9 +368,9 @@ route('POST', '/api/id/login', async ({ body, res }) => {
   } catch (e) {
     if (e instanceof IdTokenError) throw new HttpError(401, e.message);
     console.error(e);
-    throw new HttpError(502, "Couldn't reach the 6j0.org identity server. Please try again.");
+    throw new HttpError(502, "Couldn't reach the 6j0.org ID server. Please try again.");
   }
-  // saved: false means the identity was made with "Just start" and its account key isn't saved (see /api/me).
+  // saved: false means it's a temporary ID, whose account key isn't saved at the ID server yet (see /api/me).
   const saved = claims.saved === false ? 0 : 1;
   const acct = q('SELECT * FROM id_accounts WHERE sub = ?').get(claims.sub);
   if (!acct) return send(res, 200, { setup: newChallenge('id-setup', { sub: claims.sub, saved }) });
@@ -379,10 +379,10 @@ route('POST', '/api/id/login', async ({ body, res }) => {
   send(res, 200, keyBundle(user, acct.wrapped_key), newSession(res, user.id));
 }, { auth: false, mode: '6j0' });
 
-// An identity made with "Just start" lives only in the browser that made it, until its account key is saved at the
-// identity server. idUnsaved: the page warns on every screen and links to ID_ORIGIN/#save. idRecheck: it's been a
+// A temporary 6j0 ID (from the ID server's temporary-ID button) lives only in the browser that made it, until its account key is saved at the
+// ID server. idUnsaved: the page warns on every screen and links to ID_ORIGIN/#save. idRecheck: it's been a
 // week since sign-in last said so, so the page signs in again (an instant redirect) to notice a save. That also
-// counts as using the identity, which the identity server deletes if unsaved and unused for UNSAVED_TTL_DAYS.
+// counts as using the ID, which the ID server deletes if unsaved and unused for UNSAVED_TTL_DAYS.
 function idUnsaved(user) {
   if (AUTH_MODE !== '6j0') return {};
   const a = q(`SELECT id_saved, checked_at IS NULL OR checked_at < datetime('now', '-7 days') AS stale FROM id_accounts WHERE user_id = ?`).get(user.id);
@@ -399,8 +399,8 @@ route('POST', '/api/id/register', async ({ body, res }) => {
     vault: sealed(body.vault, 'vault'),
   };
   const userId = tx(() => {
-    if (q('SELECT 1 FROM id_accounts WHERE sub = ?').get(data.sub)) throw new HttpError(409, 'This identity already has an account. Please sign in again.');
-    // A fresh public GUID, unrelated to the identity's sub, so other apps' users can't link accounts across apps.
+    if (q('SELECT 1 FROM id_accounts WHERE sub = ?').get(data.sub)) throw new HttpError(409, 'This ID already has an account. Please sign in again.');
+    // A fresh public GUID, unrelated to the ID's sub, so other apps' users can't link accounts across apps.
     const { lastInsertRowid } = q('INSERT INTO users (guid, chat_pubkey, chat_privkey, vault) VALUES (?, ?, ?, ?)')
       .run(randomUUID(), fields.pub, fields.priv, fields.vault);
     q(`INSERT INTO id_accounts (user_id, sub, wrapped_key, id_saved, checked_at) VALUES (?, ?, ?, ?, datetime('now'))`)
@@ -458,7 +458,7 @@ route('POST', '/api/logout', async ({ req, res }) => {
 // writes to, which only its browser knows: its side of every channel (and its main inbox, which the server knows
 // anyway). The server can't check that a channel inbox is the caller's side rather than the other person's, so
 // someone deleting their account could erase the other side of their own chats too; nobody else's.
-// With a 6j0.org identity the account is deleted there instead, with all of that identity's apps, and the identity
+// With a 6j0 ID the account is deleted there instead, with all of that ID's apps, and the ID
 // server tells us (/api/id/deleted, below).
 const MAX_ERASE_INBOXES = 10000;
 // Erases an account: everything above, plus the mail in `inboxes` (inbox IDs).
@@ -473,7 +473,7 @@ function eraseAccount(user, inboxes = new Set()) {
   feedback.eraseUser(user.guid);
 }
 route('POST', '/api/account/delete', async ({ user, body, res }) => {
-  if (ID) throw new HttpError(400, `Your account belongs to your 6j0.org identity: delete it at ${ID.origin}`);
+  if (ID) throw new HttpError(400, `Your account belongs to your 6j0 ID: delete it at ${ID.origin}`);
   if (String(body.confirm || '').trim().toLowerCase() !== user.guid.slice(-4).toLowerCase())
     throw new HttpError(400, "That isn't the end of your Account ID. It's at the bottom of your Profile page.");
   const tokens = Array.isArray(body.inboxes) ? body.inboxes : [];
@@ -482,10 +482,10 @@ route('POST', '/api/account/delete', async ({ user, body, res }) => {
   send(res, 200, { ok: true }, { 'Set-Cookie': 'sid=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0' });
 });
 
-// AUTH_MODE=6j0: the identity server says an identity was deleted ({ token }, a signed deletion notice; see
+// AUTH_MODE=6j0: the ID server says an ID was deleted ({ token }, a signed deletion notice; see
 // idtoken.js), so its account here is erased like above. Without the browser, the server doesn't know the account's
 // channel inboxes, so its side of each chat stays (ciphertext only the other person can read, no longer tied to any
-// account), and posts still on aren't cancelled first. Answers 200 also when there's no such account, so the identity
+// account), and posts still on aren't cancelled first. Answers 200 also when there's no such account, so the ID
 // server stops retrying.
 route('POST', '/api/id/deleted', async ({ body, res }) => {
   try {
@@ -999,7 +999,7 @@ const CSP = `default-src 'self'; script-src 'self' 'sha256-${createHash('sha256'
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   try {
-    // "/" is always the app, which sends anyone not signed in to the identity server (public/app.js). The
+    // "/" is always the app, which sends anyone not signed in to the ID server (public/app.js). The
     // introduction is at "/about". Older links to "/?start" (which used to skip the introduction) still work: the
     // browser keeps the fragment (an invitation) through the redirect.
     if (req.method === 'GET' && url.pathname === '/' && url.searchParams.has('start')) {

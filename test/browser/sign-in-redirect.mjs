@@ -1,5 +1,5 @@
-// Headless Chromium against Bored in 6j0 mode (its own server; the shared one is a demo), with a stand-in identity
-// server that only records where it was sent: anyone not signed in goes straight to the identity server, with a
+// Headless Chromium against Bored in 6j0 mode (its own server; the shared one is a demo), with a stand-in ID
+// server that only records where it was sent: anyone not signed in goes straight to the ID server, with a
 // deep link (?open=…) kept for after; and they get the sign-in page instead when that would go round in circles
 // (just came back without signing in, or sign-in failed) or undo signing out.
 import assert from 'node:assert/strict';
@@ -10,7 +10,7 @@ import { listen, startServer } from '../spawn.mjs';
 
 const idServer = createServer((req, res) => {
   if (req.url.startsWith('/.well-known/')) { res.writeHead(200, { 'Content-Type': 'application/json' }); return res.end('{"keys":[]}'); }
-  res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<p id="stub">identity server</p>');
+  res.writeHead(200, { 'Content-Type': 'text/html' }); res.end('<p id="stub">ID server</p>');
 });
 const ID_ORIGIN = `http://127.0.0.1:${await listen(idServer)}`;
 const { base: BORED, proc: bored, log } = await startServer({ DEMO: '', AUTH_MODE: '6j0', ID_ORIGIN,
@@ -23,7 +23,7 @@ const signInPage = () => B.until(`location.origin === '${BORED}' && !!document.g
 try {
   await B.send('Network.clearBrowserCookies'); // the demo's session cookie (cookies ignore the port)
 
-  // A deep link while signed out: straight to the identity server's /authorize, for this app.
+  // A deep link while signed out: straight to the ID server's /authorize, for this app.
   await open(`${BORED}/?open=profile`);
   await atIdServer();
   const q = new URLSearchParams(await B.ev(`location.search`));
@@ -36,7 +36,7 @@ try {
   await signInPage();
   assert.equal(await B.ev(`document.querySelector('nav.tabs').hidden`), true, 'no tabs');
   assert.equal(await B.ev(`sessionStorage.getItem('pendingOpen')`), 'profile');
-  // Its button goes to the identity server.
+  // Its button goes to the ID server.
   await B.ev(`document.getElementById('idSignIn').click()`);
   await atIdServer();
 
@@ -53,7 +53,7 @@ try {
   await signInPage();
   assert.match(await B.ev(`document.querySelector('.account .lead').textContent`), /signed out/);
 
-  // Otherwise, a plain visit goes straight to the identity server again.
+  // Otherwise, a plain visit goes straight to the ID server again.
   await B.ev(`localStorage.removeItem('bored-signed-out')`);
   await open(`${BORED}/`);
   await atIdServer();

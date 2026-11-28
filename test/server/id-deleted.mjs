@@ -1,6 +1,6 @@
-// AUTH_MODE=6j0: a deleted 6j0.org identity's account is erased when the identity server's signed notice arrives at
+// AUTH_MODE=6j0: a deleted 6j0 ID's account is erased when the ID server's signed notice arrives at
 // /api/id/deleted, and sign-in tokens and deletion notices can't stand in for each other. Runs its own Bored server
-// in 6j0 mode (the shared test server is a demo), against a stand-in identity server that only serves its JWKS.
+// in 6j0 mode (the shared test server is a demo), against a stand-in ID server that only serves its JWKS.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { generateKeyPairSync, generateKeyPair, randomBytes, sign } from 'node:crypto';
@@ -9,7 +9,7 @@ import { join } from 'node:path';
 import { TMP } from '../lib.mjs';
 import { listen, startServer } from '../spawn.mjs';
 
-// The stand-in identity server: an Ed25519 key, and its JWKS.
+// The stand-in ID server: an Ed25519 key, and its JWKS.
 const { privateKey, publicKey } = generateKeyPairSync('ed25519');
 const jwk = publicKey.export({ format: 'jwk' }), kid = 'test-key';
 const idServer = createServer((req, res) => {
@@ -35,7 +35,7 @@ try {
     return { status: r.status, data: await r.json().catch(() => ({})), cookie: (r.headers.get('set-cookie') || '').split(';')[0] };
   };
 
-  // Sign up as identity "sub-1": sign in (no account yet, so a setup challenge), then register.
+  // Sign up as 6j0 ID "sub-1": sign in (no account yet, so a setup challenge), then register.
   const nonce = randomBytes(16).toString('base64url');
   const login = await post('/api/id/login', { token: token({ sub: 'sub-1', nonce }), nonce });
   assert.ok(login.data.setup, login.data.error);
@@ -48,7 +48,7 @@ try {
   assert.equal(me.status, 200, 'signed in');
   assert.equal((await me.json()).idUnsaved, undefined, 'a token without saved counts as saved');
 
-  // An unsaved identity ("Just start" at the identity server): /api/me says so, until a sign-in says it's saved.
+  // A temporary 6j0 ID (not saved at the ID server yet): /api/me says so, until a sign-in says it's saved.
   const meOf = async (cookie) => (await fetch(BASE + '/api/me', { headers: { Cookie: cookie } })).json();
   const nu = randomBytes(16).toString('base64url');
   const loginU = await post('/api/id/login', { token: token({ sub: 'sub-unsaved', nonce: nu, saved: false }), nonce: nu });
@@ -68,7 +68,7 @@ try {
   // Bored's own deletion is refused in 6j0 mode.
   const own = await post('/api/account/delete', { confirm: reg.data.user.guid.slice(-4) }, reg.cookie);
   assert.equal(own.status, 400);
-  assert.match(own.data.error, /6j0\.org identity/);
+  assert.match(own.data.error, /6j0 ID/);
 
   // Sign-in tokens aren't deletion notices, deletion notices aren't sign-in tokens, and the audience must match.
   assert.equal((await post('/api/id/deleted', { token: token({ sub: 'sub-1', nonce }) })).status, 401, 'a sign-in token is no notice');
@@ -78,12 +78,12 @@ try {
   assert.equal((await post('/api/id/deleted', { token: token({ sub: 'sub-1', aud: 'other-app', events: DELETED }) })).status, 401, 'for another app');
   assert.equal((await fetch(BASE + '/api/me', { headers: { Cookie: reg.cookie } })).status, 200, 'still there');
 
-  // The real notice erases the account; replaying it is refused, and a notice for an unknown identity is fine.
+  // The real notice erases the account; replaying it is refused, and a notice for an unknown ID is fine.
   const notice = token({ sub: 'sub-1', events: DELETED });
   assert.deepEqual((await post('/api/id/deleted', { token: notice })).data, { ok: true });
   assert.equal((await fetch(BASE + '/api/me', { headers: { Cookie: reg.cookie } })).status, 401, 'the session is gone');
   assert.equal((await post('/api/id/deleted', { token: notice })).status, 401, 'a notice is used once');
-  assert.equal((await post('/api/id/deleted', { token: token({ sub: 'nobody', events: DELETED }) })).status, 200, 'unknown identities are fine');
+  assert.equal((await post('/api/id/deleted', { token: token({ sub: 'nobody', events: DELETED }) })).status, 200, 'unknown IDs are fine');
   const n3 = randomBytes(16).toString('base64url');
   assert.ok((await post('/api/id/login', { token: token({ sub: 'sub-1', nonce: n3 }), nonce: n3 })).data.setup, 'signing in again starts over');
   console.log('id deleted: ok');

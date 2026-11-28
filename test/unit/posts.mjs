@@ -1,14 +1,14 @@
 import assert from 'node:assert/strict';
-import { derive, replayChannel, orderChannel, nextMessage } from '../../public/posts.js';
+import { derive, replayChannel, orderChannel, nextMessage, MAX_GUESTS_LIMIT, MAX_GUEST_NAME } from '../../public/posts.js';
 
 const HOST = { x: 'hx', y: 'hy' }, GUEST = { x: 'gx', y: 'gy' }, OTHER = { x: 'ox', y: 'oy' };
 const post = (pid, v, extra = {}) => ({ pid, v, kind: 'public', status: 'open', title: pid, max_attendees: null, ...extra });
 let clock = 1;
 // A channel both sides append to, through nextMessage (as the app will).
-function channel(pid, note = '') {
+function channel(pid, note = '', joinExtra = {}) {
   const msgs = [];
   const send = (role, fields) => { const m = { ...nextMessage(msgs, role, fields), at: clock++ }; msgs.push(m); return m; };
-  send('attendee', { type: 'join', pid, note });
+  send('attendee', { type: 'join', pid, note, ...joinExtra });
   return { msgs, send, state: () => replayChannel(msgs) };
 }
 const ID = (id) => ({ guid: id, chat: { x: id }, sign: { x: id }, inbox: id + '-inbox' });
@@ -277,5 +277,62 @@ for (const before of ['accepted', 'waitlisted', 'pending']) {
   c.send('host', { type: 'happened' });
   c.send('host', { type: 'cancel' });
   assert.equal(c.state().status, 'attended', "something that happened can't be cancelled");
+}
+// Guests: who someone brings comes with the join and can change while they're pending, waitlisted, or in. Each guest
+// takes a spot, the post's max_guests caps how many count, and the host's own placeholders (hostGuests) take spots too.
+{
+  // Cleaning: names trimmed and cut short, anything not a string unnamed, and at most MAX_GUESTS_LIMIT.
+  const c = channel('g', '', { guests: [' Sam ', 7, 'x'.repeat(100), ...Array(20).fill('')] });
+  const g = c.state().guests;
+  assert.equal(g.length, MAX_GUESTS_LIMIT);
+  assert.deepEqual(g.slice(0, 3), ['Sam', '', 'x'.repeat(MAX_GUEST_NAME)]);
+  c.send('attendee', { type: 'guests', guests: ['Alex'] });
+  assert.deepEqual(c.state().guests, ['Alex'], 'changed while pending');
+  c.send('host', { type: 'answer', status: 'accepted' });
+  c.send('attendee', { type: 'guests', guests: [] });
+  assert.deepEqual(c.state().guests, []);
+  assert.deepEqual(c.state().timeline.map(t => [t.event, t.count]), [['guests', 0]], 'a change once in shows in the chat');
+  c.send('host', { type: 'guests', guests: ['nope'] });
+  assert.deepEqual(c.state().guests, [], "only the attendee says who they're bringing");
+  c.send('host', { type: 'happened' });
+  c.send('attendee', { type: 'guests', guests: ['late'] });
+  assert.deepEqual(c.state().guests, [], 'not after it happened');
+}
+{
+  const p = post('party', 1, { max_attendees: 5, max_guests: 2 });
+  const chans = [];
+  const join = (opened, guests) => { const c = channel('party', '', { guests }); chans.push({ id: 'ch' + opened, role: 'host', opened, c }); return c; };
+  const a = join(1, ['Sam', '', 'too many']), b = join(2, ['', '']), c = join(3, []);
+  let hostGuests = {};
+  const run = () => derive({ me: { sign: HOST }, posts: [{ post: p, signer: HOST }], channels: chans.map(x => ({ ...x, messages: x.c.msgs })), hostGuests });
+  let r = run();
+  assert.deepEqual(r.hosting[0].requests[0].guests, ['Sam', ''], 'capped at max_guests');
+  a.send('host', { type: 'answer', status: 'accepted' });
+  r = run();
+  assert.equal(r.hosting[0].counts.people, 3, 'a and two guests');
+  assert.equal(r.hosting[0].status, 'open');
+  // The host adds one of their own: 4 of 5. b (3 people) doesn't fit, so b waits; c (1) fills the last spot.
+  hostGuests = { party: 1 };
+  b.send('host', { type: 'answer', status: 'waitlisted' });
+  c.send('host', { type: 'answer', status: 'waitlisted' });
+  r = run();
+  assert.deepEqual(r.todo, [{ type: 'promote', ch: 'ch3', pid: 'party' }, { type: 'status', pid: 'party', status: 'full' }],
+    "a group that doesn't fit lets a smaller one behind it in");
+  c.send('host', { type: 'answer', status: 'accepted' });
+  p.status = 'full';
+  r = run();
+  assert.deepEqual(r.hosting[0].counts, { pending: 0, accepted: 2, attended: 0, waitlisted: 1, reconfirm: 0, people: 5, hostGuests: 1 });
+  assert.deepEqual(r.todo, []);
+  // a stops bringing guests: 2 spots open, still not enough for b's group of 3, so the post is open again.
+  a.send('attendee', { type: 'guests', guests: [] });
+  r = run();
+  assert.deepEqual(r.todo, [{ type: 'status', pid: 'party', status: 'open' }]);
+  // b drops a guest while waitlisted: 2 fit, so they're in.
+  b.send('attendee', { type: 'guests', guests: ['Kim'] });
+  r = run();
+  assert.deepEqual(r.todo, [{ type: 'promote', ch: 'ch2', pid: 'party' }]);
+  // The host lowers max_guests to 0: b's guests stop counting.
+  p.max_guests = 0;
+  assert.deepEqual(run().hosting[0].requests.find(x => x.id === 'ch2').guests, []);
 }
 console.log('posts.js: all scripted sequences pass');

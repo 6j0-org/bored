@@ -26,7 +26,7 @@ import {
   vault, hasKeys, myPublicKeys, signRecord, openRecord, sealTo, openSealed, channelOf, sealChannel, openChannel, inboxIdOf,
   sign, verify, b64u, helloText,
 } from './secure.js';
-import { derive, nextMessage, LIVE } from './posts.js';
+import { derive, nextMessage, LIVE, cleanGuests, guestsFor, MAX_GUEST_NAME } from './posts.js';
 import { changedFields } from './postfields.js';
 
 let api = null;
@@ -217,6 +217,7 @@ function replay() {
     passed: hasKeys() ? vault.data.passed || [] : [],
     passedAt: hasKeys() ? vault.data.passedAt || {} : {},
     deleted: hasKeys() ? vault.data.deleted || [] : [],
+    hostGuests: hasKeys() ? Object.fromEntries(Object.entries(vault.data.posts || {}).map(([pid, p]) => [pid, (p.guests || []).length])) : {},
   });
 }
 
@@ -301,11 +302,13 @@ export function hostContact(post) {
 
 // Ask to join a post. The channel secret goes into my vault before anything is sent, so it can't be lost.
 // To a contact, the request says who it's from (signed), so they see my name; to anyone else it's anonymous.
-// interest: how interested I am, 0 to 5 stars, or null for no answer. Like the note, only the host sees it.
-export async function requestJoin(post, note = '', interest = null) {
+// interest: how interested I am, 0 to 5 stars, or null for no answer. guests: who I'm bringing, a name or '' each
+// (up to the post's max_guests). Like the note, only the host sees them.
+export async function requestJoin(post, note = '', interest = null, guests = []) {
   if (!post.reply?.chat || !post.reply?.inbox) throw new Error("This post can't take requests.");
+  guests = guestsFor({ guests: cleanGuests(guests) }, post);
   const join = nextMessage([], 'attendee', { type: 'join', pid: post.pid, note: String(note).slice(0, 280),
-    ...(Number.isInteger(interest) && interest >= 0 && interest <= 5 ? { interest } : {}) });
+    ...(Number.isInteger(interest) && interest >= 0 && interest <= 5 ? { interest } : {}), ...(guests.length ? { guests } : {}) });
   const { body, channel } = await sealTo(post.reply.chat, post.reply.inbox, join, { identify: Boolean(hostContact(post)) });
   await vault.update(api, (d) => { d.requests ||= {}; d.requests[channel] = { pid: post.pid, join, reply: post.reply, at: join.at }; });
   try { await postMail([{ inbox: post.reply.inbox, body }]); }
@@ -314,6 +317,20 @@ export async function requestJoin(post, note = '', interest = null) {
   view = replay();
   return channel;
 }
+
+// Change who I'm bringing to a post I've asked to join (pending, waitlisted, or in).
+export const setGuests = (ch, guests) => sendOn(ch, { type: 'guests', guests: cleanGuests(guests) });
+
+// People I've added to one of my posts myself, who aren't on Bored: [{ id, name }], kept only in my vault, so only I
+// see them. They take spots like anyone else (derive's hostGuests), so the post fills up and shows as full.
+export async function setHostGuests(pid, guests) {
+  await vault.update(api, (d) => {
+    if (!d.posts?.[pid]) throw new Error("That post isn't yours");
+    d.posts[pid].guests = guests.map(g => ({ id: String(g.id), name: String(g.name || '').trim().slice(0, MAX_GUEST_NAME) }));
+  });
+  view = replay();
+}
+export const hostGuestsOf = (pid) => (hasKeys() && vault.data.posts?.[pid]?.guests) || [];
 
 // Invitations to connect mailed to me that I haven't answered yet, and marking one answered.
 export const invitesForMe = () => {
@@ -386,7 +403,7 @@ export async function savePost({ pid, kind, fields, audience, guids = [], status
   const removed = (prev?.sharedWith || []).filter(g => !reach.includes(g));
   await vault.update(api, (d) => {
     d.posts ||= {};
-    d.posts[post.pid] = { record, audience: kind === 'public' ? null : audience || d.posts[post.pid]?.audience || { groups: [], contacts: [] }, sharedWith: reach };
+    d.posts[post.pid] = { ...d.posts[post.pid], record, audience: kind === 'public' ? null : audience || d.posts[post.pid]?.audience || { groups: [], contacts: [] }, sharedWith: reach };
   });
   const items = [];
   for (const g of reach) items.push({ inbox: keys[g].inbox, body: (await sealTo(keys[g].chat, keys[g].inbox, { type: 'share', record }, { identify: true })).body });

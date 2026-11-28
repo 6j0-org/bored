@@ -3,6 +3,8 @@
 // uses for the posts it still stores (eventFields in server.js).
 import { composeWhen, composeEnd } from './when.js';
 import { parseCost } from './cost.js';
+import { MAX_GUESTS_LIMIT } from './posts.js';
+export { MAX_GUESTS_LIMIT };
 
 export const MAX_TAGS = 5, MAX_ATTENDEES_LIMIT = 500; // the same as db.js
 const MAX_TAG_LENGTH = 24;
@@ -41,6 +43,14 @@ function maxAttendees(v, min = 1) {
   return n;
 }
 
+// How many guests each person who asks can bring: blank or 0 for none.
+function maxGuests(v) {
+  if (v === undefined || v === null || String(v).trim() === '') return 0;
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 0 || n > MAX_GUESTS_LIMIT) fail(`Guests each person can bring must be a whole number from 0 to ${MAX_GUESTS_LIMIT}`);
+  return n;
+}
+
 // Post form values → the post's fields, or throws an Error saying what's wrong. matched: people already in, the
 // lowest max attendees allowed. The personal info check (public/pii.js, with its phone number data) loads when needed.
 export async function postFields(body, { matched = 0 } = {}) {
@@ -59,6 +69,7 @@ export async function postFields(body, { matched = 0 } = {}) {
     online: [1, 2].includes(Number(body.online)) ? Number(body.online) : 0, // 0 in person, 1 online, 2 both
     when_text: when(body.when_text, body.when_repeat),
     max_attendees: maxAttendees(body.max_attendees, Math.max(1, matched)),
+    max_guests: maxGuests(body.max_guests),
   };
   f.end_text = composeEnd(f.when_text, str(body.end_text, 100, 'Ends')); // optional: '' for none
   if (f.online === 1) { f.location = ''; f.location_name = ''; } // an online-only post has no place
@@ -71,8 +82,9 @@ export async function postFields(body, { matched = 0 } = {}) {
 }
 
 // What attendees are asked to re-confirm after: the fields that changed, by key, with labels to show.
-export const FIELD_LABELS = { title: 'Title', details: 'Details', tags: 'Tags', location: 'Where', when_text: 'When', cost: 'Cost', max_attendees: 'Max attendees' };
+export const FIELD_LABELS = { title: 'Title', details: 'Details', tags: 'Tags', location: 'Where', when_text: 'When', cost: 'Cost', max_attendees: 'Max attendees', max_guests: 'Guests allowed' };
 const fieldValue = (p, k) => k === 'cost' ? [p.cost_amount, p.cost_currency]
+  : k === 'max_guests' ? Number(p.max_guests) || 0 // posts from before guests have none
   : k === 'when_text' ? [p.when_text, p.end_text || ''] // posts from before end times have none
   : k === 'location' ? [p.location, p.location_name, p.online] : p[k];
 export const changedFields = (before, after) =>

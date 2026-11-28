@@ -8,10 +8,10 @@ import { mountFeedback } from './feedback.js';
 import { parseWhen, parseEnd, shiftEnd, repeatOptions, whenLabel as fmtWhen, localToday, occursBetween, sunsetAt } from './when.js';
 import {
   initMail, resetMail, loadMail, mailView, requestJoin, sendOn, pass, unpass, deletePassed, savePost, setPostStatus, reshare,
-  invitesForMe, answerInvite, sendInvite, declinedInvites, keysFor, myInboxTokens,
+  invitesForMe, answerInvite, sendInvite, declinedInvites, keysFor, myInboxTokens, setGuests, setHostGuests, hostGuestsOf,
 } from './mail.js';
-import { LIVE } from './posts.js';
-import { postFields, FIELD_LABELS } from './postfields.js';
+import { LIVE, MAX_GUEST_NAME } from './posts.js';
+import { postFields, FIELD_LABELS, MAX_GUESTS_LIMIT } from './postfields.js';
 import { CURRENCIES, DEFAULT_CURRENCY, costLabel } from './cost.js';
 import { toSvg as identicon } from './vendor/jdenticon.js';
 import { addToCalendar } from './ics.js';
@@ -423,14 +423,48 @@ function createInvite() {
   };
   sheet.querySelector('input').focus();
 }
-async function shareInvite(entry) {
-  const url = inviteLink(entry);
+const shareInvite = (entry) => shareLink({ url: inviteLink(entry), title: 'Connect with me on Bored',
+  text: "Here's a link to connect with me on Bored:", copied: 'Invitation link copied. Paste it to whoever you want to connect with.',
+  ask: 'Copy this invitation link:' });
+// The device's share menu where there is one, else the clipboard, else a box to copy it from.
+async function shareLink({ url, title, text, copied, ask }) {
   if (navigator.share) {
-    try { await navigator.share({ title: 'Connect with me on Bored', text: "Here's a link to connect with me on Bored:", url }); return; }
+    try { await navigator.share({ title, text, url }); return; }
     catch (e) { if (e.name === 'AbortError') return; }
   }
-  try { await navigator.clipboard.writeText(url); toast('Invitation link copied. Paste it to whoever you want to connect with.'); }
-  catch { prompt('Copy this invitation link:', url); }
+  try { await navigator.clipboard.writeText(url); toast(copied); }
+  catch { prompt(ask, url); }
+}
+
+// ---------- links to public posts ----------
+// ${origin}/?post=<pid>. Public posts are readable by everyone signed in, so the link is just the post's ID. Opening
+// it (through sign-in if need be: it becomes PENDING_OPEN "post:<pid>") shows that post first in Discover, whatever
+// the search and filters say (focusPostIn). Private posts have no link: only the people they're shared with can read them.
+const PID_RE = /^[A-Za-z0-9_-]{16,43}$/;
+const postLink = (pid) => `${location.origin}/?${new URLSearchParams({ post: pid })}`;
+function sharePost(pid) {
+  const v = mailView(), p = v?.posts?.get(pid);
+  return shareLink({ url: postLink(pid), title: p?.title || 'Bored', text: p?.title ? `${p.title}, on Bored:` : 'A post on Bored:',
+    copied: 'Link copied. Anyone signed in to Bored can open it.', ask: 'Copy this link to the post:' });
+}
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-share-post]');
+  if (b) sharePost(b.dataset.sharePost);
+});
+// Opening a post's link in Discover: the pid to put first if it's in the deck, otherwise null, with a toast saying
+// why it isn't (own post, ended, hidden by moderation, or already swiped).
+function focusPostIn(mail, pid, hidden) {
+  const p = mail?.posts?.get(pid);
+  const why = !p ? "That post has ended or was removed, or the link isn't right."
+    : (mail.hosting || []).some(h => h.post.pid === pid) ? "That's your own post. It's in Post."
+    : !LIVE.includes(p.status) ? `“${p.title}” ${p.status === 'cancelled' ? 'was called off' : 'has already happened'}.`
+    : hidden.has(pid) ? `“${p.title}” is hidden by your moderation settings.`
+    : (mail.swiped || []).some(x => x.pid === pid && x.swipe === 'in') ? `You've already asked to join “${p.title}”. It's in your discard pile.`
+    : (mail.swiped || []).some(x => x.pid === pid) ? `You passed on “${p.title}”. It's in your discard pile, to change your mind.`
+    : !(mail.deck || []).some(x => x.pid === pid) ? `You've already asked to join “${p.title}”. See Plans.`
+    : '';
+  if (why) toast(why);
+  return why ? null : pid;
 }
 // Someone opened an invitation link: once they're signed in, show who it's from and ask before connecting.
 const PENDING_INVITE = 'pendingInvite';
@@ -1210,9 +1244,11 @@ async function syncPush() {
   const sub = await pushSubscription().catch(() => null);
   if (sub) api('/api/push/subscribe', { method: 'POST', body: sub.toJSON() }).catch(() => {});
 }
-// Go where a tapped notification says: 'confirm', 'plans', 'profile', 'discover', 'feedback' (also the About page's
-// Feedback button), 'feedback:<id>' (that post's chat), or 'mail' (see mailDestination).
+// Go where a tapped notification or a link says: 'confirm', 'plans', 'profile', 'discover', 'feedback' (also the
+// About page's Feedback button), 'feedback:<id>' (that post's chat), 'mail' (see mailDestination), or 'post:<pid>'
+// (a link to a public post, see postLink).
 function openScreen(open) {
+  if (open?.startsWith('post:') && signedIn()) { state.focusPost = open.slice(5); state.tab = 'discover'; state.chat = null; return render(); }
   if (open === 'feedback') return openFeedback();
   if (open?.startsWith('feedback:')) { state.feedbackThread = open.slice(9); return openFeedback(); }
   if (open === 'mail') return openMail();
@@ -1485,6 +1521,8 @@ function eventCard(t, { who = null, mine = false } = {}) {
   if (!mine) t = { ...t, title: clean(t.title), details: clean(t.details), location_name: clean(t.location_name), tags: t.tags.map(clean) };
   const report = !mine && who === null && t.post?.pid && state.me && hasKeys()
     ? `<button type="button" class="link report-link" data-report="${esc(t.post.pid)}">Report or block</button>` : '';
+  const share = !mine && who === null && t.visibility === 'public' && t.post?.pid
+    ? `<button type="button" class="link share-link" data-share-post="${esc(t.post.pid)}">Share</button>` : '';
   return `
     <div class="body">
       <h2>${esc(t.title)}</h2>
@@ -1494,12 +1532,13 @@ function eventCard(t, { who = null, mine = false } = {}) {
         ${whereHtml(t) ? fact('Where', whereHtml(t)) : ''}
         ${fact('Cost', esc(costLabel(t.cost_amount, t.cost_currency)))}
         ${fact('Max attendees', attendeesLabel(t.max_attendees))}
+        ${t.max_guests > 0 ? fact('Guests', `Up to ${t.max_guests} each`) : ''}
         ${t.tags.length ? fact('Tags', t.tags.map(x => '#' + esc(x)).join(' ')) : ''}
       </dl>
       ${t.details ? `<div class="details">${linkify(t.details)}</div>` : ''}
       ${starred}
       <div class="who">${who ?? `${personAvatar(t.host.guid, '', { pid: t.post?.pid, icon: t.host.icon })}
-        <div>${contactName(t.host.guid) ? `<b>${esc(contactName(t.host.guid))}</b>` : ''}</div>${report}`}
+        <div>${contactName(t.host.guid) ? `<b>${esc(contactName(t.host.guid))}</b>` : ''}</div>${share || report ? `<span class="card-links">${share}${report}</span>` : ''}`}
       </div>
     </div>`;
 }
@@ -1557,6 +1596,9 @@ async function viewDiscover(v) {
   const modNote = v.querySelector('#modNote');
   let options = { tags: [], costs: [], dates: [] }, events = [], deck = null;
   let hidden = new Map(); // posts my moderation settings hide, from the deck and the discard pile (moderatePosts)
+  // A post's link was opened (state.focusPost): checked once the posts are in, then that card stays first until swiped.
+  let focusAsked = state.focusPost || null, focusPid = null;
+  state.focusPost = null;
 
   // All the filters sit in one panel that opens and closes; its heading says how many are on.
   function drawFilters() {
@@ -1608,6 +1650,7 @@ async function viewDiscover(v) {
     modNote.innerHTML = `${hidden.size === 1 ? '1 post is' : `${hidden.size} posts are`} hidden by your moderation settings.
       <button type="button" class="link" data-mod-settings>Change them</button>`;
     allPosts = posts; swiped.clear();
+    if (focusAsked) { focusPid = focusPostIn(mail, focusAsked, hidden); focusAsked = null; }
     apply({ soft });
     if (!pile?.busy()) drawPile();
   }
@@ -1618,7 +1661,10 @@ async function viewDiscover(v) {
   function apply({ soft = false } = {}) {
     const near = state.discoverNear, words = searchWords(searchQuery());
     const found = allPosts.filter(p => !swiped.has(p.pid) && postMatchesSearch(p, words));
-    events = found.filter(mailPostMatches).map(mailCard);
+    events = found.filter(mailPostMatches);
+    const focus = focusPid && !swiped.has(focusPid) && allPosts.find(p => p.pid === focusPid);
+    if (focus) events = [focus, ...events.filter(p => p.pid !== focusPid)];
+    events = events.map(mailCard);
     const before = JSON.stringify(options);
     options = postCounts(found);
     if (!soft || JSON.stringify(options) !== before) drawFilters();
@@ -1653,7 +1699,7 @@ async function viewDiscover(v) {
     if (yes) {
       const ask = await askJoin(p);
       if (!ask) return; // cancelled: nothing changes
-      await requestJoin(p, ask.note, ask.interest);
+      await requestJoin(p, ask.note, ask.interest, ask.guests);
       await unpass(p.pid);
       toast(p.status === 'full' ? `Asked to join the waitlist for “${p.title}”` : `Asked to join “${p.title}”! You'll match if the host swipes yes too.`);
       return;
@@ -1737,9 +1783,11 @@ const INTEREST_LABELS = ['Just curious', 'A little interested', 'Somewhat intere
 const starsText = (n) => '★'.repeat(n) + '☆'.repeat(5 - n);
 // The optional extras when asking to join: how interested (0 to 5 stars, or not rated) and a note for the host. On
 // the back of a Discover card (mountDeck's back), and in askJoin's dialog for a card in the discard pile.
-// intro: the sentence at the top, saying both are optional and how to skip them; rows: the note box's height.
-const joinExtrasHtml = (intro, rows = 3) => `
+// intro: the sentence at the top, saying both are optional and how to skip them; rows: the note box's height; post:
+// the post, for who they can bring (guestsPickHtml, when its max_guests is more than 0).
+const joinExtrasHtml = (intro, rows = 3, post = null) => `
   <p class="join-intro">${intro}</p>
+  ${guestsPickHtml(post?.max_guests)}
   <fieldset class="interest">
     <legend>How interested are you?</legend>
     <div class="interest-picks" role="radiogroup" aria-label="How interested are you, 0 to 5 stars">
@@ -1770,16 +1818,126 @@ function mountJoinExtras(root) {
   };
   root.querySelectorAll('[data-interest]').forEach(b => b.onclick = () => pick(Number(b.dataset.interest)));
   box.addEventListener('input', () => { count.textContent = `${box.value.length} / ${MAX_JOIN_NOTE}`; });
-  return () => ({ note: box.value.trim(), interest });
+  const guests = mountGuestsPick(root);
+  return () => ({ note: box.value.trim(), interest, guests: guests() });
+}
+
+// ---------- guests ----------
+// Someone who asks to join can bring guests, up to the post's max_guests: a count, with a name for each if they like
+// (only the host sees them). They can change it later from Plans (changeGuests). Hosts can also add people who aren't
+// on Bored to their own posts (editHostGuests). Everyone takes a spot: max attendees counts guests too.
+// "Sam, Alex, and 2 unnamed guests"; '' for nobody.
+function guestsText(guests = []) {
+  const named = guests.filter(Boolean).map(n => clean(n)), unnamed = guests.length - named.length;
+  const parts = [...named, ...(unnamed ? [`${unnamed} unnamed guest${unnamed === 1 ? '' : 's'}`] : [])];
+  return parts.length < 3 ? parts.join(' and ') : `${parts.slice(0, -1).join(', ')}, and ${parts.at(-1)}`;
+}
+// The guest picker: a count from 0 to max, and an optional name for each. Nothing when max is 0.
+const guestsPickHtml = (max, guests = []) => !(max > 0) ? '' : `
+  <fieldset class="guests-pick" data-max="${max}">
+    <legend>Bringing anyone?</legend>
+    <div class="guest-count">
+      <button type="button" class="btn ghost small" data-guests-less aria-label="One fewer guest">−</button>
+      <output class="guest-n" aria-live="polite">${Math.min(guests.length, max)}</output>
+      <button type="button" class="btn ghost small" data-guests-more aria-label="One more guest">+</button>
+      <span class="note">up to ${max}</span>
+    </div>
+    <div class="guest-names stack">${guests.slice(0, max).map(guestNameInput).join('')}</div>
+    <p class="note">Names are optional. Only the host sees them.</p>
+  </fieldset>`;
+const guestNameInput = (name = '', i = 0) => `<input class="guest-name" maxlength="${MAX_GUEST_NAME}" autocomplete="off"
+  placeholder="Guest's name (optional)" aria-label="Guest ${i + 1}'s name (optional)" value="${esc(name)}">`;
+// Wires up guestsPickHtml inside root; returns read() → the guests' names ('' for unnamed). [] if there's no picker.
+function mountGuestsPick(root) {
+  const pick = root.querySelector('.guests-pick');
+  if (!pick) return () => [];
+  const max = Number(pick.dataset.max), names = pick.querySelector('.guest-names'), n = pick.querySelector('.guest-n');
+  const set = (count) => {
+    count = Math.max(0, Math.min(max, count));
+    while (names.children.length < count) names.insertAdjacentHTML('beforeend', guestNameInput('', names.children.length));
+    while (names.children.length > count) names.lastElementChild.remove();
+    n.textContent = count;
+  };
+  pick.querySelector('[data-guests-less]').onclick = () => set(names.children.length - 1);
+  pick.querySelector('[data-guests-more]').onclick = () => set(names.children.length + 1);
+  return () => [...names.querySelectorAll('.guest-name')].map(i => i.value.trim());
+}
+// Change who I'm bringing to a post I've asked to join (from Plans).
+function changeGuests(ch, post, guests) {
+  const { sheet, close } = openSheet(`
+    <form class="stack panel">
+      <h2>Your guests</h2>
+      <p><b>${esc(post.title)}</b></p>
+      ${guestsPickHtml(post.max_guests, guests)}
+      <div class="two">
+        <button type="button" class="btn ghost" data-cancel>Cancel</button>
+        <button class="btn">Save</button>
+      </div>
+    </form>`);
+  const read = mountGuestsPick(sheet);
+  sheet.querySelector('[data-cancel]').onclick = close;
+  sheet.querySelector('form').onsubmit = async (e) => {
+    e.preventDefault();
+    try { await setGuests(ch, read()); close(); toast('Guests updated. The host sees the change.'); render(); }
+    catch (err) { toast(err.message); }
+  };
+}
+// The people I've added to one of my posts myself, who aren't on Bored: a nickname each, to keep count.
+function editHostGuests(pid) {
+  const post = mailView()?.posts?.get(pid);
+  let list = hostGuestsOf(pid).map(g => ({ ...g }));
+  const { sheet, close } = openSheet(`
+    <form class="stack panel">
+      <h2>Guests you added</h2>
+      <p><b>${esc(post?.title || '')}</b></p>
+      <p class="note">People coming who aren't on Bored. Only you see them; they take spots like anyone else.</p>
+      <div class="list" data-host-guests></div>
+      <label>Nickname
+        <input name="name" maxlength="${MAX_GUEST_NAME}" autocomplete="off" placeholder="e.g. Sam's cousin"></label>
+      <button type="button" class="btn ghost" data-add>Add</button>
+      <div class="two">
+        <button type="button" class="btn ghost" data-cancel>Cancel</button>
+        <button class="btn">Save</button>
+      </div>
+    </form>`);
+  const listEl = sheet.querySelector('[data-host-guests]'), input = sheet.querySelector('input[name=name]');
+  const draw = () => {
+    listEl.innerHTML = list.length ? list.map(g => `<div class="row"><div class="grow"><div class="title">${esc(g.name)}</div></div>
+      <button type="button" class="btn small" data-rm="${esc(g.id)}" aria-label="Remove ${esc(g.name)}">✕</button></div>`).join('')
+      : '<p class="note">Nobody yet.</p>';
+    listEl.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => { list = list.filter(g => g.id !== b.dataset.rm); draw(); });
+  };
+  const add = () => {
+    const name = input.value.trim();
+    if (!name) return input.focus();
+    list.push({ id: Array.from(crypto.getRandomValues(new Uint8Array(8)), b => b.toString(16).padStart(2, '0')).join(''), name });
+    input.value = ''; input.focus(); draw();
+  };
+  sheet.querySelector('[data-add]').onclick = add;
+  input.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } });
+  sheet.querySelector('[data-cancel]').onclick = close;
+  sheet.querySelector('form').onsubmit = async (e) => {
+    e.preventDefault();
+    if (input.value.trim()) add(); // typed but not added yet
+    try {
+      await setHostGuests(pid, list);
+      close(); toast('Guests saved');
+      await loadMail().catch(() => {}); // the post may be full now: that goes out to everyone who can see it
+      render();
+    } catch (err) { toast(err.message); }
+  };
+  draw();
+  input.focus();
 }
 function askJoin(t) {
+  const post = t.post || t;
   return new Promise((resolve) => {
     const done = (v) => { close(); resolve(v); };
     const { sheet, close } = openSheet(`
       <form class="stack panel">
         <h2>Ask to join</h2>
         <p><b>${esc(t.title)}</b></p>
-        ${joinExtrasHtml('These are optional. Leave them blank to just send your request.')}
+        ${joinExtrasHtml('These are optional. Leave them blank to just send your request.', 3, post)}
         <div class="two">
           <button type="button" class="btn ghost" data-cancel>Cancel</button>
           <button class="btn">Send request</button>
@@ -1804,7 +1962,7 @@ function deckOptions(events, changed, filters) {
       render: (t) => `<div class="body join-back">
         <h2>Ask to join</h2>
         <p class="join-title"><b>${esc(t.title)}</b></p>
-        ${joinExtrasHtml('These are optional. Swipe right again to skip them and send your request.', 2)}</div>`,
+        ${joinExtrasHtml('These are optional. Swipe right again to skip them and send your request.', 2, t.post)}</div>`,
       mount: mountJoinExtras,
     },
     onSwipe: async (t, yes, extra = {}) => {
@@ -1812,7 +1970,7 @@ function deckOptions(events, changed, filters) {
       // From the card's back: how interested they are and a note for the host (both optional).
       const ask = extra.back || await askJoin(t);
       if (!ask) return KEEP_CARD;
-      t.ch = await requestJoin(t.post, ask.note, ask.interest);
+      t.ch = await requestJoin(t.post, ask.note, ask.interest, ask.guests);
       changed();
       toast(t.status === 'full'
         ? `Asked to join the waitlist for “${t.title}”. If the host says yes, you'll get the next open spot.`
@@ -1854,13 +2012,18 @@ function connectCard(c, nickname) {
 function mailRequests(view) {
   return (view?.hosting || []).filter(h => LIVE.includes(h.post.status)).flatMap(h => h.requests
     .filter(r => r.status === 'pending')
-    .map(r => ({ kind: 'mail', id: `m:${r.id}`, ch: r.id, from: r.from, pid: h.post.pid, title: h.post.title, note: r.note, interest: r.interest, full: h.status === 'full' })));
+    .map(r => ({ kind: 'mail', id: `m:${r.id}`, ch: r.id, from: r.from, pid: h.post.pid, title: h.post.title, note: r.note, interest: r.interest,
+      guests: r.guests, full: !roomFor(h, r) })));
 }
-// A yes on a full post puts them on the waitlist, as the server does for the posts it stores.
-function mailAnswer(view, pid) {
-  const h = view?.hosting.find(x => x.post.pid === pid);
+// Whether there's room for a request (the person and their guests) in one of my posts.
+function roomFor(h, r) {
   const max = h?.post.max_attendees ?? null;
-  return max !== null && h.counts.accepted + h.counts.attended >= max ? 'waitlisted' : 'accepted';
+  return max === null || h.counts.people + 1 + (r?.guests?.length || 0) <= max;
+}
+// A yes on a post without room for them (and their guests) puts them on the waitlist.
+function mailAnswer(view, pid, ch) {
+  const h = view?.hosting.find(x => x.post.pid === pid);
+  return roomFor(h, h?.requests.find(r => r.id === ch)) ? 'accepted' : 'waitlisted';
 }
 // A contact who asked says who they are (checked when the mail is read), so they show by the nickname I gave them.
 const mailRequestCard = (o) => {
@@ -1871,8 +2034,9 @@ const mailRequestCard = (o) => {
         <div class="meta"><span class="chip">Wants to join: <b>${esc(o.title)}</b></span></div>
         ${known ? `<h2>${esc(displayName(o.from) || 'One of your contacts')}</h2>` : ''}
         ${o.interest != null ? `<p class="interest-shown" aria-label="${o.interest} of 5 stars: ${esc(INTEREST_LABELS[o.interest])}"><span class="stars" aria-hidden="true">${starsText(o.interest)}</span> ${esc(INTEREST_LABELS[o.interest])}</p>` : ''}
+        ${o.guests?.length ? `<p class="guests-shown">Bringing ${esc(guestsText(o.guests))}</p>` : ''}
         ${o.note ? `<div class="details">“${esc(clean(o.note))}”</div>` : ''}
-        ${o.full ? `<p class="note">This post is full, so saying yes puts them on the waitlist. They'll be matched automatically when a spot opens.</p>` : ''}
+        ${o.full ? `<p class="note">There isn't room for ${o.guests?.length ? 'them and their guests' : 'them'}, so saying yes puts them on the waitlist. They'll be matched automatically when ${o.guests?.length ? 'enough spots open' : 'a spot opens'}.</p>` : ''}
         <p class="note">${known ? "One of your contacts." : "Someone you don't know yet: you'll see who it is once you say yes."}</p>
       </div>`;
 };
@@ -1968,7 +2132,7 @@ async function viewConfirm(v) {
   const renderCard = (o) => o.kind === 'connect' ? connectCard(o, nicknames.get(String(o.id))) : o.kind === 'invite' ? inviteCard(o) : mailRequestCard(o);
   // Answer a request to join, and say what happened.
   const answerJoin = async (o, yes) => {
-    const status = yes ? mailAnswer(mailView(), o.pid) : 'declined';
+    const status = yes ? mailAnswer(mailView(), o.pid, o.ch) : 'declined';
     await sendOn(o.ch, { type: 'answer', status });
     if (status === 'accepted') showMatch(o.from && isContact(o.from) ? o.from : null, o.title, `m:${o.ch}`);
     else if (status === 'waitlisted') toast(`Added them to the waitlist for “${o.title}”`);
@@ -2121,9 +2285,15 @@ async function viewPlans(v) {
     : m.status === 'called-off' ? ['pass', 'Cancelled']
     : m.reconfirm ? ['warn', m.role === 'attendee' ? 'Re-confirm?' : 'Awaiting OK']
     : ['in', "It's on"];
+  const guestsLine = (m) => m.state.guests?.length
+    ? `<small class="guests-shown">${m.role === 'attendee' ? 'You' : 'They'}'re bringing ${esc(guestsText(m.state.guests))}</small>` : '';
   const who = (m) => `${personAvatar(m.other)}
     <div><b>${m.role === 'attendee' ? `Hosted by ${esc(nameOrSomeone(m.other))}` : `${esc(nameOrSomeone(m.other))} is going`}</b>
+      ${guestsLine(m)}
       ${m.last_message && !isBlocked({ guid: m.other }) ? `<small>${esc(clean(m.last_message))}</small>` : ''}</div>`;
+  // Someone who asked to join can change who they're bringing while they're in or waitlisted.
+  const guestsButton = (m) => m.role === 'attendee' && ['accepted', 'waitlisted'].includes(m.status) && m.post.max_guests > 0
+    ? `<button class="btn ghost small" data-guests-ch="${esc(m.ch)}">Guests${m.state.guests?.length ? ` (${m.state.guests.length})` : ''}</button>` : '';
   // A plan I'm hosting that's still on can be edited, like it can from Your posts.
   const hosted = (m) => m.role === 'host' && m.status === 'accepted'
     && (mail?.hosting || []).find(h => h.post.pid === m.post.pid && LIVE.includes(h.status));
@@ -2136,15 +2306,16 @@ async function viewPlans(v) {
       <span class="label ${cls}">${esc(text)}</span>
       ${eventCard(mailCard(m.post), { who: who(m), mine: m.role === 'host' })}
       ${deletable ? `<div class="card-actions"><button class="btn small" data-delete-plan="${esc(m.ch)}">Delete</button></div>`
-        : hosted(m) ? `<div class="card-actions"><button class="btn ghost small" data-edit-plan="${esc(m.post.pid)}">Edit</button></div>` : ''}
+        : hosted(m) ? `<div class="card-actions"><button class="btn ghost small" data-edit-plan="${esc(m.post.pid)}">Edit</button></div>`
+        : guestsButton(m) ? `<div class="card-actions">${guestsButton(m)}</div>` : ''}
     </div>`;
   };
   // Waitlist cards have no chat yet: that opens when a spot does and they're matched.
   const waitCard = (m) => `
     <div class="card flat plan-card waiting" data-search-item>
       <span class="label warn">${m.waitlist_pos ? `Waitlist #${m.waitlist_pos}` : 'Waitlist'}</span>
-      ${eventCard(mailCard(m.post), { who: `${personAvatar(m.other)}<div>${contactName(m.other) ? `<b>Hosted by ${esc(contactName(m.other))}</b>` : ''}</div>` })}
-      <div class="card-actions"><button class="btn small" data-leave-ch="${esc(m.ch)}">Leave</button></div>
+      ${eventCard(mailCard(m.post), { who: `${personAvatar(m.other)}<div>${contactName(m.other) ? `<b>Hosted by ${esc(contactName(m.other))}</b>` : ''}${guestsLine(m)}</div>` })}
+      <div class="card-actions">${guestsButton(m)}<button class="btn small" data-leave-ch="${esc(m.ch)}">Leave</button></div>
     </div>`;
   // The search matches what's on the cards: the plan, who's in it, and the newest message.
   v.innerHTML = `
@@ -2180,6 +2351,10 @@ async function viewPlans(v) {
     const h = (mail?.hosting || []).find(h => h.post.pid === b.dataset.editPlan);
     if (h) openPostSheet(hostedPost(h));
   });
+  v.querySelectorAll('[data-guests-ch]').forEach(b => b.onclick = () => {
+    const m = all.find(x => x.ch === b.dataset.guestsCh);
+    if (m) changeGuests(m.ch, m.post, m.state.guests || []);
+  });
   v.querySelectorAll('[data-leave-ch]').forEach(b => b.onclick = async () => {
     if (!confirm('Leave this waitlist?')) return;
     try { await sendOn(b.dataset.leaveCh, { type: 'unjoin' }); toast('Left the waitlist'); render(); }
@@ -2193,6 +2368,7 @@ const mailSystemLine = (t, m) => ({
   promoted: "A spot opened up, so you're off the waitlist and in!",
   updated: `The post was updated: ${(t.changes || []).map(k => FIELD_LABELS[k] || k).join(', ') || 'details'}.${m.role === 'attendee' ? ' Please re-confirm you can still make it.' : ''}`,
   reconfirmed: 'Re-confirmed: still in!',
+  guests: t.count ? `Now bringing ${t.count === 1 ? '1 guest' : `${t.count} guests`}.` : 'Not bringing any guests now.',
   'reconfirm-no': "Can't make it after the change, so dropped out.",
   left: "Can't make it anymore, so dropped out.",
   cancelled: m.role === 'host' ? 'You cancelled this plan.' : 'The host cancelled this plan.',
@@ -2401,7 +2577,11 @@ function eventFormFields(t = {}) {
       ${audienceInputs(t)}
       <label>Max attendees
         <input name="max_attendees" type="number" inputmode="numeric" step="1" min="${Math.max(1, t.matched || 0)}" max="${MAX_ATTENDEES_LIMIT}"
-          placeholder="e.g. 4, or blank for no limit" value="${t.max_attendees ?? ''}"></label>`;
+          placeholder="e.g. 4, or blank for no limit" value="${t.max_attendees ?? ''}"></label>
+      <label>Guests each person can bring
+        <input name="max_guests" type="number" inputmode="numeric" step="1" min="0" max="${MAX_GUESTS_LIMIT}"
+          placeholder="0" value="${t.max_guests || ''}"></label>
+      <p class="note">Max attendees counts guests too.</p>`;
 }
 
 // "When": the browser's date and time picker for the first (or only) time, an optional end, and a Repeats menu whose
@@ -2636,10 +2816,10 @@ async function saveEvent(form, id) {
   // A private post has to go to someone: nobody picked (or only blocked people) can't be posted.
   if (pick && !audienceGuids(pick).length) throw new Error('Pick at least one person or group to share this private post with.');
   // A new public post asks first: anyone can see it, and it can't be made private later.
-  if (!pick && !id && !confirm("Post this publicly? Anyone can see it, including people who aren't signed in, and it stays public.")) throw new Error('Not posted.');
+  if (!pick && !id && !confirm('Post this publicly? Anyone signed in to Bored can see it, and it stays public.')) throw new Error('Not posted.');
   const pid = id ? String(id).replace(/^m:/, '') : null;
   const h = pid && mailView()?.hosting.find(x => x.post.pid === pid);
-  const fields = await postFields(formData(form), { matched: h ? h.counts.accepted + h.counts.attended : 0 });
+  const fields = await postFields(formData(form), { matched: h ? h.counts.people : 0 });
   return savePost({
     pid, kind: pick ? 'private' : 'public', fields,
     audience: pick ? { groups: [...pick.groups], contacts: [...pick.contacts] } : null, guids: pick ? audienceGuids(pick) : [],
@@ -2786,7 +2966,7 @@ function fillPostForm(form, t = {}) {
 // One of my posts (an entry of the mail view's hosting), as Your posts shows it and openPostSheet edits it.
 const hostedPost = (h) => ({
   ...h.post, id: `m:${h.post.pid}`, visibility: h.post.kind, tags: h.post.tags || [], status: h.status,
-  pending: h.counts.pending, matched: h.counts.accepted + h.counts.attended, waitlisted: h.counts.waitlisted, awaiting: h.counts.reconfirm,
+  pending: h.counts.pending, matched: h.counts.people, hostGuests: h.counts.hostGuests, waitlisted: h.counts.waitlisted, awaiting: h.counts.reconfirm,
   viewers: vault.data.posts?.[h.post.pid]?.sharedWith.length || 0, audience: vault.data.posts?.[h.post.pid]?.audience,
 });
 
@@ -2817,7 +2997,7 @@ async function viewPost(v) {
   }[t.status] || ['done', t.status]);
   const who = (t) => `${avatar(state.me.guid)}
     <div><b>${t.visibility === 'public' ? 'Public' : t.viewers ? `${t.viewers} can see` : 'Only you'} · ${t.max_attendees == null ? `${t.matched} matched · no limit` : `${t.matched}/${t.max_attendees} matched`}</b>
-      ${t.waitlisted || t.awaiting ? `<small>${[t.waitlisted && `${t.waitlisted} waitlisted`, t.awaiting && `${t.awaiting} to re-confirm`].filter(Boolean).join(' · ')}</small>` : ''}</div>`;
+      ${t.waitlisted || t.awaiting || t.hostGuests ? `<small>${[t.hostGuests && `${t.hostGuests} you added`, t.waitlisted && `${t.waitlisted} waitlisted`, t.awaiting && `${t.awaiting} to re-confirm`].filter(Boolean).join(' · ')}</small>` : ''}</div>`;
   const card = (t) => {
     const [cls, text] = label(t);
     return `
@@ -2825,6 +3005,8 @@ async function viewPost(v) {
           <span class="label ${cls}">${esc(text)}</span>
           ${eventCard(mailCard(t), { who: who(t), mine: true })}
           <div class="card-actions">${t.status !== 'past' ? `
+            ${t.visibility === 'public' ? `<button class="btn ghost small" data-share-post="${esc(t.pid)}">Share</button>` : ''}
+            <button class="btn ghost small" data-host-guests="${esc(t.pid)}">Guests${t.hostGuests ? ` (${t.hostGuests})` : ''}</button>
             <button class="btn ghost small" data-edit="${t.id}">Edit</button>
             <button class="btn small" data-del="${t.id}">Remove</button>`
             : `<button class="btn small" data-delete-post="${esc(t.pid)}">Delete</button>`}
@@ -2868,6 +3050,7 @@ async function viewPost(v) {
     catch (err) { toast(err.message); }
   };
   v.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => openPostSheet(events.find(t => String(t.id) === b.dataset.edit)));
+  v.querySelectorAll('[data-host-guests]').forEach(b => b.onclick = () => editHostGuests(b.dataset.hostGuests));
   v.querySelectorAll('.post-card [data-ics]').forEach(b => b.onclick = () => addToCalendar(events.find(t => String(t.id) === b.dataset.ics)));
   v.querySelectorAll('[data-delete-post]').forEach(b => b.onclick = async () => {
     if (!confirm('Delete this past post from Posts? Only you stop seeing it.')) return;
@@ -3411,18 +3594,20 @@ setInterval(async () => {
 // Boot: restore the session and, if this browser still holds the keys, the vault.
 initMail(api);
 await Promise.all([api('/api/config').then(c => { state.config = c; }, () => {}), loadBuiltinWords()]);
-// Deep links, remembered through sign-in and taken out of the address bar: an invitation (#invite=…), and a screen
-// to open (?open=…, from a notification or the About page's Feedback link; see openScreen).
+// Deep links, remembered through sign-in and taken out of the address bar: an invitation (#invite=…), a screen to
+// open (?open=…, from a notification or the About page's Feedback link; see openScreen), and a public post
+// (?post=<pid>, see postLink).
 {
   const frag = new URLSearchParams(location.hash.slice(1)), token = frag.get('invite');
   if (token) {
     session.set(PENDING_INVITE, JSON.stringify({ token, key: frag.get('key'), name: (frag.get('name') || '').slice(0, 60) }));
     history.replaceState(null, '', location.pathname + location.search);
   }
-  const query = new URLSearchParams(location.search), open = query.get('open');
-  if (open) {
-    session.set(PENDING_OPEN, open);
-    query.delete('open');
+  const query = new URLSearchParams(location.search), post = query.get('post');
+  const open = query.get('open') || (PID_RE.test(post || '') ? `post:${post}` : null);
+  if (query.has('open') || query.has('post')) {
+    if (open) session.set(PENDING_OPEN, open);
+    query.delete('open'); query.delete('post');
     history.replaceState(null, '', location.pathname + (query.size ? `?${query}` : '') + location.hash);
   }
 }

@@ -196,8 +196,8 @@ export async function createDemoAccount(api) {
 // ---------- vault: your private names for yourself and your contacts ----------
 // { v: 1, contacts: { [guid]: { nickname, tags: [], added, keys?: { chat, sign, inbox } } },  (keys: saved the first
 //     time they're used, so the server can't swap them later)
-//   posts, requests, passed: my posts, my requests to join (with their channel secrets), and posts I passed on (see
-//     public/mail.js)
+//   posts, requests, passed: my posts (each with the guests I added myself, who aren't on Bored: guests: [{ id,
+//     name }]), my requests to join (with their channel secrets), and posts I passed on (see public/mail.js)
 //   prefs: { distanceUnit: 'km' | 'mi', tutorialSeen: true },  (settings from Profile; tutorialSeen once the
 //     first-visit tutorial is finished or skipped)
 //   moderation: { builtin, lists, reports, blocked, reported },  (my word lists, report thresholds, who I've blocked,

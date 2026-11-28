@@ -6,7 +6,10 @@
 // (signatures, senders, and the identities in `hello`) and hands derive() plain objects.
 //
 // Posts are signed by their host: { pid, v, kind: 'public' | 'private', status, title, details, tags, location,
-// location_name, online, when_text, end_text (optional), max_attendees, cost_amount, cost_currency, reply: { chat, inbox } }.
+// location_name, online, when_text, end_text (optional), max_attendees, max_guests, cost_amount, cost_currency,
+// reply: { chat, inbox } }.
+// - max_attendees: how many people can come, guests included (null: no limit). max_guests: how many guests each
+//   person who asks can bring (0 or missing: none).
 // - pid is random; v goes up with every change (the newest wins).
 // - status: open | full (every spot is taken) | past (it happened) | cancelled (the host removed it).
 // - reply is where requests to join go: the host's chat public key and main inbox.
@@ -24,7 +27,9 @@
 // - id: random, for telling copies of the same message apart. at: the sender's clock, in ms, for display only.
 //
 // Message types (sender: what it needs → what it does):
-//   join       attendee: first message, { pid, note, interest }        → pending (interest: 0 to 5 stars, or none)
+//   join       attendee: first message, { pid, note, interest, guests } → pending (interest: 0 to 5 stars, or none;
+//              guests: who they're bringing, a name or '' for each, see cleanGuests)
+//   guests     attendee: pending, waitlisted, or accepted, { guests }   → who they're bringing now
 //   unjoin     attendee: pending or waitlisted                         → cancelled (take back the request)
 //   answer     host: { status: accepted | waitlisted | declined }
 //              from pending: any of the three; from waitlisted: accepted (a spot opened) or declined
@@ -44,9 +49,16 @@
 export const POST_STATUSES = ['open', 'full', 'past', 'cancelled'];
 export const LIVE = ['open', 'full'];
 const MAX_NOTE = 500, MAX_CHAT = 4000;
+export const MAX_GUESTS_LIMIT = 10, MAX_GUEST_NAME = 60;
+
+// Who someone is bringing: a list with a name, or '' for someone unnamed, for each guest. The post's max_guests caps
+// how many count (guestsFor), so a host who lowers it doesn't have to ask anyone to change theirs.
+export const cleanGuests = (g) => Array.isArray(g)
+  ? g.slice(0, MAX_GUESTS_LIMIT).map(x => (typeof x === 'string' ? x : '').trim().slice(0, MAX_GUEST_NAME)) : [];
+export const guestsFor = (st, post) => (st?.guests || []).slice(0, Math.max(0, Number(post?.max_guests) || 0));
 
 const SENDER = {
-  join: 'attendee', unjoin: 'attendee', reconfirm: 'attendee', leave: 'attendee',
+  join: 'attendee', guests: 'attendee', unjoin: 'attendee', reconfirm: 'attendee', leave: 'attendee',
   answer: 'host', undo: 'host', update: 'host', happened: 'host', cancel: 'host',
   hello: 'both', chat: 'both', edit: 'both', delete: 'both',
 };
@@ -89,6 +101,7 @@ export function replayChannel(messages) {
   const st = {
     pid: join.pid, note: String(join.note || '').slice(0, MAX_NOTE), status: 'pending', reconfirm: false,
     interest: Number.isInteger(join.interest) && join.interest >= 0 && join.interest <= 5 ? join.interest : null,
+    guests: cleanGuests(join.guests),
     hello: { host: null, attendee: null }, timeline: [], chatted: false, gap, counts,
     joinedAt: Number(join.at) || 0, updatedAt: Number(join.at) || 0,
   };
@@ -103,6 +116,12 @@ function apply(st, m) {
   const s = st.status, line = (event, extra = {}) => st.timeline.push({ event, role: m.role, at: Number(m.at) || 0, ...extra });
   switch (m.type) {
     case 'join': return false; // only as the first message
+    case 'guests': {
+      if (!['pending', 'waitlisted', 'accepted'].includes(s) || !Array.isArray(m.guests)) return false;
+      st.guests = cleanGuests(m.guests);
+      if (s === 'accepted') line('guests', { count: st.guests.length });
+      return true;
+    }
     case 'unjoin':
       if (s !== 'pending' && s !== 'waitlisted') return false;
       st.status = 'cancelled'; return true;
@@ -173,6 +192,7 @@ export function nextMessage(channelMessages, role, fields) {
 // input:
 //   me:       { sign } my signing public key (JWK), to tell which posts are mine
 //   posts:    [{ post, signer, shared?: true, host?: guid } | { unshare: { pid, v }, signer }], every version
+//   hostGuests: { pid: n } for my posts: people I added myself, who aren't on Bored (placeholders, kept in my vault)
 //             seen, signatures already checked (public posts, shares and unshares from my inbox, and my own from the
 //             vault). host is the host's GUID when known (a share says who it's from).
 //   channels: [{ id, role: 'host' | 'attendee', opened, messages }], id is the channel secret, opened sorts
@@ -195,7 +215,7 @@ export function nextMessage(channelMessages, role, fields) {
 //   together: { guid: times we've done something together } (attended, either side)
 //   stats:    { hosted: my posts that happened with someone, attended: posts I went to, helped: different hosts of
 //             posts tagged "help" I went to }
-export function derive({ me, posts = [], channels = [], passed = [], passedAt = {}, deleted = [] }) {
+export function derive({ me, posts = [], channels = [], passed = [], passedAt = {}, deleted = [], hostGuests = {} }) {
   // Posts: per pid, the first signer seen owns it (mine always wins), and the newest version counts.
   const owner = new Map(), latest = new Map(), unshared = new Map();
   for (const e of posts) {
@@ -224,7 +244,7 @@ export function derive({ me, posts = [], channels = [], passed = [], passedAt = 
     if (st.status !== 'cancelled') asked.add(st.pid);
     const post = latest.get(st.pid) || null;
     if (st.status === 'attended') count(st.hello.host?.guid);
-    return { ...st, id: c.id, post, closed: !post || !LIVE.includes(post.status) };
+    return { ...st, guests: guestsFor(st, post), id: c.id, post, closed: !post || !LIVE.includes(post.status) };
   }).sort((a, b) => b.updatedAt - a.updatedAt);
 
   // Posts I host, with their requests.
@@ -232,24 +252,30 @@ export function derive({ me, posts = [], channels = [], passed = [], passedAt = 
   const hosting = [...latest.values()].filter(mine).map(post => {
     const reqs = replayed.filter(x => x.c.role === 'host' && x.st.pid === post.pid)
       .sort((a, b) => (a.c.opened ?? 0) - (b.c.opened ?? 0) || String(a.c.id).localeCompare(String(b.c.id)))
-      .map(({ c, st }) => ({ ...st, id: c.id, from: c.from || null }));
+      .map(({ c, st }) => ({ ...st, guests: guestsFor(st, post), id: c.id, from: c.from || null }));
     for (const r of reqs) if (r.status === 'attended') count(r.hello.attendee?.guid);
     const n = (s) => reqs.filter(r => r.status === s).length;
-    const accepted = n('accepted'), attended = n('attended');
+    // People, not requests, fill spots: each request is the person plus their guests, and the host's own
+    // placeholders count too.
+    const size = (r) => 1 + r.guests.length, people = (s) => reqs.filter(r => r.status === s).reduce((t, r) => t + size(r), 0);
+    const accepted = n('accepted'), attended = n('attended'), added = Math.max(0, Number(hostGuests[post.pid]) || 0);
+    const inPeople = people('accepted'), therePeople = people('attended');
     let status = post.status;
     if (LIVE.includes(post.status)) {
-      // First come, first served off the waitlist into open spots, then open or full (or past, once everyone
-      // who matched has been marked as there), the same rule the server used.
+      // Off the waitlist into open spots in the order people asked, skipping a group that doesn't fit yet (a smaller
+      // one behind it may), then open or full (or past, once everyone who matched has been marked as there).
       const max = post.max_attendees ?? null;
-      let room = max === null ? Infinity : max - accepted - attended;
-      for (const r of reqs) if (room > 0 && r.status === 'waitlisted') { todo.push({ type: 'promote', ch: r.id, pid: post.pid }); room--; }
-      const filled = accepted + attended + todo.filter(t => t.pid === post.pid).length;
-      status = max === null || filled < max ? 'open' : filled - attended === 0 ? 'past' : 'full';
+      let room = max === null ? Infinity : max - inPeople - therePeople - added, promoted = 0;
+      for (const r of reqs) if (r.status === 'waitlisted' && size(r) <= room) { todo.push({ type: 'promote', ch: r.id, pid: post.pid }); room -= size(r); promoted += size(r); }
+      const filled = inPeople + therePeople + added + promoted;
+      status = max === null || filled < max ? 'open' : inPeople + promoted === 0 && therePeople > 0 ? 'past' : 'full';
       if (status !== post.status) todo.push({ type: 'status', pid: post.pid, status });
     }
     return {
       post, requests: reqs, status,
-      counts: { pending: n('pending'), accepted, attended, waitlisted: n('waitlisted'), reconfirm: reqs.filter(r => r.reconfirm).length },
+      counts: { pending: n('pending'), accepted, attended, waitlisted: n('waitlisted'), reconfirm: reqs.filter(r => r.reconfirm).length,
+        // people: everyone in, guests and the host's placeholders included; hostGuests: those placeholders
+        people: inPeople + therePeople + added, hostGuests: added },
     };
   });
 

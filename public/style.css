@@ -536,6 +536,14 @@ button.chip { font: inherit; font-size: .82rem; cursor: pointer; }
 .interest-picks button:focus-visible { outline: 2px solid var(--wood-line); outline-offset: 1px; }
 .interest-shown { margin: 0; color: var(--muted); font-size: .9rem; }
 .interest-shown .stars { color: #c98a14; letter-spacing: 1px; font-size: 1.05rem; }
+/* Guests someone's bringing when they ask to join (app.js guestsPickHtml), and where they show */
+.guests-pick { border: 0; margin: 0; padding: 0; display: grid; gap: 8px; }
+.guests-pick legend { font-size: .85rem; color: var(--muted); padding: 0; margin-bottom: 4px; }
+.guest-count { display: flex; align-items: center; gap: 10px; }
+.guest-count .btn { min-width: 44px; min-height: 44px; }
+.guest-count .guest-n { min-width: 2ch; text-align: center; font-weight: 800; font-size: 1.1rem; }
+.guest-count .note { margin: 0; }
+.guests-shown { margin: 0; color: var(--muted); font-size: .9rem; }
 .ntfy-topic { display: block; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
   font-size: .85rem; overflow-wrap: anywhere; user-select: all; }
 .offline { max-width: 420px; margin: 20vh auto 0; padding: 0 16px; text-align: center; }
@@ -652,8 +660,10 @@ a.map-link { text-underline-offset: 2px; }
 
 /* ---------- moderation ---------- */
 /* Report or block (on cards, Discover's hidden-posts note), and Profile → Moderation (moderationHtml in app.js). */
-.who .report-link { margin-left: auto; flex: none; font-size: .8rem; color: var(--muted); }
-.who .report-link:hover { color: var(--text); }
+/* Share and Report or block, at the right of a card's host line */
+.who .card-links { margin-left: auto; flex: none; display: flex; gap: 14px; }
+.who .card-links .link { font-size: .8rem; color: var(--muted); }
+.who .card-links .link:hover { color: var(--text); }
 .mod-note { margin: 0 0 10px; }
 .msg.hidden-msg { color: var(--muted); font-style: italic; }
 .sub-title { font-size: .95rem; font-weight: 700; margin: 14px 0 0; text-align: center; }

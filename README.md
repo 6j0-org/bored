@@ -170,8 +170,8 @@ vault, so it shows once per account. "Show the tutorial" in Profile's settings t
 
 | Step | Who | Where |
 |---|---|---|
-| Post an event (title, details, up to 5 tags, where (map pin), when (date, time, optional repeat, with quick picks like "In an hour" and ends like "2 hours" or "Sunset"), cost and currency, max attendees or no limit, public or shared with chosen contacts/groups). A post idea fills in the form. The button says who'll see it ("Post it to 3 people"); a private post needs at least one person, and a public one asks first | Host | **Post** |
-| Swipe right on events you're in for (search, and filter by date, distance, tags, and free/paid), then rate how interested you are (0 to 5 stars) and add a note for the host, both optional; scroll down to the discard pile to change a swipe | Attendee | **Discover** |
+| Post an event (title, details, up to 5 tags, where (map pin), when (date, time, optional repeat, with quick picks like "In an hour" and ends like "2 hours" or "Sunset"), cost and currency, max attendees or no limit, how many guests each person can bring, public or shared with chosen contacts/groups). A post idea fills in the form. The button says who'll see it ("Post it to 3 people"); a private post needs at least one person, and a public one asks first | Host | **Post** |
+| Swipe right on events you're in for (search, and filter by date, distance, tags, and free/paid), then rate how interested you are (0 to 5 stars), add a note for the host, and say who you're bringing if the post allows guests, all optional; scroll down to the discard pile to change a swipe | Attendee | **Discover** |
 | Swipe right on the people who want to join (anonymous, except your contacts) | Host | **Confirm** |
 | Match → you learn who each other are and chat to sort out details (matching doesn't make you contacts) | Both | **Plans** |
 | "Mark as done" to close it out | Host | Plan chat |
@@ -195,9 +195,20 @@ on, which tells everyone; Delete for one that's done). A plan that's still on ha
 first, which moves it to Past. Deleting a past plan or post only hides it from you, on all your devices.
 
 A post stays in the deck until it reaches its max attendees; after that, saying yes joins its waitlist, and people
-move off the waitlist in order as spots open. Posts with no limit stay open until the host removes them. Posts are
+move off the waitlist in order as spots open. Posts with no limit stay open until the host removes them.
+
+**Guests.** A host can let each person who asks bring up to 10 guests ("Guests each person can bring" in the post
+form; 0 by default). Asking to join then has a count, with an optional name for each guest, and only the host sees
+them. That can be changed from **Plans** while you're in or waitlisted. Hosts can also add people who aren't on
+Bored to their own posts (**Guests** on the post in **Post**): just a nickname each, kept in the host's encrypted
+vault, so only they see them. Max attendees counts everyone: a request with two guests needs three spots. Without
+enough room, saying yes waitlists the group, and a group comes off the waitlist once it fits (a smaller group behind it
+can go first). Lowering the guest limit stops extra guests from counting. Posts are
 **private** by default: only the contacts and groups (contact tags) the host picks can see them. Until someone has a
 contact (both people said yes to an invitation), new posts are public. **Public** posts show for everyone signed in. A post stays public or private once it's posted.
+A public post can be shared as a link (`/?post=<pid>`, from **Share** on its card in Post or Discover). Opening it,
+after signing in if need be, shows that post first in Discover, whatever the search and filters say. Private posts
+have no link: only the people they're shared with can read them.
 
 ## Moderation
 

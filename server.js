@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { createHash, createHmac, createPublicKey, randomBytes, randomUUID, verify as verifySignature } from 'node:crypto';
-import { newChallenge, takeChallenge, verifyRegistration, verifyAssertion, WebAuthnError } from './webauthn.js';
 import { verifyIdToken, verifyDeletionToken, IdTokenError } from './idtoken.js';
 import { postFields } from './public/postfields.js';
 import { REPORT_REASONS as MODERATION_REASONS } from './public/moderation.js';
@@ -14,27 +13,26 @@ import { seedDemo, demoNames, demoSeed, demoBot, pruneVisitors } from './demo.js
 import { createFeedback, FeedbackError } from './feedback.js';
 
 const PORT = Number(process.env.PORT || 3000);
-// Passkeys are bound to an origin. Defaults to whatever host the browser used (fine for localhost);
-// set ORIGIN (e.g. https://bored.example) and optionally RP_ID in production.
+// This site's origin, for links that leave it (ntfy notifications). Defaults to whatever host the browser used (fine
+// for localhost); set ORIGIN (e.g. https://bored.example) in production.
 const originOf = (req) => process.env.ORIGIN || `${req.headers['x-forwarded-proto'] || 'http'}://${req.headers.host}`;
-const rpIdOf = (req) => process.env.RP_ID || new URL(originOf(req)).hostname;
 const MAX_SEALED = 200 * 1024; // max size of one encrypted blob (vault, key) in characters
 
 // Who signs people in:
-// - AUTH_MODE=local (default): Bored runs its own passkeys (RP ID = RP_ID or the ORIGIN hostname). Standalone.
-// - AUTH_MODE=6j0: a 6j0.org identity server at ID_ORIGIN does. The browser comes back with a signed token and
-//   this app's key from that server; the local passkey routes are switched off. ID_APP is this app's name in the
-//   identity server's APPS list (default "bored"). ID_JWKS_URL overrides where its public keys are fetched from
-//   (default ID_ORIGIN + /.well-known/jwks.json), e.g. an in-cluster Service URL.
-// The two modes have separate accounts: switching a running instance from one to the other strands existing users.
-// - DEMO=1 overrides both with "demo": no sign-in at all. Each browser gets its own throwaway account, filled with
-//   demo content (demo.js), in an in-memory database (db.js). For trying the app out, never for real use.
+// - AUTH_MODE=6j0 (the only real mode): a 6j0.org identity server at ID_ORIGIN does. The browser comes back with a
+//   signed token and this app's key from that server. ID_APP is this app's name in the identity server's APPS list
+//   (default "bored"). ID_JWKS_URL overrides where its public keys are fetched from (default ID_ORIGIN +
+//   /.well-known/jwks.json), e.g. an in-cluster Service URL.
+// - DEMO=1 makes it "demo": no sign-in at all. Each browser gets its own throwaway account, filled with demo content
+//   (demo.js), in an in-memory database (db.js). For trying the app out, never for real use.
+// Bored used to run its own passkeys (AUTH_MODE=local). That's gone: AUTH_MODE=local is refused.
 if (DEMO && process.env.AUTH_MODE) console.warn(`DEMO=1: ignoring AUTH_MODE=${process.env.AUTH_MODE}`);
-const AUTH_MODE = DEMO ? 'demo' : process.env.AUTH_MODE || 'local';
-if (!['local', '6j0', 'demo'].includes(AUTH_MODE)) throw new Error(`AUTH_MODE must be "local" or "6j0", not "${AUTH_MODE}"`);
+const AUTH_MODE = DEMO ? 'demo' : process.env.AUTH_MODE || '6j0';
+if (AUTH_MODE === 'local') throw new Error("AUTH_MODE=local (Bored's own passkeys) was removed. Use AUTH_MODE=6j0 with ID_ORIGIN, or DEMO=1.");
+if (!['6j0', 'demo'].includes(AUTH_MODE)) throw new Error(`AUTH_MODE must be "6j0", not "${AUTH_MODE}"`);
 const ID = AUTH_MODE === '6j0' ? (() => {
   const origin = process.env.ID_ORIGIN;
-  if (!origin || new URL(origin).origin !== origin) throw new Error('AUTH_MODE=6j0 needs ID_ORIGIN, e.g. https://id.6j0.org');
+  if (!origin || new URL(origin).origin !== origin) throw new Error('Bored needs ID_ORIGIN, the 6j0.org identity server, e.g. https://id.6j0.org (or DEMO=1 to try it out)');
   return { origin, app: process.env.ID_APP || 'bored', jwksUrl: process.env.ID_JWKS_URL || `${origin}/.well-known/jwks.json` };
 })() : null;
 
@@ -244,7 +242,7 @@ async function sendNtfy(nt, { body, open }) {
 
 const routes = [];
 // auth: true (must be signed in) | false (no user) | 'optional' (user if signed in, else null)
-// mode: only register the route in this AUTH_MODE ('local' | '6j0' | 'demo'); default: always.
+// mode: only register the route in this AUTH_MODE ('6j0' | 'demo'); default: always.
 const route = (method, pattern, handler, { auth = true, mode } = {}) => {
   if (mode && mode !== AUTH_MODE) return;
   const keys = [];
@@ -329,11 +327,24 @@ feedbackRoute('POST', '/status', async ({ user, id, body, res }) => {
   send(res, 200, thread);
 });
 
-// ---------- passkeys ----------
-// Sign-up: the server picks the GUID; the browser creates a passkey (with the PRF extension), derives a vault key,
-// encrypts its chat private key and empty vault with it, and sends only ciphertext plus the passkey's public key.
+// ---------- setup tickets (single use, short-lived, in memory) ----------
+// /api/id/login hands one to a new identity, and /api/id/register takes it back.
+const tickets = new Map(); // ticket (base64url) -> { kind, data, expires }
+const TICKET_TTL_MS = 5 * 60 * 1000;
+function newChallenge(kind, data = {}) {
+  const now = Date.now();
+  for (const [k, v] of tickets) if (v.expires < now) tickets.delete(k);
+  const ticket = randomBytes(32).toString('base64url');
+  tickets.set(ticket, { kind, data, expires: now + TICKET_TTL_MS });
+  return ticket;
+}
+function takeChallenge(ticket, kind) {
+  const t = tickets.get(ticket);
+  tickets.delete(ticket);
+  if (!t || t.kind !== kind || t.expires < Date.now()) throw new Error('This sign-in expired. Please sign in again.');
+  return t.data;
+}
 
-const webauthnCtx = (req, kind) => ({ origin: originOf(req), rpId: rpIdOf(req), kind });
 const keyBundle = (user, wrappedKey) => ({
   user: publicUser(user),
   wrappedKey,
@@ -341,81 +352,7 @@ const keyBundle = (user, wrappedKey) => ({
   vault: { data: user.vault, version: user.vault_version },
 });
 
-route('POST', '/api/passkey/register/options', async ({ req, res }) => {
-  const guid = randomUUID();
-  send(res, 200, {
-    challenge: newChallenge('register', { guid }),
-    rp: { id: rpIdOf(req), name: 'Bored' },
-    user: { id: Buffer.from(guid).toString('base64url'), name: `Bored ${guid.slice(0, 8)}`, displayName: 'Bored account' },
-  });
-}, { auth: false, mode: 'local' });
-
-route('POST', '/api/passkey/register/verify', async ({ req, body, res }) => {
-  const reg = verifyRegistration(body, webauthnCtx(req, 'register'));
-  const fields = {
-    wrapped: sealed(body.wrappedKey, 'wrapped key'),
-    pub: chatPubkey(body.chatPubkey),
-    priv: sealed(body.chatPrivkey, 'chat key'),
-    vault: sealed(body.vault, 'vault'),
-  };
-  const userId = tx(() => {
-    const { lastInsertRowid } = q('INSERT INTO users (guid, chat_pubkey, chat_privkey, vault) VALUES (?, ?, ?, ?)')
-      .run(reg.data.guid, fields.pub, fields.priv, fields.vault);
-    q(`INSERT INTO passkeys (user_id, credential_id, public_key, alg, sign_count, wrapped_key, last_used_at)
-       VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`).run(lastInsertRowid, reg.credentialId, reg.publicKey, reg.alg, reg.signCount, fields.wrapped);
-    return lastInsertRowid;
-  });
-  const user = q('SELECT * FROM users WHERE id = ?').get(userId);
-  send(res, 200, { user: publicUser(user) }, newSession(res, userId));
-}, { auth: false, mode: 'local' });
-
-route('POST', '/api/passkey/login/options', async ({ req, res }) => {
-  send(res, 200, { challenge: newChallenge('login'), rpId: rpIdOf(req) });
-}, { auth: false, mode: 'local' });
-
-route('POST', '/api/passkey/login/verify', async ({ req, body, res }) => {
-  const pk = q('SELECT * FROM passkeys WHERE credential_id = ?').get(String(body.credentialId || ''));
-  if (!pk) throw new HttpError(401, "This passkey isn't registered with Bored. Was the account created on another site or deleted?");
-  const { signCount } = verifyAssertion(body, pk, webauthnCtx(req, 'login'));
-  const user = q('SELECT * FROM users WHERE id = ?').get(pk.user_id);
-  if (body.userHandle && Buffer.from(body.userHandle, 'base64url').toString() !== user.guid) throw new HttpError(401, 'Passkey user mismatch');
-  q(`UPDATE passkeys SET sign_count = ?, last_used_at = datetime('now') WHERE id = ?`).run(signCount, pk.id);
-  send(res, 200, keyBundle(user, pk.wrapped_key), newSession(res, user.id));
-}, { auth: false, mode: 'local' });
-
-// Add another passkey to my account (e.g. a phone, a security key, or a password manager that supports PRF).
-// The browser unlocks the vault key with an existing passkey, then wraps it for the new one.
-route('POST', '/api/passkey/add/options', async ({ req, user, res }) => {
-  const mine = q('SELECT credential_id, wrapped_key FROM passkeys WHERE user_id = ?').all(user.id);
-  send(res, 200, {
-    challenge: newChallenge('add', { userId: user.id }),
-    rp: { id: rpIdOf(req), name: 'Bored' },
-    user: { id: Buffer.from(user.guid).toString('base64url'), name: `Bored ${user.guid.slice(0, 8)}`, displayName: 'Bored account' },
-    existing: mine.map(p => ({ credentialId: p.credential_id, wrappedKey: p.wrapped_key })),
-  });
-}, { mode: 'local' });
-
-route('POST', '/api/passkey/add/verify', async ({ req, user, body, res }) => {
-  const reg = verifyRegistration(body, webauthnCtx(req, 'add'));
-  if (reg.data.userId !== user.id) throw new HttpError(403, 'Passkey request was for a different account');
-  q(`INSERT INTO passkeys (user_id, credential_id, public_key, alg, sign_count, wrapped_key) VALUES (?, ?, ?, ?, ?, ?)`)
-    .run(user.id, reg.credentialId, reg.publicKey, reg.alg, reg.signCount, sealed(body.wrappedKey, 'wrapped key'));
-  send(res, 200, { ok: true });
-}, { mode: 'local' });
-
-route('GET', '/api/passkeys', async ({ user, res }) => {
-  send(res, 200, q('SELECT id, created_at, last_used_at FROM passkeys WHERE user_id = ? ORDER BY id').all(user.id));
-}, { mode: 'local' });
-
-route('DELETE', '/api/passkeys/:id', async ({ user, params, res }) => {
-  const n = q('SELECT COUNT(*) n FROM passkeys WHERE user_id = ?').get(user.id).n;
-  if (n <= 1) throw new HttpError(409, "That's your only passkey. Add another one before removing it, or you'll lose your account.");
-  const r = q('DELETE FROM passkeys WHERE id = ? AND user_id = ?').run(params.id, user.id);
-  if (!r.changes) throw new HttpError(404, 'Passkey not found');
-  send(res, 200, { ok: true });
-}, { mode: 'local' });
-
-// ---------- 6j0.org identity (AUTH_MODE=6j0) ----------
+// ---------- 6j0.org identity ----------
 // The browser went to ID_ORIGIN/authorize and came back with a signed token plus this app's key, which only the
 // page can decrypt. Known identity: return the key bundle and start a session. New identity: hand out a short-lived
 // setup ticket, and the browser creates the vault and chat keys (wrapped under the app key) and calls /api/id/register.
@@ -514,7 +451,7 @@ route('POST', '/api/logout', async ({ req, res }) => {
 
 // ---------- deleting an account ----------
 // { confirm, inboxes } → everything this server holds for the account is erased, at once and for good: the users row
-// and everything that cascades from it (keys, the encrypted vault, passkeys, sessions, public posts and the reports on
+// and everything that cascades from it (keys, the encrypted vault, sessions, public posts and the reports on
 // them, invitations, connections, connection requests, and push subscriptions), the mail in its main inbox, the
 // reports it filed, and its feedback posts and replies. confirm is the last 4 characters of the account's GUID (shown
 // at the bottom of Profile), so a stray request can't do it. inboxes are read tokens for the inboxes the account
@@ -1036,7 +973,7 @@ const STATIC = {
   '/': 'index.html', '/index.html': 'index.html', '/app.js': 'app.js', '/secure.js': 'secure.js', '/hpke.js': 'hpke.js', '/envelope.js': 'envelope.js', '/posts.js': 'posts.js', '/mail.js': 'mail.js', '/postfields.js': 'postfields.js', '/style.css': 'style.css', '/location.js': 'location.js', '/when.js': 'when.js', '/cost.js': 'cost.js', '/ics.js': 'ics.js', '/pointer.js': 'pointer.js', '/html.js': 'html.js', '/instagram.js': 'instagram.js',
   '/feedback.js': 'feedback.js', '/moderation.js': 'moderation.js',
   '/pii.js': 'pii.js', '/libphonenumber.js': 'libphonenumber.js',
-  '/about': 'about.html', '/about.html': 'about.html', '/privacy': 'privacy.html', '/privacy.html': 'privacy.html', '/landing.js': 'landing.js', '/about.js': 'about.js', '/examples.js': 'examples.js',
+  '/about': 'about.html', '/about.html': 'about.html', '/privacy': 'privacy.html', '/privacy.html': 'privacy.html', '/about.js': 'about.js', '/examples.js': 'examples.js',
   '/sw.js': 'sw.js', '/theme.js': 'theme.js', '/manifest.webmanifest': 'manifest.webmanifest', '/icon.svg': 'icon.svg', '/board.webp': 'board.webp', '/board-surf.svg': 'board-surf.svg', '/board-planed.svg': 'board-planed.svg', '/boards.css': 'boards.css',
   // National Park, SIL OFL 1.1 (see public/fonts/NationalPark-OFL.txt)
   '/fonts/national-park-latin.woff2': 'fonts/national-park-latin.woff2', '/fonts/national-park-latin-ext.woff2': 'fonts/national-park-latin-ext.woff2',
@@ -1062,21 +999,13 @@ const CSP = `default-src 'self'; script-src 'self' 'sha256-${createHash('sha256'
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://x');
   try {
-    // First visit: "/" shows the introduction. Its links go to "/?start", which remembers that with a "seen=1"
-    // cookie (no ID, nothing about the person) and sends them on to the app at "/". Signed-in browsers always get
-    // the app. URL fragments (invites, sign-in tokens) never reach the server: public/landing.js forwards those.
-    if (req.method === 'GET' && url.pathname === '/') {
-      if (url.searchParams.has('start')) {
-        url.searchParams.delete('start');
-        const secure = String(process.env.ORIGIN || '').startsWith('https:') ? '; Secure' : '';
-        res.writeHead(302, {
-          Location: '/' + url.search, 'Cache-Control': 'no-store',
-          'Set-Cookie': `seen=1; HttpOnly; SameSite=Lax; Path=/; Max-Age=${60 * 60 * 24 * 365}${secure}`,
-        });
-        return res.end();
-      }
-      const { sid, seen } = parseCookies(req.headers.cookie);
-      if (!sid && !seen) url.pathname = '/about';
+    // "/" is always the app, which sends anyone not signed in to the identity server (public/app.js). The
+    // introduction is at "/about". Older links to "/?start" (which used to skip the introduction) still work: the
+    // browser keeps the fragment (an invitation) through the redirect.
+    if (req.method === 'GET' && url.pathname === '/' && url.searchParams.has('start')) {
+      url.searchParams.delete('start');
+      res.writeHead(302, { Location: '/' + url.search, 'Cache-Control': 'no-store' });
+      return res.end();
     }
     if (req.method === 'GET' && (STATIC[url.pathname] || VENDOR[url.pathname])) {
       const file = STATIC[url.pathname] ? './public/' + STATIC[url.pathname] : './' + VENDOR[url.pathname];
@@ -1111,7 +1040,6 @@ const server = http.createServer(async (req, res) => {
     }
     throw new HttpError(404, 'Not found');
   } catch (e) {
-    if (e instanceof WebAuthnError) e = new HttpError(400, e.message);
     if (!(e instanceof HttpError)) console.error(e);
     send(res, e.status || 500, { error: e instanceof HttpError ? e.message : 'Something went wrong' });
   }

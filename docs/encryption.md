@@ -59,7 +59,7 @@ flowchart LR
   subgraph S["Server"]
     M[("mail<br/>inbox ID + ciphertext")]
     P[("public_posts<br/>signed records")]
-    U[("accounts, passkeys (if used),<br/>encrypted vaults")]
+    U[("accounts,<br/>encrypted vaults")]
   end
   subgraph B["Bob's browser"]
     BK["keys + vault"]
@@ -70,7 +70,7 @@ flowchart LR
   B -- "sealed mail" --> M
   M -- "read by token, no cookies" --> A
   A -- "signed public post" --> P
-  P -- "anyone, guests too" --> B
+  P -- "anyone, no cookies" --> B
 ```
 
 Why this shape: a server that only stores ciphertext filed under random IDs has much less to leak, to be compelled to
@@ -83,11 +83,9 @@ Code: `public/secure.js` (key setup, the vault), `public/envelope.js` (using the
 
 ```mermaid
 flowchart TD
-  PK["Passkey<br/>(WebAuthn PRF extension)"] -->|"PRF(salt = SHA-256('bored-vault-v1'))"| PRF["32-byte secret<br/>(never leaves the browser)"]
-  ID["6j0.org identity server"] -.->|"app key, AUTH_MODE=6j0"| APP["32-byte app key"]
-  PRF -->|"HKDF 'vault-kek-v1'"| KEK["key-encryption key"]
-  APP -.->|"HKDF 'vault-kek-6j0-v1'"| KEK
-  KEK -->|"unwraps (one wrapped copy per passkey<br/>or 6j0.org identity, stored on the server)"| VK["vault key<br/>random AES-256"]
+  ID["6j0.org identity server"] -->|"app key, handed to the page"| APP["32-byte app key<br/>(never reaches Bored's server)"]
+  APP -->|"HKDF 'vault-kek-6j0-v1'"| KEK["key-encryption key"]
+  KEK -->|"unwraps (wrapped copy stored on the server)"| VK["vault key<br/>random AES-256"]
   VK -->|encrypts| V["vault: contacts, nicknames, saved keys,<br/>my posts, my requests and channel secrets,<br/>main inbox token"]
   VK -->|encrypts| CK["chat key: ECDH P-256<br/>(public half published)"]
   VK -->|encrypts| SK["signing key: ECDSA P-256<br/>(public half published)"]
@@ -103,15 +101,12 @@ Each account has:
 
 Why these choices:
 
-- **If you used a passkey: PRF, no passwords.** The passkey's PRF output is a secret the browser gets only after the
-  person authenticates, and the server never sees it. That gives us an encryption key without a password to choose,
-  forget, or reuse. Signup is blocked on authenticators without PRF rather than falling back to something weaker.
-- **If you used a 6j0.org identity** (`AUTH_MODE=6j0`): however you signed in there (a passkey, or a username and
-  password), the identity server hands the browser this app's own *app key*, and the key-encryption key is derived
-  from that instead. Bored never sees the password.
-- **A random vault key, wrapped per sign-in.** Deriving the vault key straight from one passkey would lock the account
-  to that passkey. Wrapping one random key once per passkey (or once for a 6j0.org identity) lets people add a second
-  passkey (another device, a security key) without re-encrypting anything.
+- **A 6j0.org identity's app key.** However you signed in there (a passkey, or a username and password), the identity
+  server hands the browser this app's own *app key*, and the key-encryption key is derived from that. Bored's server
+  never sees the app key or the password. (Bored used to run its own passkeys, with a key-encryption key from their
+  WebAuthn PRF output. That was removed.)
+- **A random vault key, wrapped.** Wrapping one random key, instead of deriving the vault key straight from the app
+  key, means the way you sign in can change without re-encrypting anything.
 - **Private keys never leave WebCrypto in usable form.** After sign-in, the vault, chat, and signing keys are imported
   as **non-extractable** CryptoKeys and kept in IndexedDB, so a page reload doesn't need you to sign in again, and no script
   can read the raw key bytes out (it can only *use* them; see [limits](#10-known-limits)).
@@ -248,7 +243,7 @@ sequenceDiagram
   autonumber
   participant H as Host's browser
   participant S as Server
-  participant G as Anyone (guests too)
+  participant G as Anyone
   H->>H: sign the post
   H->>S: PUT /api/public { record }
   S->>S: check signature is the caller's key, version is newer,<br/>replies go to the caller's own inbox, fields pass the post checks
@@ -352,7 +347,7 @@ anything.
 | Which session is sending, as it sends | Yes, in memory | For rate limits; never stored. |
 | Inbox, time, and size of each message | **Yes** | Main inboxes belong to known accounts; channel inboxes don't. |
 | IP addresses | **Yes**, in transit | Not stored by the app; a reverse proxy may log them. |
-| Accounts, passkeys' public keys (if you used a passkey), sessions, push subscriptions | Yes | Bored stores no names, emails, or passwords. A 6j0.org identity's password, if it has one, stays on the identity server. |
+| Accounts, sessions, push subscriptions | Yes | Bored stores no names, emails, or passwords. A 6j0.org identity's passkeys and password stay on the identity server. |
 | The vault | No | Encrypted with the vault key. |
 | Invitation connections | **Yes** | Who connected with whom through an invitation link. Still plaintext (see `TODO.md`). |
 | Your location (distance filter) | No | Stays in the browser; Discover filters locally. |

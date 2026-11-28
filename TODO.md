@@ -36,8 +36,8 @@ left**, and about the limits of doing end-to-end encryption in a web app.
   nominatim.openstreetmap.org for a suggested name (`reverseGeocode()` in `server.js`). The server makes the request,
   so OSM sees the server's IP, not the host's, but it does see the spot. Nominatim also allows only one request a
   second; at real volume, run our own Nominatim or use a paid geocoder.
-- [ ] **P2: Timestamps everywhere** (`created_at` on users, passkeys, and mail; `updated_at` on public posts;
-  `last_used_at` on passkeys) enable timing correlation. Reduce precision or drop where not needed.
+- [ ] **P2: Timestamps everywhere** (`created_at` on users and mail; `updated_at` on public posts) enable timing
+  correlation. Reduce precision or drop where not needed.
 - [ ] **P2: Mail is kept forever, and read from the start.** Each app load reads the main inbox from the beginning,
   and nothing is ever deleted (outside demo mode). Let readers delete mail they've read, or expire channel mail some
   time after a post has happened.
@@ -46,8 +46,8 @@ left**, and about the limits of doing end-to-end encryption in a web app.
 
 - [ ] **P0: IP addresses.** The server (and any reverse proxy or CDN) sees client IPs, which can tie GUIDs to real
   people. Define a no-logging policy, strip IPs at the proxy, and document it. Consider Tor/onion support.
-- [ ] **P0: HTTPS only in production.** Passkeys require a secure context outside `localhost`. Set `ORIGIN`
-  (and `RP_ID`) and add HSTS. With `ORIGIN` unset, the server derives the expected origin from the `Host` /
+- [ ] **P0: HTTPS only in production.** Bored's encryption (WebCrypto) needs a secure context outside `localhost`.
+  Set `ORIGIN` and add HSTS. With `ORIGIN` unset, the server derives the expected origin from the `Host` /
   `X-Forwarded-Proto` headers (`originOf()` in `server.js`), which is only acceptable for local development.
 - [ ] **P1: The database is unencrypted at rest**, along with its backups. It holds the graph, public keys, and
   ciphertext. Encrypt the disk and backups, and restrict access.
@@ -77,22 +77,19 @@ left**, and about the limits of doing end-to-end encryption in a web app.
 - [ ] **P1: Not enough AES-GCM additional data.** Sealed envelopes are bound to their inbox (the inbox ID is HPKE's
   AAD), but the vault, the encrypted private keys, and channel messages aren't bound to their purpose or owner, so
   the server could swap ciphertexts between fields. Bind each blob with AAD such as `guid | purpose | id`.
-- [ ] **P2: Removing a passkey doesn't rotate the vault key.** `DELETE /api/passkeys/:id` deletes the wrapped key, but
-  anyone who already captured that passkey's PRF output and wrapped key can still unwrap the same vault key.
-  Rotate the vault key (and re-encrypt the vault and chat key) when a passkey is removed.
 
 ## 4. Keys on the device
 
 - [ ] **P1: Keys persist in IndexedDB until sign-out.** The vault and chat keys are stored as non-extractable CryptoKeys
   (`installKeys()` in `public/secure.js`), so they can't be copied out, but any script running on the page, or
-  anyone using the unlocked device, can *use* them. Add an idle auto-lock that requires the passkey again, and a
+  anyone using the unlocked device, can *use* them. Add an idle auto-lock that requires signing in again, and a
   "this is a shared computer" option that keeps keys in memory only.
 - [ ] **P1: XSS means key misuse.** The CSP blocks inline and third-party scripts, but `style-src` allows
   `'unsafe-inline'` (inline `style=` attributes in the markup). Move inline styles to CSS so the policy can be
   tightened, and keep all user content going through `esc()`.
 - [ ] **P2: The browser extension attack surface** (extensions can read page content) is outside our control. Document it.
 
-## 5. Accounts, sessions, and passkeys
+## 5. Accounts and sessions
 
 - [ ] **P1: Session lifetime and revocation.** Sessions last 30 days, with no "sign out everywhere" and no list of
   active sessions. Add both, plus shorter idle timeouts.
@@ -101,18 +98,8 @@ left**, and about the limits of doing end-to-end encryption in a web app.
 - [ ] **P1: CSRF.** Protection relies on `SameSite=Lax` plus requiring `Content-Type: application/json`. Add an
   explicit CSRF token or an `Origin` header check on state-changing requests.
 - [ ] **P1: Secure cookies** are only set when `ORIGIN` starts with `https:`. Make HTTPS the default outside localhost.
-- [ ] **P1: Passkey challenges live in process memory** (`webauthn.js`). A restart cancels sign-ins in progress, and
-  multiple server processes would break sign-in. Move challenges to the database or a shared store with a TTL.
-- [ ] **P2: Minimal WebAuthn verification.** We use attestation `none`, trust the browser-reported SPKI public key
-  without parsing the COSE key in `attestationObject`, and only enforce the signature counter when both values are
-  non-zero. Consider full CBOR/COSE parsing, checking backup-eligible/backed-up flags (to warn about device-bound
-  passkeys with no backup), and an authenticator allow-list if needed.
-- [ ] **P2: Error messages** on sign-in reveal whether a passkey is registered ("This passkey isn't registered…").
-  This is low risk, but could be made generic.
-- [ ] **P2: Lost passkey = lost account (by design).** Keep the nudges (second device or security key). Consider an
-  optional, user-held recovery key (printed or saved offline) that wraps the vault key, never escrowed by us.
-- [ ] **P2: PRF support varies** across browsers and passkey managers. Signup is blocked without it; keep the
-  supported list in the UI current. If a passkey provider is compromised, so is that passkey's vault access.
+- [ ] **P2: PRF support varies** across browsers and passkey managers. This is now the 6j0.org identity server's
+  concern (Bored's own passkeys were removed), kept here for the research.
   **State as of 2026-11-15:**
   - **Bitwarden** doesn't return PRF results for passkeys stored in it. We tested the browser extension in LibreWolf
     and Chromium on Arch Linux, and the app as a passkey provider on GrapheneOS with Vanadium: the extension
@@ -125,19 +112,18 @@ left**, and about the limits of doing end-to-end encryption in a web app.
     iCloud Keychain (macOS/iOS 18+).
   - So no free, open-source password manager supports PRF in a released version yet. The 6j0.org identity server
     is adding a username + password fallback for now. **Follow up:** recheck Bitwarden and KeePassXC, and once one
-    ships PRF, update the advice text (`PRF_ADVICE` in 6j0-org-id `public/id.js`, `UPGRADE_ADVICE` in
-    `public/app.js`) to recommend it again.
+    ships PRF, update the advice text (`PRF_ADVICE` in 6j0-org-id `public/id.js`) to recommend it again.
 
-### With a 6j0.org identity (`AUTH_MODE=6j0`)
+### The 6j0.org identity
 
 - [ ] **P1: The identity server holds every app's keys.** It can't read Bored data on its own (it never sees the root
   secret), but a compromised id.6j0.org page could derive every app's key for whoever signs in there. Keep it small,
   strictly CSP'd, and separately deployed. See the id repo's TODO.
-- [ ] **P1: Signing out of Bored doesn't sign out of id.6j0.org,** so "Continue" signs straight back in without a
+- [ ] **P1: Signing out of Bored doesn't sign out of id.6j0.org.** After signing out, Bored shows its sign-in page
+  instead of sending the browser to the identity server on its own, but its button signs straight back in without a
   passkey prompt while the identity session lasts. Say so in the UI, and consider a "sign out of all 6j0.org apps" link.
-- [ ] **P2: Setup tickets and seen-token IDs live in process memory** (like passkey challenges): a restart between the
+- [ ] **P2: Setup tickets and seen-token IDs live in process memory**: a restart between the
   redirect and account creation means signing in again.
-- [ ] **P2: No migration between modes.** A local-passkey account can't be linked to a 6j0.org identity (or back).
 
 ## 6. Abuse, rate limiting, and safety
 
@@ -164,7 +150,7 @@ left**, and about the limits of doing end-to-end encryption in a web app.
 
 ## 7. Data retention and deletion
 
-- [ ] **P1: No account deletion.** Add "delete my account", which removes the user, passkeys, sessions, vault, public
+- [ ] **P1: No account deletion.** Add "delete my account", which removes the user, sessions, vault, public
   posts, and main inbox mail. Channel mail can't be tied to the account, so the browser would
   have to delete it (it knows the channels). Decide what happens to the other person's view of shared matches.
 - [ ] **P1: No retention policy.** Ended public posts and all mail are kept forever. Define retention and purge on
@@ -185,7 +171,7 @@ SQLite is enough. For under 100 users it's not even close to a limit; SQLite com
 - One app process. node:sqlite is synchronous and Bored runs as one process, which is fine. Just don't scale it out to several copies.
 
 Must-haves before GA:
-1. HTTPS, with ORIGIN set. Passkeys won't work without it. Put a reverse proxy like Caddy in front, and decide what it logs, since IP addresses are a P0 privacy item in TODO.md.
+1. HTTPS, with ORIGIN set. Bored's encryption won't work without it. Put a reverse proxy like Caddy in front, and decide what it logs, since IP addresses are a P0 privacy item in TODO.md.
 2. Safety features. This app gets strangers to meet in person. I found no block or report feature in the server. You need at least:
    - block a person;
    - report a post or person, and a way for you to act on reports (hide posts, ban accounts);

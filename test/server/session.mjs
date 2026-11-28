@@ -9,7 +9,7 @@ import { TMP } from '../lib.mjs';
 import { startServer } from '../spawn.mjs';
 
 const DB_PATH = join(TMP, 'session.sqlite');
-const { base: BASE, proc: server, log } = await startServer({ DEMO: '', AUTH_MODE: '', DB_PATH, FEEDBACK_PATH: join(TMP, 'session.jsonl') });
+const { base: BASE, proc: server, log } = await startServer({ DEMO: '', AUTH_MODE: '6j0', ID_ORIGIN: 'http://127.0.0.1:9', DB_PATH, FEEDBACK_PATH: join(TMP, 'session.jsonl') });
 try {
   const db = new DatabaseSync(DB_PATH);
   const userId = db.prepare('INSERT INTO users (guid) VALUES (?)').run(crypto.randomUUID()).lastInsertRowid;

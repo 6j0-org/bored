@@ -1,7 +1,6 @@
 // Bored — vanilla JS front-end.
 import {
-  prfSupport, createAccount, signIn, addPasskey, loadKeys, clearKeys, hasKeys, vault,
-  PrfUnsupportedError, startIdSignIn, finishIdSignIn, hasIdCallback, createDemoAccount,
+  loadKeys, clearKeys, hasKeys, vault, startIdSignIn, finishIdSignIn, hasIdCallback, createDemoAccount,
   newInviteKey, sealForInvite, openForInvite, sha1Hex, b64u, ensureKeys,
 } from './secure.js';
 import { locationHtml, mountLocationField, pickLocation, PIN_SVG, parseLatLon } from './location.js';
@@ -94,10 +93,6 @@ const TAB_ICONS = {
   account: PERSON_ICON,
 };
 
-const GUEST_TABS = [
-  { id: 'discover', label: 'Discover' },
-  { id: 'account', label: 'Sign in' },
-];
 const TABS = [
   { id: 'discover', label: 'Discover' },
   { id: 'confirm', label: 'Confirm' },
@@ -208,9 +203,9 @@ const POST_IDEAS = [
 ];
 const POST_IDEA_MS = 5000;
 
-// config.authMode: 'local' (Bored passkeys) | '6j0' (sign in with a 6j0.org identity at config.idOrigin)
+// config.authMode: '6j0' (sign in with a 6j0.org identity at config.idOrigin) | 'demo' (no sign-in, see startDemo)
 //   | 'demo' (server DEMO=1: no sign-in; every browser gets its own throwaway account full of demo content).
-const state = { config: { authMode: 'local' }, me: null, tab: 'discover', chat: null, discoverTags: loadSet('discoverTags'), discoverCosts: new Set([...loadSet('discoverCosts')].filter(c => c in COST_FILTERS)),
+const state = { config: { authMode: '6j0' }, me: null, tab: 'discover', chat: null, discoverTags: loadSet('discoverTags'), discoverCosts: new Set([...loadSet('discoverCosts')].filter(c => c in COST_FILTERS)),
   discoverDate: (() => { try { const d = localStorage.getItem('discoverDate'); return d in DATE_FILTERS ? d : ''; } catch { return ''; } })(),
   discoverNear: (() => { const n = loadJson('discoverNear', null); return n && Number.isFinite(n.lat) && Number.isFinite(n.lon) ? n : null; })(),
   discoverOnline: loadJson('discoverOnline', false) === true,
@@ -296,7 +291,7 @@ async function api(path, { method = 'GET', body } = {}) {
     body: body !== undefined ? JSON.stringify(body) : method !== 'GET' ? '{}' : undefined,
   });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && state.me && !path.startsWith('/api/passkey/') && !path.startsWith('/api/id/')) { state.me = null; await clearKeys(); resetMail(); render(); }
+  if (res.status === 401 && state.me && !path.startsWith('/api/id/')) { state.me = null; await clearKeys(); resetMail(); render(); }
   if (!res.ok) throw Object.assign(new Error(data.error || 'Request failed'), { status: res.status });
   return data;
 }
@@ -442,6 +437,7 @@ const PENDING_INVITE = 'pendingInvite';
 const pendingInvite = () => { try { return JSON.parse(sessionStorage.getItem(PENDING_INVITE)); } catch { return null; } };
 const dropPendingInvite = () => { try { sessionStorage.removeItem(PENDING_INVITE); } catch {} };
 async function offerPendingInvite() {
+  if (leaving) return; // on the way to sign in: offered after
   const { token, key, name } = pendingInvite() || {};
   if (!token) return;
   if (!key) { dropPendingInvite(); return toast("That invitation link is incomplete. Ask them to share it again."); }
@@ -450,7 +446,7 @@ async function offerPendingInvite() {
   catch (e) { dropPendingInvite(); return toast(e.message); }
   if (info.skip) { dropPendingInvite(); return toast(info.skip); }
   const result = await connectSheet({ token, key, name, info, ready: state.me && hasKeys() });
-  if (result === 'signin') return signInNow(); // enterApp offers it again after sign-in
+  if (result === 'signin') return goSignIn(); // enterApp offers it again after sign-in
   dropPendingInvite();
 }
 // Check an invitation before offering it: { icon, skip } (skip: why not to offer it, if there's a reason).
@@ -480,7 +476,7 @@ function connectSheet({ token, key, name, info, ready }) {
         <input name="myName" required maxlength="60" placeholder="e.g. Sam from book club" value="${esc(myName())}" autocomplete="off"></label>
       <p class="note">Nicknames are private: only you see the one you give them, and only they see the one they give
         you. What you suggest is encrypted so only they can read it.</p>`
-      : '<p class="note">Sign in or create an account first. This invitation will be waiting.</p>'}
+      : '<p class="note">Sign in first. This invitation will be waiting.</p>'}
       <div class="two">
         <button type="button" class="btn ghost" data-no>No thanks</button>
         <button class="btn">${ready ? 'Ask to connect' : 'Sign in'}</button>
@@ -848,7 +844,7 @@ function badgeCounts() {
 
 function shell(content) {
   const me = state.me, c = badgeCounts();
-  const tabs = me ? TABS : GUEST_TABS;
+  const tabs = signedIn() ? TABS : []; // none on the sign-in and unlock page
   // The page's name under the board. The account screen is "Unlock" for someone signed in without their keys here.
   const title = state.tab === 'account' ? (me ? 'Unlock' : 'Sign in') : state.tab === 'feedback' ? 'Feedback' : TABS.find(t => t.id === state.tab)?.label || '';
   // Under the board on every screen: Bored is in alpha, and asks for feedback (the feedback page, once signed in).
@@ -861,7 +857,7 @@ function shell(content) {
       <h1 class="page-title">${esc(title)}</h1>
     </header>
     <main id="view"></main>
-    <nav class="tabs" style="grid-template-columns: repeat(${tabs.length}, 1fr)">
+    <nav class="tabs" style="grid-template-columns: repeat(${tabs.length}, 1fr)" ${tabs.length ? '' : 'hidden'}>
       ${tabs.map(t => {
         const n = t.id === 'confirm' ? c.confirm : t.id === 'plans' ? c.plans : 0;
         return `<button data-tab="${t.id}" class="${state.tab === t.id ? 'active' : ''}" aria-label="${t.label}" title="${t.label}"
@@ -906,20 +902,53 @@ async function recheckIdentity() {
   store(ID_RECHECKED, now); store(ID_SAVE_CLICKED, 0);
   try { await startIdSignIn(state.config); return true; } catch (e) { console.warn(e); return false; }
 }
-// Send a signed-out guest to sign in. With a 6j0.org identity that's straight to the identity server (the account
-// tab would only offer its one button); otherwise it's the account tab, with `why` as a toast. Someone signed in
-// without their keys here still gets the account tab, to unlock.
-async function signInNow(why) {
-  if (state.config.authMode === '6j0' && !state.me) {
-    try { return await startIdSignIn(state.config); } catch (e) { why = e.message; }
-  }
-  if (why) toast(why);
-  if (state.tab !== 'account') go('account');
+// ---------- signing in ----------
+// Bored is only used signed in. Anyone who isn't, or is signed in without this browser's keys, is sent to the
+// identity server as soon as the page loads (render() calls autoSignIn) and comes back signed in, with no screen in
+// between. A deep link survives the trip in sessionStorage: "?open=…" here (PENDING_OPEN, opened by openPending
+// after sign-in), and an invitation in PENDING_INVITE.
+// The sign-in page (viewAccount, with a button) shows instead when sending them would go round in circles or undo
+// what they asked for: sign-in just failed (noAutoSignIn), they were sent less than a minute ago in this tab and came
+// back without signing in (SIGNIN_TRIED), or they signed out on this browser (SIGNED_OUT, until they sign in again:
+// the identity server would otherwise sign them straight back in).
+const PENDING_OPEN = 'pendingOpen', SIGNIN_TRIED = 'bored-signin-tried', SIGNED_OUT = 'bored-signed-out';
+let noAutoSignIn = false, leaving = false;
+const signedIn = () => Boolean(state.me && hasKeys());
+const session = {
+  get: (k) => { try { return sessionStorage.getItem(k); } catch { return null; } },
+  set: (k, v) => { try { sessionStorage.setItem(k, v); } catch {} },
+  drop: (k) => { try { sessionStorage.removeItem(k); } catch {} },
+};
+// Off to the identity server. False if it couldn't start (the reason is a toast).
+async function goSignIn() {
+  if (leaving) return true;
+  leaving = true;
+  session.set(SIGNIN_TRIED, String(Date.now()));
+  try { await startIdSignIn(state.config); return true; }
+  catch (e) { leaving = false; toast(e.message); return false; }
 }
-// The feedback page needs an account (posts are filed under it), so anyone else is sent to sign in first.
+// Called before drawing a screen: true when the browser is on its way to the identity server instead.
+function autoSignIn() {
+  if (leaving) return true;
+  if (state.config.authMode !== '6j0' || signedIn() || noAutoSignIn || stored(SIGNED_OUT)) return false;
+  if (Date.now() - (Number(session.get(SIGNIN_TRIED)) || 0) < 60_000) return false;
+  goSignIn();
+  return true;
+}
+function signedInHere() { session.drop(SIGNIN_TRIED); try { localStorage.removeItem(SIGNED_OUT); } catch {} }
+// After sign-in (or on loading signed in): go where a deep link said. True if it did.
+function openPending() {
+  const open = session.get(PENDING_OPEN);
+  if (!open || !signedIn()) return false;
+  session.drop(PENDING_OPEN);
+  openScreen(open);
+  return true;
+}
+// The feedback page needs an account (posts are filed under it), so anyone else signs in first and lands there after.
 function openFeedback() {
-  if (state.me && hasKeys()) return go('feedback');
-  signInNow('Sign in to send feedback.');
+  if (signedIn()) return go('feedback');
+  session.set(PENDING_OPEN, 'feedback');
+  goSignIn();
 }
 
 // Network trouble (no connection, a timeout, or the server restarting), as opposed to an answer about the account.
@@ -968,9 +997,9 @@ async function render() {
   mountDeck.keyHandler = null;
   stopFresh(); // the new view starts its own, if it has one
   const asked = state.tab;
-  // Signed in, but this browser doesn't hold the keys (e.g. keys were cleared): unlock with a passkey first.
-  if (state.me && !hasKeys()) state.tab = 'account';
-  if (!state.me && !GUEST_TABS.some(t => t.id === state.tab)) state.tab = 'discover';
+  if (autoSignIn()) return;
+  // Not signed in, or signed in without this browser's keys (e.g. they were cleared): the sign-in or unlock page.
+  if (!signedIn()) state.tab = 'account';
   syncHistory(state.tab !== asked);
   const views = {
     discover: viewDiscover, confirm: viewConfirm, plans: viewPlans, post: viewPost, profile: viewProfile, account: viewAccount,
@@ -1133,8 +1162,9 @@ async function enterApp(tab = 'discover') {
   await syncConnections();
   await loadMail().catch(err => console.warn(err));
   syncAudiences().catch(err => console.warn(err));
+  signedInHere();
   state.tab = tab; state.chat = null;
-  render();
+  if (!openPending()) render();
   offerPendingInvite();
   syncPush();
 }
@@ -1318,22 +1348,23 @@ async function drawNtfySettings(el) {
     api('/api/push/test', { method: 'POST' }).then(() => toast('Sent. It should arrive in a moment.'), err => toast(err.message)));
 }
 
-const PASSKEY_ADVICE = `Your passkey <b>is</b> your account: there's no email or password to recover it with.
-  Add a second passkey in Profile (another device or a security key), so losing one device doesn't lose your account.`;
-const UPGRADE_ADVICE = `Bored encrypts your contacts and chats with a key that only your passkey can make, using a
-  passkey feature called <b>PRF</b>. This browser or passkey manager doesn't support it. <b>Some password managers,
-  including Bitwarden, don't support it yet.</b><br><br>
-  Passkeys that do: a <b>security key</b> (YubiKey 5, Nitrokey 3, SoloKey 2, and similar), <b>Google Password
-  Manager</b> (Chrome, Android) and <b>iCloud Keychain</b> (Safari on macOS/iOS 18 or newer).`;
-
 const idHost = () => new URL(state.config.idOrigin).host;
 
-// AUTH_MODE=6j0: one button for sign-in, sign-up, and unlock; the identity server handles the passkey.
-function viewAccountId(v) {
-  const unlocking = Boolean(state.me);
+// The sign-in and unlock page, for when autoSignIn doesn't go to the identity server on its own: one button for
+// sign-in, sign-up, and unlock; the identity server does the rest. In the demo (where nobody signs in), only if
+// making the demo account failed.
+async function viewAccount(v) {
+  if (isDemo()) {
+    v.innerHTML = `<div class="account stack"><p class="lead">The demo couldn't start.</p>
+      <button class="btn" id="demoRetry">Try again</button>${ABOUT_LINKS}</div>`;
+    v.querySelector('#demoRetry').onclick = () => startDemo().catch(e => toast(e.message));
+    return;
+  }
+  const unlocking = Boolean(state.me), signedOut = !unlocking && stored(SIGNED_OUT);
   v.innerHTML = `
     <div class="account stack">
       <p class="lead">${unlocking ? 'Unlock your account with your 6j0.org identity to see your contacts and chats.'
+        : signedOut ? "You're signed out of Bored on this browser."
         : `Swipe through what's happening nearby, and when you and the host both say yes, it's on.
            Join something fun, or host your own.`}</p>
       <button class="btn" id="idSignIn">${unlocking ? 'Unlock' : 'Continue'} with ${esc(idHost())}</button>
@@ -1345,70 +1376,8 @@ function viewAccountId(v) {
       ${unlocking ? `<button class="btn" id="logout">Sign out</button>` : ''}
       ${ABOUT_LINKS}
     </div>`;
-  v.querySelector('#idSignIn').onclick = async () => {
-    try { await startIdSignIn(state.config); } catch (e) { v.querySelector('#authErr').textContent = e.message; }
-  };
+  v.querySelector('#idSignIn').onclick = () => goSignIn();
   v.querySelector('#logout')?.addEventListener('click', signOut);
-}
-
-// Sign up, sign in, or unlock (signed in but keys missing in this browser). Shown as a tab for guests.
-async function viewAccount(v) {
-  if (state.config.authMode === '6j0') return viewAccountId(v);
-  const unlocking = Boolean(state.me);
-  const support = await prfSupport();
-  v.innerHTML = `
-    <div class="account stack">
-      <p class="lead">${unlocking ? 'Unlock your account with your passkey to see your contacts and chats.'
-        : `Swipe through what's happening nearby, and when you and the host both say yes, it's on.
-           Join something fun, or host your own.`}</p>
-      ${unlocking ? `<button class="btn" id="signIn">Unlock with passkey</button>` : `
-        <button class="btn" id="signIn">Sign in with passkey</button>
-        <button class="btn" id="create" ${support === false ? 'disabled' : ''}>Create an account</button>`}
-      <div class="error" id="authErr"></div>
-      <div class="notice ${support === false ? 'warn' : ''}" id="authNote">${support === false ? UPGRADE_ADVICE : `
-        <b>No usernames, passwords, or email.</b> You get an anonymous account protected by a passkey.
-        Nobody sees a name for you unless they've connected with you, and then only the nickname <em>they</em> chose.
-        <br><br>${PASSKEY_ADVICE}`}</div>
-      ${unlocking ? `<button class="btn" id="logout">Sign out</button>` : ''}
-      ${ABOUT_LINKS}
-    </div>`;
-  const err = v.querySelector('#authErr'), note = v.querySelector('#authNote');
-  const fail = (e) => {
-    if (e instanceof PrfUnsupportedError) {
-      note.classList.add('warn');
-      note.innerHTML = UPGRADE_ADVICE + `<br><br>If a "Bored" passkey was just saved, you can delete it from your passkey manager.`;
-      err.textContent = '';
-    } else if (e?.name === 'NotAllowedError') err.textContent = 'Passkey request was cancelled or timed out.';
-    else err.textContent = e.message;
-  };
-  v.querySelector('#signIn').onclick = async () => {
-    err.textContent = '';
-    try { await signIn(api); await enterApp(); toast('Welcome back!'); } catch (e) { fail(e); }
-  };
-  v.querySelector('#create')?.addEventListener('click', async () => {
-    err.textContent = '';
-    try {
-      await createAccount(api, nextStep);
-      await enterApp('profile');
-      toast('Account created! Add a second passkey below so you never get locked out.');
-    } catch (e) { fail(e); }
-  });
-  v.querySelector('#logout')?.addEventListener('click', signOut);
-}
-
-// "Tap to continue" between passkey prompts (Safari allows only one prompt per tap). Rejects if dismissed.
-function nextStep(message, button = 'Continue') {
-  return new Promise((resolve, reject) => {
-    const cancel = () => { close(); reject(Object.assign(new Error('Cancelled'), { name: 'NotAllowedError' })); };
-    // No closing by tapping outside: a stray tap mid-sign-up would cancel it.
-    const { sheet, close } = openSheet(`<div class="stack panel" aria-live="polite">
-      <h2>One more step</h2><p class="note">${esc(message)}</p>
-      <div class="two"><button type="button" class="btn ghost" id="stepCancel">Cancel</button>
-        <button type="button" class="btn" id="stepGo">${esc(button)}</button></div></div>`, { onDismiss: cancel, backdrop: false });
-    sheet.querySelector('#stepGo').onclick = () => { close(); resolve(); };
-    sheet.querySelector('#stepCancel').onclick = cancel;
-    sheet.querySelector('#stepGo').focus();
-  });
 }
 
 async function signOut() {
@@ -1418,11 +1387,12 @@ async function signOut() {
   resetMail();
   state.me = null; state.tab = 'discover'; state.chat = null;
   if (isDemo()) return startDemo();
+  store(SIGNED_OUT, Date.now()); // the sign-in page from now on, not straight back in (see autoSignIn)
   render();
 }
 
 // ---------- deleting an account ----------
-// At the bottom of Profile. With Bored's own accounts (and in the demo), the server erases everything it holds for
+// At the bottom of Profile. In the demo, the server erases everything it holds for
 // the account (POST /api/account/delete in server.js) once you type the last 4 characters of your Account ID, which
 // is just below. With a 6j0.org identity, the account belongs to the identity, so it's deleted at the identity
 // server (its "Delete your identity", at /#delete), along with the identity's accounts on every other 6j0.org
@@ -1575,13 +1545,9 @@ function postCounts(posts) {
 }
 
 async function viewDiscover(v) {
-  // The hint goes right under the heading: under the deck, the tab bar would cover it on a phone. Guests have no
-  // discard pile (their passes aren't kept).
-  // Guests get a warning above everything: swiping looks like it does something, but nothing is saved or sent.
-  v.innerHTML = `${state.me ? '' : `<div class="notice warn guest-warning" role="note">
-      <b>You're not signed in, so swiping does nothing.</b> Passes aren't saved, and you can't ask to join anything.
-      <button type="button" class="btn small" id="guestSignIn">Sign in or create an account</button></div>`}
-    <p class="hint pile-hint">${state.me ? 'Scroll up to refresh. Scroll down to see your discard pile.' : 'Scroll up to refresh.'}</p>
+  // The hint goes right under the heading: under the deck, the tab bar would cover it on a phone.
+  v.innerHTML = `
+    <p class="hint pile-hint">Scroll up to refresh. Scroll down to see your discard pile.</p>
     ${searchBoxHtml('Search posts')}
     <div class="filters" id="filters"></div>
     <p class="note mod-note" id="modNote" hidden></p>
@@ -1589,7 +1555,6 @@ async function viewDiscover(v) {
     <section class="pile" id="pile" aria-labelledby="pileTitle" hidden></section>`;
   const filtersEl = v.querySelector('#filters'), host = v.querySelector('#deckHost'), pileEl = v.querySelector('#pile');
   const modNote = v.querySelector('#modNote');
-  v.querySelector('#guestSignIn')?.addEventListener('click', () => signInNow());
   let options = { tags: [], costs: [], dates: [] }, events = [], deck = null;
   let hidden = new Map(); // posts my moderation settings hide, from the deck and the discard pile (moderatePosts)
 
@@ -1636,12 +1601,12 @@ async function viewDiscover(v) {
     const mail = await loadMail().catch(err => { console.warn(err); return mailView(); });
     // Posts my moderation settings hide (blocked hosts, reports, and word lists that hide posts) are left out of the
     // deck and the discard pile, before the filters, so their counts don't include them either.
-    hidden = await moderatePosts([...(mail?.deck || []), ...(state.me ? mail?.swiped || [] : [])]);
+    hidden = await moderatePosts([...(mail?.deck || []), ...(mail?.swiped || [])]);
     if (!document.body.contains(host)) return;
     const posts = (mail?.deck || []).filter(p => !hidden.has(p.pid));
     modNote.hidden = !hidden.size;
-    modNote.innerHTML = `${hidden.size === 1 ? '1 post is' : `${hidden.size} posts are`} hidden by ${state.me ? 'your' : 'the default'} moderation settings.${
-      state.me && hasKeys() ? ' <button type="button" class="link" data-mod-settings>Change them</button>' : ''}`;
+    modNote.innerHTML = `${hidden.size === 1 ? '1 post is' : `${hidden.size} posts are`} hidden by your moderation settings.
+      <button type="button" class="link" data-mod-settings>Change them</button>`;
     allPosts = posts; swiped.clear();
     apply({ soft });
     if (!pile?.busy()) drawPile();
@@ -1667,7 +1632,7 @@ async function viewDiscover(v) {
   // my answer. Swipe one again, or use its button, to change it. Signed in only: a guest's passes aren't kept.
   let pile = null, pileCards = [];
   function drawPile() {
-    pileCards = (state.me ? mailView()?.swiped || [] : []).filter(p => !hidden.has(p.pid)).map(p => ({ ...mailCard(p), yes: p.swipe === 'in', request: p.request }));
+    pileCards = (mailView()?.swiped || []).filter(p => !hidden.has(p.pid)).map(p => ({ ...mailCard(p), yes: p.swipe === 'in', request: p.request }));
     pile = mountPile(pileEl, {
       items: pileCards, renderCard: eventCard, yesLabel: "I'm in", noLabel: 'Pass',
       label: (c) => c.yes ? ['in', c.request === 'waitlisted' ? "I'm in · waitlist" : "I'm in"] : ['pass', 'Pass'],
@@ -1833,21 +1798,16 @@ function deckOptions(events, changed, filters) {
     renderCard: eventCard,
     yesLabel: "I'm in", noLabel: 'Pass',
     // Saying yes turns the card over: the back has the optional rating and note for the host, and swiping right
-    // again sends the request (with or without them); left turns it back. Guests get no back (they sign in first).
+    // again sends the request (with or without them); left turns it back.
     back: {
       yesLabel: 'Send request', noLabel: 'Back',
-      render: (t) => state.me ? `<div class="body join-back">
+      render: (t) => `<div class="body join-back">
         <h2>Ask to join</h2>
         <p class="join-title"><b>${esc(t.title)}</b></p>
-        ${joinExtrasHtml('These are optional. Swipe right again to skip them and send your request.', 2)}</div>` : null,
+        ${joinExtrasHtml('These are optional. Swipe right again to skip them and send your request.', 2)}</div>`,
       mount: mountJoinExtras,
     },
     onSwipe: async (t, yes, extra = {}) => {
-      if (!state.me) {
-        // Guests can browse; passing is just local, but saying yes needs an account.
-        if (yes) { signInNow('Sign in or create an account to say yes.'); return KEEP_CARD; }
-        return;
-      }
       if (!yes) { await pass(t.pid); return changed(); }
       // From the card's back: how interested they are and a note for the host (both optional).
       const ask = extra.back || await askJoin(t);
@@ -3143,7 +3103,7 @@ function openContactSheet(guid, onSaved) {
 async function viewProfile(v) {
   const idMode = state.config.authMode === '6j0';
   await syncConnections();
-  const [passkeys, invites] = await Promise.all([idMode || isDemo() ? [] : api('/api/passkeys'), api('/api/invites'), loadMail().catch(() => {}),
+  const [invites] = await Promise.all([api('/api/invites'), loadMail().catch(() => {}),
     api('/api/me').then(m => { state.me = m; }, () => {})]); // fresh badges
   const me = state.me, st = mailView()?.stats || {};
   // Badges from the server, as cards with the stats: Tester once a developer has marked any of your feedback as done,
@@ -3210,7 +3170,7 @@ async function viewProfile(v) {
 
     <section data-search-group>
     <div class="section-title">Contacts</div>
-    <p class="note">People you've connected with: you both said yes to an invitation. Names and tags here are yours alone: they're encrypted with your passkey, and nobody else, including the server, can read them.</p>
+    <p class="note">People you've connected with: you both said yes to an invitation. Names and tags here are yours alone: they're encrypted with a key only you can unlock, and nobody else, including the server, can read them.</p>
     ${allTags.length ? `<div class="filter-row" role="group" aria-label="Filter contacts by tag"><span class="label">Tags</span>
       ${allTags.map(t => `<button type="button" class="chip filter ${sel.has(t) ? 'on' : ''}" data-ctag="${esc(t)}" aria-pressed="${sel.has(t)}">#${esc(t)}</button>`).join('')}
       ${sel.size ? `<button type="button" class="chip filter clear" data-cclear>Clear</button>` : ''}</div>` : ''}
@@ -3249,19 +3209,9 @@ async function viewProfile(v) {
     ${isDemo() ? `<div class="section-title">Demo</div>
     <div class="notice">This is a demo account, made just for this browser. It's deleted after a day, and everything
       resets when the server restarts. Start over to get a fresh account with the demo content back.</div>`
-    : idMode ? `<div class="section-title">Sign-in</div>
+    : `<div class="section-title">Sign-in</div>
     <div class="notice">You sign in with your 6j0.org identity. Manage your password at
-      <a href="${esc(state.config.idOrigin)}/">${esc(idHost())}</a>. Keep it in a password manager: nobody can reset it.</div>` : `
-    <div class="section-title">Passkeys</div>
-    <div class="notice ${passkeys.length < 2 ? 'warn' : ''}">${passkeys.length < 2
-      ? `<b>You only have one passkey.</b> If you lose it, your account is gone for good. Add another one: on your phone (scan the QR code your browser offers) or on a security key.`
-      : `You have ${passkeys.length} passkeys, so losing one device won't lock you out.`}</div>
-    <div class="list">
-      ${passkeys.map((p, i) => `<div class="row">
-        <div class="grow"><div class="title">Passkey ${i + 1}</div><div class="sub">Added ${fmt(p.created_at)} · last used ${fmt(p.last_used_at)}</div></div>
-        ${passkeys.length > 1 ? `<button class="btn small" data-rmkey="${p.id}" aria-label="Remove passkey">✕</button>` : ''}</div>`).join('')}
-    </div>
-    <button class="btn" id="addKey">Add another passkey</button>`}
+      <a href="${esc(state.config.idOrigin)}/">${esc(idHost())}</a>. Keep it in a password manager: nobody can reset it.</div>`}
 
     <button class="btn" id="logout" style="margin-top:24px">${isDemo() ? 'Start over' : 'Sign out'}</button>
     ${deleteAccountHtml(idMode)}
@@ -3315,20 +3265,6 @@ async function viewProfile(v) {
     sel.has(b.dataset.ctag) ? sel.delete(b.dataset.ctag) : sel.add(b.dataset.ctag); render();
   });
   v.querySelector('[data-cclear]')?.addEventListener('click', () => { sel.clear(); render(); });
-  v.querySelector('#addKey')?.addEventListener('click', async () => {
-    try {
-      toast('First confirm with a passkey you already have, then create the new one.');
-      await addPasskey(api, nextStep);
-      toast('Passkey added. You now have a backup.'); render();
-    } catch (e) {
-      toast(e instanceof PrfUnsupportedError ? "That passkey manager can't create the encryption key (some, including Bitwarden, don't support it). Try a security key or your phone."
-        : e?.name === 'NotAllowedError' ? 'Passkey request was cancelled.' : e?.name === 'InvalidStateError' ? 'That device already has a passkey for this account.' : e.message);
-    }
-  });
-  v.querySelectorAll('[data-rmkey]').forEach(b => b.onclick = async () => {
-    if (!confirm("Remove this passkey? You won't be able to sign in with it anymore.")) return;
-    try { await api(`/api/passkeys/${b.dataset.rmkey}`, { method: 'DELETE' }); render(); } catch (e) { toast(e.message); }
-  });
   v.querySelector('#logout').onclick = signOut;
   mountDeleteAccount(v);
   mountModeration(v);
@@ -3475,12 +3411,19 @@ setInterval(async () => {
 // Boot: restore the session and, if this browser still holds the keys, the vault.
 initMail(api);
 await Promise.all([api('/api/config').then(c => { state.config = c; }, () => {}), loadBuiltinWords()]);
-// An invitation link (#invite=…): remember it through sign-in, and take it out of the address bar.
+// Deep links, remembered through sign-in and taken out of the address bar: an invitation (#invite=…), and a screen
+// to open (?open=…, from a notification or the About page's Feedback link; see openScreen).
 {
   const frag = new URLSearchParams(location.hash.slice(1)), token = frag.get('invite');
   if (token) {
-    try { sessionStorage.setItem(PENDING_INVITE, JSON.stringify({ token, key: frag.get('key'), name: (frag.get('name') || '').slice(0, 60) })); } catch {}
+    session.set(PENDING_INVITE, JSON.stringify({ token, key: frag.get('key'), name: (frag.get('name') || '').slice(0, 60) }));
     history.replaceState(null, '', location.pathname + location.search);
+  }
+  const query = new URLSearchParams(location.search), open = query.get('open');
+  if (open) {
+    session.set(PENDING_OPEN, open);
+    query.delete('open');
+    history.replaceState(null, '', location.pathname + (query.size ? `?${query}` : '') + location.hash);
   }
 }
 if (state.config.authMode === '6j0' && hasIdCallback()) {
@@ -3490,8 +3433,9 @@ if (state.config.authMode === '6j0' && hasIdCallback()) {
     await enterApp(res.created ? 'profile' : 'discover');
     toast(res.created ? 'Account created!' : 'Welcome back!');
   } catch (e) {
-    await refreshMe();
-    if (state.me && !hasKeys()) state.tab = 'account';
+    // The sign-in page with the reason, not straight back to the identity server.
+    noAutoSignIn = true;
+    await refreshMe().catch(() => {});
     render(); toast(e.message);
   }
 } else {
@@ -3519,7 +3463,8 @@ if (state.config.authMode === '6j0' && hasIdCallback()) {
       try { if (state.me) await api('/api/logout', { method: 'POST' }); await startDemo(); } catch (e) { toast(e.message); }
     }
     if (!(hasKeys() && await recheckIdentity())) {
-      render();
+      if (signedIn()) signedInHere();
+      if (!openPending()) render();
       offerPendingInvite();
       syncPush();
     }
@@ -3554,8 +3499,4 @@ if (window.visualViewport) {
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').catch(() => {});
   navigator.serviceWorker.addEventListener('message', (e) => { if (e.data?.type === 'open') openScreen(e.data.open); });
-}
-{
-  const open = new URLSearchParams(location.search).get('open');
-  if (open) { history.replaceState(null, '', location.pathname + location.hash); openScreen(open); }
 }

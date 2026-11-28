@@ -57,7 +57,7 @@ export function findChrome() {
 const pageErrors = [];
 
 // Opens `path` in a new headless browser with its own profile, and waits for the tab bar.
-export async function browser(name, path = '/?start') {
+export async function browser(name, path = '/') {
   const chrome = findChrome();
   if (!chrome) throw new Error('No Chrome or Chromium found; set CHROME_BIN');
   const profile = mkdtempSync(join(TMP, `chrome-${name}-`));

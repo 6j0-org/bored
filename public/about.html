@@ -9,7 +9,6 @@
   <link rel="preload" href="/fonts/national-park-latin.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="icon" href="/icon.svg" type="image/svg+xml">
   <link rel="manifest" href="/manifest.webmanifest">
-  <script src="/landing.js"></script>
   <script src="/theme.js"></script>
   <script type="module" src="/about.js"></script>
   <style>
@@ -84,7 +83,7 @@
       font-size: clamp(2.7rem, 12vw, 5.4rem); transform: rotate(-1.2deg);
     }
     /* "Alpha" under the board, asking for feedback, the same as in the app (public/style.css). Its link opens the
-       app's feedback page (through "/?start", like "Open Bored"), which asks guests to sign in first. */
+       app's feedback page ("/?open=feedback"), which sends anyone not signed in to sign in first. */
     .alpha-note { margin: 12px 0 0; text-align: center; font-size: .85rem; color: var(--muted); text-wrap: balance; }
     /* the board's wood brown and dark outline, lettered in National Park (same as the app's buttons, public/style.css) */
     .btn {
@@ -199,7 +198,7 @@
   <div class="wrap">
     <header class="bar">
       <span class="board" aria-label="Bored?">Bored?</span>
-      <p class="alpha-note"><em>Alpha:</em> Bored is new and still changing. <a id="feedbackLink" href="/?start&amp;open=feedback">Share what you think</a></p>
+      <p class="alpha-note"><em>Alpha:</em> Bored is new and still changing. <a id="feedbackLink" href="/?open=feedback">Share what you think</a></p>
     </header>
 
     <div class="hero">
@@ -273,7 +272,7 @@
       <div class="slogan">Touch grass.</div>
       <p class="lede">Get outside. Be social. Make life more fun.</p>
       <div class="cta" style="justify-content:center">
-        <a class="btn ghost" id="openBored" href="/?start">Open Bored</a>
+        <a class="btn ghost" id="openBored" href="/">Open Bored</a>
       </div>
     </div>
   </section>

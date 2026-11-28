@@ -83,7 +83,7 @@
 
       <h2>On Bored's server</h2>
       <ul>
-        <li>An anonymous account: a random ID, the public keys other people use to encrypt things for you, and, if you use a passkey, its public half (never the passkey itself).</li>
+        <li>An anonymous account: a random ID, and the public keys other people use to encrypt things for you. You sign in with a 6j0.org identity, which lives at the identity server, not here.</li>
         <li>Your vault: your contacts, the nicknames and tags you give them, your posts, and who you've shared them with. It's encrypted in your browser before it's sent, so Bored can't read it.</li>
         <li>Encrypted mail: private posts, requests to join, answers, and chats. The server can see which inbox each message goes to, when, and how big it is, but not what it says or who sent it.</li>
         <li>Your public posts. Anyone can read them, which is the point.</li>
@@ -94,8 +94,7 @@
       </ul>
 
       <h2>Deleting your account</h2>
-      <p>You can delete your account at the bottom of your Profile page. To confirm, you type the last 4 characters of your Account ID, which is shown just below. Bored's server then erases everything above that belongs to the account, right away: the account and its keys, your vault, your public posts and the reports you made, the mail in your inboxes (including your side of every chat), your invitations and connections, your feedback and replies, your push address, and your ntfy topic. There's no recovery, not even by the developers. Posts you're hosting that are still on are cancelled first, so the people they're shared with are told. The people you've chatted with keep their own side of the conversation, and private posts you shared stay in their encrypted mail, marked cancelled. Deleted feedback is gone from the server's disk after its next restart.</p>
-      <p>If you sign in with a 6j0.org identity, your Bored account belongs to that identity, so you delete it at the identity server instead. That deletes all of your accounts on 6j0.org services, not just Bored. The identity server then tells Bored, which erases your account the same way, with two differences: your side of each chat stays, though it's no longer tied to any account and only the person you chatted with can read it, and your posts aren't cancelled for you, so remove them first.</p>
+      <p>Your Bored account belongs to your 6j0.org identity, so you delete it at the identity server (the bottom of your Profile page links there). That deletes all of your accounts on 6j0.org services, not just Bored. The identity server then tells Bored, whose server erases everything above that belongs to the account, right away: the account and its keys, your vault, your public posts and the reports you made, the mail in your main inbox, your invitations and connections, your feedback and replies, your push address, and your ntfy topic. There's no recovery, not even by the developers. Your side of each chat stays, though it's no longer tied to any account and only the person you chatted with can read it. Your posts aren't cancelled for you, so remove the ones you're hosting first, so the people they're shared with are told. Deleted feedback is gone from the server's disk after its next restart.</p>
 
       <h2>What Bored doesn't keep</h2>
       <ul>
@@ -105,9 +104,11 @@
 
       <h2>In your browser</h2>
       <ul>
-        <li>Two cookies: one that keeps you signed in (until you go 30 days without using Bored, or sign out), and one that remembers you've seen the introduction page (it holds nothing about you).</li>
+        <li>One cookie, which keeps you signed in (until you go 30 days without using Bored, or sign out).</li>
         <li>Your keys, locked in the browser's storage so that not even the app can copy them out. Signing out deletes them.</li>
         <li>Your preferences: theme, currency, and Discover filters, including the place you search near. These never leave your device, but they stay on it after you sign out.</li>
+        <li>After you sign out, a note that you did, so Bored shows its sign-in page instead of signing you straight back in. Signing in again removes it.</li>
+        <li>While you sign in, the link you opened (an invitation, or a screen like Feedback), so Bored can take you there afterwards. It's gone when you close the tab.</li>
       </ul>
       <p>That's everything. There are no analytics, ads, or trackers, so there's no cookie banner: there's nothing to agree to.</p>
 

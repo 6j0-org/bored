@@ -163,6 +163,9 @@ const MIGRATIONS = [
   // means the identity server didn't say, which counts as saved.
   `ALTER TABLE id_accounts ADD COLUMN id_saved INTEGER;
    ALTER TABLE id_accounts ADD COLUMN checked_at TEXT;`,
+  // 6. Bored's own passkeys (AUTH_MODE=local) are gone: everyone signs in with a 6j0.org identity (id_accounts). An
+  // account that had only passkeys can't be signed in to any more.
+  `DROP TABLE passkeys;`,
 ];
 
 function migrate() {

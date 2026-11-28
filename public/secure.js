@@ -1,16 +1,13 @@
-// Bored client-side security: passkeys, the encrypted vault, and the account's keys.
+// Bored client-side security: the 6j0.org identity sign-in, the encrypted vault, and the account's keys.
 //
 // Keys
-// - Each passkey yields a secret via the WebAuthn PRF extension (same passkey + same salt → same 32 bytes).
-//   HKDF turns it into a key-encryption key that wraps the account's random 256-bit *vault key*.
-//   The server stores one wrapped copy per passkey and never sees the PRF output or the vault key.
+// - The 6j0.org identity server hands the page this app's 32-byte *app key* (see the handoff below). HKDF turns it
+//   into a key-encryption key that wraps the account's random 256-bit *vault key*. The server stores the wrapped
+//   copy and never sees the app key or the vault key.
 // - The vault key encrypts the *vault* (contacts, your posts, and your requests to join; see below) and your ECDH
 //   P-256 *chat private key*. Your chat public key is stored in the clear so people can seal mail to you.
-// - With a 6j0.org identity (server AUTH_MODE=6j0) there are no local passkeys: the identity server hands the
-//   page this app's 32-byte *app key* (see the handoff below), and HKDF turns that into the key-encryption key
-//   instead. Everything from the vault key down is the same.
 // - After sign-in the vault key and chat key are kept in IndexedDB as non-extractable CryptoKeys, so a page
-//   reload doesn't need the passkey again. Signing out deletes them.
+//   reload doesn't need the identity server again. Signing out deletes them.
 // - Each account also has an ECDSA P-256 *signing key*, encrypted with the vault key like the chat key, which signs
 //   public posts and tells people who sent a message when that should be known.
 //
@@ -30,76 +27,12 @@ export { b64u, newInboxToken, inboxIdOf, channelOf, sealChannel, openChannel, op
 const subtle = crypto.subtle;
 const te = new TextEncoder(), td = new TextDecoder();
 
-export class PrfUnsupportedError extends Error {
-  constructor() { super("This browser or passkey manager can't create the encryption key Bored needs."); }
-}
-
 // Encoding (b64u) and the AES-GCM helpers (seal, openBytes, openText) are in public/envelope.js.
 
 async function hkdfKey(secret, salt, info, extractable = false) {
   const base = await subtle.importKey('raw', secret, 'HKDF', false, ['deriveKey']);
   return subtle.deriveKey({ name: 'HKDF', hash: 'SHA-256', salt: te.encode(salt), info: te.encode(info) },
     base, { name: 'AES-GCM', length: 256 }, extractable, ['encrypt', 'decrypt']);
-}
-
-// ---------- PRF ----------
-let prfSaltCache;
-const prfSalt = async () => (prfSaltCache ||= new Uint8Array(await subtle.digest('SHA-256', te.encode('bored-vault-v1'))));
-const kekFromPrf = (prf) => hkdfKey(new Uint8Array(prf), 'bored', 'vault-kek-v1');
-
-// true / false when the browser can tell us, null when it can't (we find out during sign-up).
-export async function prfSupport() {
-  if (!window.isSecureContext || !window.PublicKeyCredential) return false;
-  try {
-    const caps = await PublicKeyCredential.getClientCapabilities?.();
-    if (caps && 'extension:prf' in caps) return Boolean(caps['extension:prf']);
-  } catch {}
-  return null;
-}
-
-// Ask a specific passkey for its PRF output (used when create() didn't return it, and to unlock before adding a passkey).
-async function prfFromGet(allow) {
-  const cred = await navigator.credentials.get({ publicKey: {
-    challenge: crypto.getRandomValues(new Uint8Array(32)), // not sent to the server; this is only to read PRF
-    allowCredentials: allow.map(id => ({ type: 'public-key', id: b64u.dec(id) })),
-    userVerification: 'required', timeout: 120000,
-    extensions: { prf: { eval: { first: await prfSalt() } } },
-  } });
-  const prf = cred.getClientExtensionResults().prf?.results?.first;
-  if (!prf) throw new PrfUnsupportedError();
-  return { prf, credentialId: b64u.enc(cred.rawId) };
-}
-
-// Run navigator.credentials.create() and return the registration payload plus the PRF output.
-// nextStep(label) must resolve after a fresh user tap: browsers like Safari only allow one passkey prompt per tap.
-async function createPasskey(opts, exclude = [], nextStep) {
-  const cred = await navigator.credentials.create({ publicKey: {
-    challenge: b64u.dec(opts.challenge),
-    rp: opts.rp,
-    user: { id: b64u.dec(opts.user.id), name: opts.user.name, displayName: opts.user.displayName },
-    pubKeyCredParams: [{ type: 'public-key', alg: -7 }, { type: 'public-key', alg: -257 }],
-    authenticatorSelection: { residentKey: 'required', userVerification: 'required' },
-    excludeCredentials: exclude.map(id => ({ type: 'public-key', id: b64u.dec(id) })),
-    attestation: 'none', timeout: 120000,
-    extensions: { prf: { eval: { first: await prfSalt() } } },
-  } });
-  const ext = cred.getClientExtensionResults();
-  if (!ext.prf?.enabled) throw new PrfUnsupportedError();
-  const credentialId = b64u.enc(cred.rawId);
-  // Some authenticators only return PRF output on get(), so ask once more (after another tap) if needed.
-  let prf = ext.prf.results?.first;
-  if (!prf) { await nextStep('Confirm your new passkey once more to finish setting up encryption.'); prf = (await prfFromGet([credentialId])).prf; }
-  const r = cred.response;
-  return {
-    prf,
-    payload: {
-      credentialId,
-      clientDataJSON: b64u.enc(r.clientDataJSON),
-      authenticatorData: b64u.enc(r.getAuthenticatorData()),
-      publicKey: b64u.enc(r.getPublicKey()),
-      alg: r.getPublicKeyAlgorithm(),
-    },
-  };
 }
 
 // ---------- key storage (IndexedDB, non-extractable keys) ----------
@@ -148,7 +81,7 @@ async function installKeys(guid, kek, wrappedKey, chatPrivkey) {
 }
 
 // ---------- account flows ----------
-// Each takes the app's api(path, opts) helper. nextStep(message) is the app's "tap to continue" prompt.
+// Each takes the app's api(path, opts) helper.
 
 // New account: make a vault key and chat key pair, wrap the vault key with kek, POST everything to path.
 async function registerAccount(api, path, kek, extra) {
@@ -206,34 +139,7 @@ export async function ensureKeys(api) {
   await saveKeys();
 }
 
-export async function createAccount(api, nextStep) {
-  const opts = await api('/api/passkey/register/options', { method: 'POST' });
-  const { prf, payload } = await createPasskey(opts, [], nextStep);
-  return registerAccount(api, '/api/passkey/register/verify', await kekFromPrf(prf), payload);
-}
-
-export async function signIn(api) {
-  const opts = await api('/api/passkey/login/options', { method: 'POST' });
-  const cred = await navigator.credentials.get({ publicKey: {
-    challenge: b64u.dec(opts.challenge), rpId: opts.rpId, userVerification: 'required', timeout: 120000,
-    extensions: { prf: { eval: { first: await prfSalt() } } },
-  } });
-  const prf = cred.getClientExtensionResults().prf?.results?.first;
-  if (!prf) throw new PrfUnsupportedError();
-  const r = cred.response;
-  const res = await api('/api/passkey/login/verify', { method: 'POST', body: {
-    credentialId: b64u.enc(cred.rawId),
-    clientDataJSON: b64u.enc(r.clientDataJSON),
-    authenticatorData: b64u.enc(r.authenticatorData),
-    signature: b64u.enc(r.signature),
-    userHandle: r.userHandle ? b64u.enc(r.userHandle) : undefined,
-  } });
-  await installKeys(res.user.guid, await kekFromPrf(prf), res.wrappedKey, res.chatPrivkey);
-  vault.reset(res.vault);
-  return res;
-}
-
-// ---------- 6j0.org identity (server AUTH_MODE=6j0) ----------
+// ---------- 6j0.org identity ----------
 // 1. startIdSignIn: make an ephemeral ECDH P-256 key pair and a random nonce, keep them in IndexedDB, and go to
 //    <idOrigin>/authorize?app=<idApp>&nonce=<nonce>&epk=<x>.<y>.
 // 2. The identity server signs the browser in (one passkey for all 6j0.org apps), derives this app's key, encrypts it
@@ -285,20 +191,6 @@ export async function createDemoAccount(api) {
   const res = await registerAccount(api, '/api/demo/register', kek, {});
   vault.reset({ data: null, version: 0 });
   return res;
-}
-
-// Add another passkey: unlock the vault key with an existing passkey, create the new one, wrap the key for it.
-export async function addPasskey(api, nextStep) {
-  const opts = await api('/api/passkey/add/options', { method: 'POST' });
-  const existing = opts.existing.map(p => p.credentialId);
-  const unlock = await prfFromGet(existing);
-  const wrapped = opts.existing.find(p => p.credentialId === unlock.credentialId).wrappedKey;
-  const raw = await openBytes(await kekFromPrf(unlock.prf), wrapped);
-  await nextStep('Confirmed. Now create the new passkey: on this device, your phone (scan the QR code), or a security key. It must support PRF: some password managers, including Bitwarden, do not.', 'Create new passkey');
-  const { prf, payload } = await createPasskey(opts, existing, nextStep);
-  const body = { ...payload, wrappedKey: await seal(await kekFromPrf(prf), raw) };
-  raw.fill(0);
-  return api('/api/passkey/add/verify', { method: 'POST', body });
 }
 
 // ---------- vault: your private names for yourself and your contacts ----------

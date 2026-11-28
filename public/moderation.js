@@ -105,8 +105,8 @@ export function reportedFor(counts, reports) {
 const threshold = (v) => { const n = Number(v); return Number.isInteger(n) && n >= 1 && n <= MAX_THRESHOLD ? n : null; };
 
 // ---------- settings ----------
-// Kept in the vault as `moderation` (public/secure.js): what's not saved yet gets the defaults, which are also what
-// guests get. Everything is on by default.
+// Kept in the vault as `moderation` (public/secure.js): what's not saved yet gets the defaults. Everything is on by
+// default.
 //   builtin:  { on, hide }          the built-in word list; hide: hide whole posts, not just star the words out
 //   lists:    [{ id, name, words: [term], on, hide }]   the person's own word lists
 //   reports:  { [reason]: { on, count } }               hide posts at least count people reported for reason

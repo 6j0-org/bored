@@ -123,8 +123,8 @@ Cards can only be deleted in three places: a discard pile, Past in Plans, and yo
   theme; the right branch is the left one mirrored). The same room above and below, so sections stand apart.
 - **Notes and hints** (`.note`, `.hint`): small muted text that explains what's around it.
 - **Notices** (`.notice`): a box for something to know, like a blocked person's chat or the demo account.
-  `.notice.warn` is amber, for something that needs attention, like the warning that guests' swipes do nothing.
-- **Rows** (`.row`): a line in a list, like a contact, an invitation, or a passkey: an avatar or title on the left,
+  `.notice.warn` is amber, for something that needs attention, like the warning that an account isn't saved yet.
+- **Rows** (`.row`): a line in a list, like a contact, an invitation, or a blocked person: an avatar or title on the left,
   buttons on the right.
 - **Sheets** (`.sheet`, `.panel`): forms that slide up over the page, like editing a post, a contact, or an
   invitation. Cancel (outlined) and the form's action (filled) sit side by side at the bottom (`.two`).

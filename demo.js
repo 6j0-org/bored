@@ -1,7 +1,7 @@
 // Demo mode (DEMO=1): demo accounts with real keys and signed public posts (seedDemo), a small bot that answers
 // mail sent to them (demoBot), and a starting point for each visitor's account (demoNames, demoSeed).
 //
-// The demo accounts have no passkeys, so nobody can sign in as them. Their private keys live only in this process's
+// The demo accounts have no sign-in, so nobody can sign in as them. Their private keys live only in this process's
 // memory, which is what lets the bot read and write their mail. Everything goes through the same message formats and
 // rules the browser uses (public/envelope.js and public/posts.js), so a visitor sees exactly what real people would
 // send. The database is in memory too, so a restart starts everything over.

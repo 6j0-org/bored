@@ -10,7 +10,7 @@ COPY package.json package-lock.json .npmrc ./
 RUN apk add --no-cache --virtual .install-deps git \
  && npm ci --omit=dev --ignore-scripts \
  && apk del .install-deps
-COPY server.js db.js demo.js push.js webauthn.js idtoken.js feedback.js ./
+COPY server.js db.js demo.js push.js idtoken.js feedback.js ./
 COPY public ./public
 
 # The SQLite database (accounts, posts, encrypted vaults, and chats) and feedback.jsonl live here; mount a volume to
@@ -18,8 +18,8 @@ COPY public ./public
 RUN mkdir -p /data && chown node:node /data
 VOLUME /data
 
-# Set ORIGIN (e.g. https://bored.example) when serving over HTTPS: passkeys are bound to it, and it turns on
-# Secure cookies. RP_ID defaults to the ORIGIN hostname.
+# Set ID_ORIGIN (the 6j0.org identity server, e.g. https://id.6j0.org), or DEMO=1. Set ORIGIN (e.g.
+# https://bored.example) when serving over HTTPS: links in notifications use it, and it turns on Secure cookies.
 ENV PORT=3000 DB_PATH=/data/data.sqlite
 EXPOSE 3000
 USER node

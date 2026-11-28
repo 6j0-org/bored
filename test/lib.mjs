@@ -56,6 +56,18 @@ export function findChrome() {
 // Page errors and console errors or warnings from every browser opened, for the test to report at the end.
 const pageErrors = [];
 
+// Every browser this test opened. Each runs in its own process group (detached), so killing the group takes its
+// renderer and helper processes with it. They're all killed when the test exits, however it exits (finish(), a
+// failed assertion, or run.mjs's timeout), so a test that never calls close() doesn't leave Chromium running.
+const browsers = new Set();
+const killBrowser = (proc) => {
+  browsers.delete(proc);
+  try { process.kill(-proc.pid, 'SIGKILL'); } catch { try { proc.kill('SIGKILL'); } catch {} }
+};
+process.on('exit', () => { for (const proc of browsers) killBrowser(proc); });
+// Signals skip 'exit' handlers unless something handles them; exit so the handler above runs.
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => process.exit(1));
+
 // Opens `path` in a new headless browser with its own profile, and waits for the tab bar.
 export async function browser(name, path = '/') {
   const chrome = findChrome();
@@ -65,13 +77,14 @@ export async function browser(name, path = '/') {
     '--disable-dev-shm-usage', 'about:blank']; // containers often have a tiny /dev/shm
   // Containers usually run as root, where Chromium refuses to start sandboxed.
   if (process.getuid?.() === 0) args.unshift('--no-sandbox');
-  const proc = spawn(chrome, args, { stdio: 'ignore' });
+  const proc = spawn(chrome, args, { stdio: 'ignore', detached: true });
+  browsers.add(proc);
   let port;
   for (let i = 0; i < 200 && !port; i++) {
     await wait(100);
     if (existsSync(`${profile}/DevToolsActivePort`)) port = readFileSync(`${profile}/DevToolsActivePort`, 'utf8').split('\n')[0];
   }
-  if (!port) { proc.kill(); throw new Error(`${name}: Chromium didn't start`); }
+  if (!port) { killBrowser(proc); throw new Error(`${name}: Chromium didn't start`); }
   const targets = await (await realFetch(`http://127.0.0.1:${port}/json`)).json();
   const ws = new WebSocket(targets.find(t => t.type === 'page').webSocketDebuggerUrl);
   await new Promise(r => ws.onopen = r);
@@ -94,7 +107,7 @@ export async function browser(name, path = '/') {
   const tab = async (id) => { await ev(`document.querySelector('nav.tabs button[data-tab=${id}]').click()`); await wait(1200); };
   const text = () => ev(`document.getElementById('view').innerText.replace(/\\s+/g, ' ')`);
   const reload = async () => { await send('Page.reload'); await ready(); await wait(1500); };
-  return self = { name, send, ev, until, tab, text, reload, onEvent: null, close: () => { ws.close(); proc.kill(); } };
+  return self = { name, send, ev, until, tab, text, reload, onEvent: null, close: () => { ws.close(); killBrowser(proc); } };
 }
 
 // Prints the page errors and exits: 1 if there were any.

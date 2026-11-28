@@ -433,11 +433,24 @@ route('POST', '/api/id/login', async ({ body, res }) => {
     console.error(e);
     throw new HttpError(502, "Couldn't reach the 6j0.org identity server. Please try again.");
   }
+  // saved: false means the identity was made with "Just start" and its account key isn't saved (see /api/me).
+  const saved = claims.saved === false ? 0 : 1;
   const acct = q('SELECT * FROM id_accounts WHERE sub = ?').get(claims.sub);
-  if (!acct) return send(res, 200, { setup: newChallenge('id-setup', { sub: claims.sub }) });
+  if (!acct) return send(res, 200, { setup: newChallenge('id-setup', { sub: claims.sub, saved }) });
+  q(`UPDATE id_accounts SET id_saved = ?, checked_at = datetime('now') WHERE user_id = ?`).run(saved, acct.user_id);
   const user = q('SELECT * FROM users WHERE id = ?').get(acct.user_id);
   send(res, 200, keyBundle(user, acct.wrapped_key), newSession(res, user.id));
 }, { auth: false, mode: '6j0' });
+
+// An identity made with "Just start" lives only in the browser that made it, until its account key is saved at the
+// identity server. idUnsaved: the page warns on every screen and links to ID_ORIGIN/#save. idRecheck: it's been a
+// week since sign-in last said so, so the page signs in again (an instant redirect) to notice a save. That also
+// counts as using the identity, which the identity server deletes if unsaved and unused for UNSAVED_TTL_DAYS.
+function idUnsaved(user) {
+  if (AUTH_MODE !== '6j0') return {};
+  const a = q(`SELECT id_saved, checked_at IS NULL OR checked_at < datetime('now', '-7 days') AS stale FROM id_accounts WHERE user_id = ?`).get(user.id);
+  return a?.id_saved === 0 ? { idUnsaved: true, idRecheck: Boolean(a.stale) } : {};
+}
 
 route('POST', '/api/id/register', async ({ body, res }) => {
   let data;
@@ -453,7 +466,8 @@ route('POST', '/api/id/register', async ({ body, res }) => {
     // A fresh public GUID, unrelated to the identity's sub, so other apps' users can't link accounts across apps.
     const { lastInsertRowid } = q('INSERT INTO users (guid, chat_pubkey, chat_privkey, vault) VALUES (?, ?, ?, ?)')
       .run(randomUUID(), fields.pub, fields.priv, fields.vault);
-    q('INSERT INTO id_accounts (user_id, sub, wrapped_key) VALUES (?, ?, ?)').run(lastInsertRowid, data.sub, fields.wrapped);
+    q(`INSERT INTO id_accounts (user_id, sub, wrapped_key, id_saved, checked_at) VALUES (?, ?, ?, ?, datetime('now'))`)
+      .run(lastInsertRowid, data.sub, fields.wrapped, data.saved ?? 1);
     return lastInsertRowid;
   });
   const user = q('SELECT * FROM users WHERE id = ?').get(userId);
@@ -558,7 +572,7 @@ route('GET', '/api/me', async ({ user, res }) => {
   const badges = { developer: DEMO || isDeveloper(user), tester: feedback.doneCount(user.guid) };
   // Discover news (see "Discover news" below): perDay is 0 when this server doesn't send them.
   const discoverNews = { on: Boolean(user.discover_news), perDay: DISCOVER_NEWS_HOURS.length };
-  send(res, 200, { ...publicUser(user), counts, badges, discoverNews });
+  send(res, 200, { ...publicUser(user), counts, badges, discoverNews, ...idUnsaved(user) });
 });
 
 // ---------- keys and mail ----------

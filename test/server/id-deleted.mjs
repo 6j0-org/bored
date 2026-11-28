@@ -46,6 +46,24 @@ try {
   assert.equal(reg.status, 200, reg.data.error);
   const me = await fetch(BASE + '/api/me', { headers: { Cookie: reg.cookie } });
   assert.equal(me.status, 200, 'signed in');
+  assert.equal((await me.json()).idUnsaved, undefined, 'a token without saved counts as saved');
+
+  // An unsaved identity ("Just start" at the identity server): /api/me says so, until a sign-in says it's saved.
+  const meOf = async (cookie) => (await fetch(BASE + '/api/me', { headers: { Cookie: cookie } })).json();
+  const nu = randomBytes(16).toString('base64url');
+  const loginU = await post('/api/id/login', { token: token({ sub: 'sub-unsaved', nonce: nu, saved: false }), nonce: nu });
+  const regU = await post('/api/id/register', { setup: loginU.data.setup, wrappedKey: blob(), chatPubkey: { kty: 'EC', crv: 'P-256', x, y }, chatPrivkey: blob(), vault: blob() });
+  assert.equal(regU.status, 200, regU.data.error);
+  const u1 = await meOf(regU.cookie);
+  assert.equal(u1.idUnsaved, true, 'unsaved');
+  assert.equal(u1.idRecheck, false, 'just checked');
+  const nu2 = randomBytes(16).toString('base64url');
+  const again = await post('/api/id/login', { token: token({ sub: 'sub-unsaved', nonce: nu2, saved: false }), nonce: nu2 });
+  assert.equal((await meOf(again.cookie)).idUnsaved, true, 'still unsaved');
+  const nu3 = randomBytes(16).toString('base64url');
+  const savedNow = await post('/api/id/login', { token: token({ sub: 'sub-unsaved', nonce: nu3, saved: true }), nonce: nu3 });
+  assert.equal((await meOf(savedNow.cookie)).idUnsaved, undefined, 'saved now');
+  assert.equal((await meOf(regU.cookie)).idUnsaved, undefined, 'older sessions see it too');
 
   // Bored's own deletion is refused in 6j0 mode.
   const own = await post('/api/account/delete', { confirm: reg.data.user.guid.slice(-4) }, reg.cookie);

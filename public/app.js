@@ -857,6 +857,7 @@ function shell(content) {
       <a class="logo board wide" href="/about" title="About Bored">Bored?</a>
       <p class="alpha-note"><em>Alpha:</em> Bored is new and still changing.
         <button type="button" class="link" id="feedbackLink" ${state.tab === 'feedback' ? 'aria-current="page"' : ''}>Share what you think</button></p>
+      ${idUnsavedBanner()}
       <h1 class="page-title">${esc(title)}</h1>
     </header>
     <main id="view"></main>
@@ -869,11 +870,42 @@ function shell(content) {
     </nav>`;
   app.querySelectorAll('nav.tabs button').forEach(b => b.onclick = () => go(b.dataset.tab));
   document.getElementById('feedbackLink').onclick = openFeedback;
+  document.getElementById('idSave')?.addEventListener('click', () => store(ID_SAVE_CLICKED, Date.now()));
   content(document.getElementById('view'));
   drawTour();
 }
 
 function go(tab) { state.tab = tab; state.chat = null; render(); }
+
+// ---------- unsaved 6j0.org identities ----------
+// An identity made with "Just start" at the identity server lives only in the browser that made it until its account
+// key is saved there (the server's /api/me says idUnsaved). Every screen warns, with a link to save it at
+// <idOrigin>/#save. Sign-in is re-run (an instant redirect while the identity server still has the identity) to see
+// whether it's been saved: on the next start after following that link, and otherwise once a week (idRecheck), which
+// also keeps the identity counting as used, so the identity server doesn't delete it.
+const ID_SAVE_CLICKED = 'bored-id-save-clicked', ID_RECHECKED = 'bored-id-rechecked';
+const DAY_MS = 24 * 3600 * 1000;
+const stored = (k) => { try { return Number(localStorage.getItem(k)) || 0; } catch { return 0; } };
+const store = (k, v) => { try { localStorage.setItem(k, String(v)); } catch {} };
+
+function idUnsavedBanner() {
+  if (state.config.authMode !== '6j0' || !state.me?.idUnsaved) return '';
+  return `<div class="notice warn guest-warning id-unsaved" role="note">
+    <span><b>You haven't saved your account.</b> If you clear this browser's data or lose this device, you lose
+      everything here, for good.</span>
+    <a class="btn small ghost" id="idSave" href="${esc(state.config.idOrigin)}/#save">Save my account</a></div>`;
+}
+
+// Re-run sign-in if it's time to check again (see above). True when it's sending the browser away. At most once every
+// 10 minutes, so an identity server that can't sign the browser in doesn't send it round in circles.
+async function recheckIdentity() {
+  if (state.config.authMode !== '6j0' || !state.me?.idUnsaved) return false;
+  const now = Date.now();
+  if (!state.me.idRecheck && stored(ID_SAVE_CLICKED) < now - DAY_MS) return false;
+  if (stored(ID_RECHECKED) > now - 10 * 60 * 1000) return false;
+  store(ID_RECHECKED, now); store(ID_SAVE_CLICKED, 0);
+  try { await startIdSignIn(state.config); return true; } catch (e) { console.warn(e); return false; }
+}
 // The feedback page needs an account (posts are filed under it), so anyone else is sent to sign in first.
 function openFeedback() {
   if (state.me && hasKeys()) return go('feedback');
@@ -3477,9 +3509,11 @@ if (state.config.authMode === '6j0' && hasIdCallback()) {
     if (isDemo() && !(state.me && hasKeys())) {
       try { if (state.me) await api('/api/logout', { method: 'POST' }); await startDemo(); } catch (e) { toast(e.message); }
     }
-    render();
-    offerPendingInvite();
-    syncPush();
+    if (!(hasKeys() && await recheckIdentity())) {
+      render();
+      offerPendingInvite();
+      syncPush();
+    }
   }
 }
 

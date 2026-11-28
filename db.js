@@ -157,6 +157,12 @@ const MIGRATIONS = [
   `ALTER TABLE users ADD COLUMN discover_news INTEGER NOT NULL DEFAULT 1;
    ALTER TABLE public_posts ADD COLUMN first_seq INTEGER NOT NULL DEFAULT 0;
    UPDATE public_posts SET first_seq = seq;`,
+  // 5. AUTH_MODE=6j0: whether the identity's account key is saved, from the sign-in token's saved claim (0: "Just
+  // start", so the identity lives in one browser and Bored warns), and when that was last checked, so Bored re-runs
+  // sign-in now and then to notice a save (and keep the identity in use, so it isn't deleted as unused). NULL saved
+  // means the identity server didn't say, which counts as saved.
+  `ALTER TABLE id_accounts ADD COLUMN id_saved INTEGER;
+   ALTER TABLE id_accounts ADD COLUMN checked_at TEXT;`,
 ];
 
 function migrate() {

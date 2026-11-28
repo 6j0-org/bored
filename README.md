@@ -141,6 +141,12 @@ account, `NTFY_SERVERS=https://ntfy.sh=tk_…`) or its own ntfy server.
 
 The two modes keep separate accounts, so pick one before people sign up. Switching later strands existing users.
 
+An identity made with the identity server's "Just start" lives only in the browser that made it until its account
+key is saved (the sign-in token says `saved: false`). Bored records that in `id_accounts.id_saved`, warns on every
+screen with a link to `ID_ORIGIN/#save`, and signs in again (an instant redirect) to see whether it's been saved: on
+the next start after that link is followed, and otherwise once a week. The weekly check also counts as using the
+identity, which the identity server deletes if it's unsaved and unused for 90 days.
+
 To try `6j0` mode locally, run the identity server on `localhost` and Bored on `127.0.0.1` (cookies ignore the
 port, so two apps on one hostname would overwrite each other's session cookie):
 
